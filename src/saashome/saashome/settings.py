@@ -114,7 +114,9 @@ DATABASES = {
     }
 }
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# Local development uses SQLite by default. Set DATABASE_URL only when you want
+# Django to connect to Postgres, for example Neon locally or Railway in deploy.
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DB_CONN_MAX_AGE = int(os.environ.get("DB_CONN_MAX_AGE", 30))
 DB_CONN_HEALTH_CHECKS = get_bool_env("DB_CONN_HEALTH_CHECKS", True)
 
