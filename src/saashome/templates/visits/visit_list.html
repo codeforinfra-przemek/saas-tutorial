@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | {{ page_title }}{% endblock %}
+
+{% block content %}
+    <section class="content-section">
+        <div class="section-header">
+            <div>
+                <span class="eyebrow">Website activity</span>
+                <h1>Ostatnie wizyty</h1>
+                <p>
+                    Prosty podgląd pierwszych danych analitycznych. IP zapisujemy jako hash,
+                    a nie jako czysty adres.
+                </p>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Czas</th>
+                        <th>Typ</th>
+                        <th>URL</th>
+                        <th>Franczyza</th>
+                        <th>Użytkownik</th>
+                        <th>Session</th>
+                        <th>Referrer</th>
+                        <th>User agent</th>
+                        <th>IP hash</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for visit in visits %}
+                        <tr>
+                            <td class="nowrap">{{ visit.created_at|date:"Y-m-d H:i:s" }}</td>
+                            <td>{{ visit.page_type|default:"-" }}</td>
+                            <td>
+                                <div class="truncate" title="{{ visit.full_url }}">{{ visit.url_path }}</div>
+                            </td>
+                            <td>{{ visit.franchise_id|default:"-" }}</td>
+                            <td>
+                                {% if visit.user %}
+                                    {{ visit.user }}
+                                {% else %}
+                                    <span class="muted">anonymous</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="truncate" title="{{ visit.session_key }}">{{ visit.session_key|default:"-" }}</div>
+                            </td>
+                            <td>
+                                <div class="truncate" title="{{ visit.referrer }}">{{ visit.referrer|default:"-" }}</div>
+                            </td>
+                            <td>
+                                <div class="truncate" title="{{ visit.user_agent }}">{{ visit.user_agent|default:"-" }}</div>
+                            </td>
+                            <td>
+                                <div class="truncate" title="{{ visit.ip_hash }}">{{ visit.ip_hash|default:"-" }}</div>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="9" class="muted">Nie ma jeszcze zapisanych wizyt.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% endblock %}

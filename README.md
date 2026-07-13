@@ -7,5 +7,8 @@ pwd
 /home/prz/code/saas-tutorial/src
 pip install -r ../requirements.txt 
 django-admin startproject saashome
-(venv) prz@LaptopRodzinny:~/code/saas-tutorial/src/saashome$ python manage.py runserver
+python manage.py runserver
+python manage.py startapp visits
+python manage.py makemigrations visits
+python manage.py migrate
 ```
