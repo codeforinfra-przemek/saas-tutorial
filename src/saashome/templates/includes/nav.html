@@ -1,0 +1,11 @@
+<nav class="nav" aria-label="Główna nawigacja">
+    <a class="brand" href="/">
+        <span class="brand-mark">S</span>
+        <span>{{ site_name|default:"SaaS Home" }}</span>
+    </a>
+    <div class="nav-links">
+        <a href="/" {% if active_page == "home" %}aria-current="page"{% endif %}>Lista obiektów</a>
+        <a href="/">Mapa</a>
+        <a href="/admin/">Admin</a>
+    </div>
+</nav>
