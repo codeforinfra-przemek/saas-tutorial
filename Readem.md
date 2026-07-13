@@ -15,3 +15,4 @@ https://github.com/codingforentrepreneurs/SaaS-Foundations/tree/section-1-end/sr
 https://www.youtube.com/watch?v=WbNNESIxJnY&t=528s
 
 # section-1:
+0:00 - 1:26:00 
