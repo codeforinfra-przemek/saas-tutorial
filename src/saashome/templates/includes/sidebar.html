@@ -13,19 +13,31 @@
 
 <aside
     id="app-sidebar"
-    class="fixed left-0 top-0 z-40 h-screen w-72 -translate-x-full border-r border-slate-200 bg-white transition-transform lg:translate-x-0"
+    class="fixed left-0 top-0 z-40 h-screen w-72 -translate-x-full overflow-x-hidden border-r border-slate-200 bg-white transition-[transform,width] duration-300 ease-in-out lg:translate-x-0"
     aria-label="Główna nawigacja"
 >
-    <div class="flex h-full flex-col overflow-y-auto px-5 py-6">
-        <a href="/" data-drawer-hide="app-sidebar" class="mb-8 flex items-center gap-3">
+    <div id="sidebar-inner" class="flex h-full flex-col overflow-y-auto px-5 py-6 transition-[padding] duration-300 ease-in-out">
+        <button
+            id="sidebar-collapse-toggle"
+            type="button"
+            class="absolute -right-4 top-6 hidden h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-brand-500 lg:inline-flex"
+            aria-label="Zwiń menu"
+            aria-expanded="true"
+        >
+            <svg id="sidebar-collapse-icon" class="h-4 w-4 transition-transform duration-300" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m15 19-7-7 7-7"/>
+            </svg>
+        </button>
+
+        <a href="/" data-drawer-hide="app-sidebar" class="sidebar-link mb-8 flex items-center gap-3">
             <span class="grid h-10 w-10 place-items-center rounded-lg bg-brand-500 text-base font-black text-white">S</span>
-            <span>
+            <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200">
                 <span class="block text-lg font-black tracking-normal text-slate-950">{{ site_name|default:"SaaS Home" }}</span>
                 <span class="block text-xs font-semibold uppercase tracking-wide text-brand-700">franchise intelligence</span>
             </span>
         </a>
 
-        <form class="mb-6">
+        <form class="sidebar-search mb-6 transition-opacity duration-200">
             <label for="sidebar-search" class="sr-only">Szukaj</label>
             <div class="relative">
                 <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
@@ -38,33 +50,33 @@
         </form>
 
         <nav class="space-y-1 text-sm font-semibold">
-            <a href="/" data-drawer-hide="app-sidebar" class="flex items-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'home' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}">
-                <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+            <a href="/" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'home' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Lista franczyz">
+                <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
                     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V10.5Z"/>
                 </svg>
-                Lista franczyz
+                <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200">Lista franczyz</span>
             </a>
-            <a href="/" data-drawer-hide="app-sidebar" class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950">
-                <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+            <a href="/" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950" title="Mapa">
+                <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
                     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Zm0 0V3m6 18V6"/>
                 </svg>
-                Mapa
+                <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200">Mapa</span>
             </a>
-            <a href="/visits/" data-drawer-hide="app-sidebar" class="flex items-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'visits' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}">
-                <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+            <a href="/visits/" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'visits' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Wizyty">
+                <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
                     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6"/>
                 </svg>
-                Wizyty
+                <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200">Wizyty</span>
             </a>
-            <a href="/admin/" data-drawer-hide="app-sidebar" class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950">
-                <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+            <a href="/admin/" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950" title="Admin">
+                <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
                     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.5 6h3m-6 4h9m-11 4h13M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/>
                 </svg>
-                Admin
+                <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200">Admin</span>
             </a>
         </nav>
 
-        <div class="mt-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <div class="sidebar-card mt-auto rounded-lg border border-slate-200 bg-slate-50 p-4 transition-opacity duration-200">
             <p class="text-sm font-bold text-slate-950">Roadmap</p>
             <p class="mt-1 text-sm leading-5 text-slate-600">Ranking franczyz, promowane oferty i mapa zainteresowania.</p>
         </div>

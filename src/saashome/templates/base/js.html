@@ -1,1 +1,55 @@
 <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const sidebar = document.getElementById("app-sidebar");
+        const sidebarInner = document.getElementById("sidebar-inner");
+        const main = document.getElementById("app-main");
+        const toggle = document.getElementById("sidebar-collapse-toggle");
+        const icon = document.getElementById("sidebar-collapse-icon");
+        const labels = document.querySelectorAll(".sidebar-label");
+        const search = document.querySelector(".sidebar-search");
+        const card = document.querySelector(".sidebar-card");
+        const links = document.querySelectorAll(".sidebar-link");
+
+        if (!sidebar || !sidebarInner || !main || !toggle) {
+            return;
+        }
+
+        function setCollapsed(isCollapsed) {
+            document.body.dataset.sidebarState = isCollapsed ? "collapsed" : "expanded";
+            sidebar.classList.toggle("lg:w-20", isCollapsed);
+            sidebar.classList.toggle("lg:w-72", !isCollapsed);
+            sidebarInner.classList.toggle("lg:px-3", isCollapsed);
+            sidebarInner.classList.toggle("lg:px-5", !isCollapsed);
+            main.classList.toggle("lg:ml-20", isCollapsed);
+            main.classList.toggle("lg:ml-72", !isCollapsed);
+            icon.classList.toggle("rotate-180", isCollapsed);
+            toggle.setAttribute("aria-expanded", String(!isCollapsed));
+            toggle.setAttribute("aria-label", isCollapsed ? "Rozwiń menu" : "Zwiń menu");
+
+            labels.forEach(function (label) {
+                label.classList.toggle("lg:opacity-0", isCollapsed);
+                label.classList.toggle("lg:pointer-events-none", isCollapsed);
+            });
+
+            links.forEach(function (link) {
+                link.classList.toggle("lg:justify-center", isCollapsed);
+            });
+
+            [search, card].forEach(function (element) {
+                if (!element) {
+                    return;
+                }
+                element.classList.toggle("lg:hidden", isCollapsed);
+            });
+
+            localStorage.setItem("sidebarCollapsed", isCollapsed ? "true" : "false");
+        }
+
+        setCollapsed(localStorage.getItem("sidebarCollapsed") === "true");
+
+        toggle.addEventListener("click", function () {
+            setCollapsed(document.body.dataset.sidebarState !== "collapsed");
+        });
+    });
+</script>
