@@ -1,0 +1,72 @@
+<button
+    type="button"
+    data-drawer-target="app-sidebar"
+    data-drawer-toggle="app-sidebar"
+    aria-controls="app-sidebar"
+    class="fixed left-4 top-4 z-50 inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500 lg:hidden"
+>
+    <span class="sr-only">Otwórz menu</span>
+    <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 17 14">
+        <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 1h15M1 7h15M1 13h15"/>
+    </svg>
+</button>
+
+<aside
+    id="app-sidebar"
+    class="fixed left-0 top-0 z-40 h-screen w-72 -translate-x-full border-r border-slate-200 bg-white transition-transform lg:translate-x-0"
+    aria-label="Główna nawigacja"
+>
+    <div class="flex h-full flex-col overflow-y-auto px-5 py-6">
+        <a href="/" class="mb-8 flex items-center gap-3">
+            <span class="grid h-10 w-10 place-items-center rounded-lg bg-brand-500 text-base font-black text-white">S</span>
+            <span>
+                <span class="block text-lg font-black tracking-normal text-slate-950">{{ site_name|default:"SaaS Home" }}</span>
+                <span class="block text-xs font-semibold uppercase tracking-wide text-brand-700">franchise intelligence</span>
+            </span>
+        </a>
+
+        <form class="mb-6">
+            <label for="sidebar-search" class="sr-only">Szukaj</label>
+            <div class="relative">
+                <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                    <svg class="h-4 w-4 text-slate-400" aria-hidden="true" fill="none" viewBox="0 0 20 20">
+                        <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"/>
+                    </svg>
+                </div>
+                <input id="sidebar-search" type="search" class="block w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 pl-9 text-sm text-slate-900 focus:border-brand-500 focus:ring-brand-500" placeholder="Szukaj franczyzy">
+            </div>
+        </form>
+
+        <nav class="space-y-1 text-sm font-semibold">
+            <a href="/" class="flex items-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'home' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}">
+                <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V10.5Z"/>
+                </svg>
+                Lista franczyz
+            </a>
+            <a href="/" class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950">
+                <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Zm0 0V3m6 18V6"/>
+                </svg>
+                Mapa
+            </a>
+            <a href="/visits/" class="flex items-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'visits' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}">
+                <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6"/>
+                </svg>
+                Wizyty
+            </a>
+            <a href="/admin/" class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950">
+                <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.5 6h3m-6 4h9m-11 4h13M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/>
+                </svg>
+                Admin
+            </a>
+        </nav>
+
+        <div class="mt-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p class="text-sm font-bold text-slate-950">Roadmap</p>
+            <p class="mt-1 text-sm leading-5 text-slate-600">Ranking franczyz, promowane oferty i mapa zainteresowania.</p>
+        </div>
+    </div>
+</aside>

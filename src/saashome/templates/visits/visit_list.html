@@ -3,65 +3,63 @@
 {% block title %}{{ block.super }} | {{ page_title }}{% endblock %}
 
 {% block content %}
-    <section class="content-section">
-        <div class="section-header">
-            <div>
-                <span class="eyebrow">Website activity</span>
-                <h1>Ostatnie wizyty</h1>
-                <p>
-                    Prosty podgląd pierwszych danych analitycznych. IP zapisujemy jako hash,
-                    a nie jako czysty adres.
-                </p>
-            </div>
+    <section class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10 lg:py-12">
+        <div class="mb-6">
+            <span class="inline-flex w-fit items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-extrabold uppercase tracking-wide text-brand-700 shadow-sm">Website activity</span>
+            <h1 class="mt-5 text-4xl font-black tracking-normal text-slate-950 sm:text-5xl">Ostatnie wizyty</h1>
+            <p class="mt-3 max-w-2xl text-base leading-7 text-slate-600">
+                Prosty podgląd pierwszych danych analitycznych. IP zapisujemy jako hash,
+                a nie jako czysty adres.
+            </p>
         </div>
 
-        <div class="table-wrap">
-            <table class="data-table">
-                <thead>
+        <div class="relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+            <table class="w-full min-w-[1100px] text-left text-sm text-slate-600">
+                <thead class="bg-slate-50 text-xs uppercase text-slate-500">
                     <tr>
-                        <th>Czas</th>
-                        <th>Typ</th>
-                        <th>URL</th>
-                        <th>Franczyza</th>
-                        <th>Użytkownik</th>
-                        <th>Session</th>
-                        <th>Referrer</th>
-                        <th>User agent</th>
-                        <th>IP hash</th>
+                        <th scope="col" class="px-4 py-3">Czas</th>
+                        <th scope="col" class="px-4 py-3">Typ</th>
+                        <th scope="col" class="px-4 py-3">URL</th>
+                        <th scope="col" class="px-4 py-3">Franczyza</th>
+                        <th scope="col" class="px-4 py-3">Użytkownik</th>
+                        <th scope="col" class="px-4 py-3">Session</th>
+                        <th scope="col" class="px-4 py-3">Referrer</th>
+                        <th scope="col" class="px-4 py-3">User agent</th>
+                        <th scope="col" class="px-4 py-3">IP hash</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for visit in visits %}
-                        <tr>
-                            <td class="nowrap">{{ visit.created_at|date:"Y-m-d H:i:s" }}</td>
-                            <td>{{ visit.page_type|default:"-" }}</td>
-                            <td>
-                                <div class="truncate" title="{{ visit.full_url }}">{{ visit.url_path }}</div>
+                        <tr class="border-t border-slate-200 bg-white hover:bg-slate-50">
+                            <td class="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{{ visit.created_at|date:"Y-m-d H:i:s" }}</td>
+                            <td class="px-4 py-3">{{ visit.page_type|default:"-" }}</td>
+                            <td class="px-4 py-3">
+                                <div class="max-w-[240px] truncate" title="{{ visit.full_url }}">{{ visit.url_path }}</div>
                             </td>
-                            <td>{{ visit.franchise_id|default:"-" }}</td>
-                            <td>
+                            <td class="px-4 py-3">{{ visit.franchise_id|default:"-" }}</td>
+                            <td class="px-4 py-3">
                                 {% if visit.user %}
                                     {{ visit.user }}
                                 {% else %}
-                                    <span class="muted">anonymous</span>
+                                    <span class="text-slate-400">anonymous</span>
                                 {% endif %}
                             </td>
-                            <td>
-                                <div class="truncate" title="{{ visit.session_key }}">{{ visit.session_key|default:"-" }}</div>
+                            <td class="px-4 py-3">
+                                <div class="max-w-[180px] truncate" title="{{ visit.session_key }}">{{ visit.session_key|default:"-" }}</div>
                             </td>
-                            <td>
-                                <div class="truncate" title="{{ visit.referrer }}">{{ visit.referrer|default:"-" }}</div>
+                            <td class="px-4 py-3">
+                                <div class="max-w-[220px] truncate" title="{{ visit.referrer }}">{{ visit.referrer|default:"-" }}</div>
                             </td>
-                            <td>
-                                <div class="truncate" title="{{ visit.user_agent }}">{{ visit.user_agent|default:"-" }}</div>
+                            <td class="px-4 py-3">
+                                <div class="max-w-[240px] truncate" title="{{ visit.user_agent }}">{{ visit.user_agent|default:"-" }}</div>
                             </td>
-                            <td>
-                                <div class="truncate" title="{{ visit.ip_hash }}">{{ visit.ip_hash|default:"-" }}</div>
+                            <td class="px-4 py-3">
+                                <div class="max-w-[220px] truncate" title="{{ visit.ip_hash }}">{{ visit.ip_hash|default:"-" }}</div>
                             </td>
                         </tr>
                     {% empty %}
-                        <tr>
-                            <td colspan="9" class="muted">Nie ma jeszcze zapisanych wizyt.</td>
+                        <tr class="border-t border-slate-200">
+                            <td colspan="9" class="px-4 py-6 text-slate-500">Nie ma jeszcze zapisanych wizyt.</td>
                         </tr>
                     {% endfor %}
                 </tbody>
