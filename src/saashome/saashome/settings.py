@@ -36,6 +36,13 @@ def load_local_env():
 load_local_env()
 
 
+def get_bool_env(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in ("1", "true", "t", "yes", "y", "on")
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
@@ -108,12 +115,14 @@ DATABASES = {
 }
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+DB_CONN_MAX_AGE = int(os.environ.get("DB_CONN_MAX_AGE", 30))
+DB_CONN_HEALTH_CHECKS = get_bool_env("DB_CONN_HEALTH_CHECKS", True)
 
 if DATABASE_URL:
     DATABASES["default"] = dj_database_url.parse(
         DATABASE_URL,
-        conn_max_age=600,
-        conn_health_checks=True,
+        conn_max_age=DB_CONN_MAX_AGE,
+        conn_health_checks=DB_CONN_HEALTH_CHECKS,
     )
 
 
