@@ -38,10 +38,12 @@ venv.bak/
 db.sqlite3
 db.sqlite3-journal
 local_settings.py
-src/staticfiles/
-staticfiles/
+/staticfiles/
+src/saashome/static_cdn/
 local-cdn/
 media/
+src/saashome/mediafiles/*
+!src/saashome/mediafiles/.gitkeep
 
 # Logs
 *.log
