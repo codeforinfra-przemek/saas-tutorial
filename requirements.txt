@@ -1,4 +1,5 @@
 Django>=6.0,<6.1
+django-allauth[socialaccount]>=65.18,<66
 gunicorn
 psycopg[binary]
 dj-database-url

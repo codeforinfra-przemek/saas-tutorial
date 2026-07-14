@@ -17,6 +17,10 @@ python manage.py collectstatic
 ## Accounts / Auth setup
 
 The project uses Django's built-in `User` model with an email-first login flow.
+`django-allauth` is installed and migrated as the foundation for future social
+login. The current custom `/accounts/` views remain the primary login/signup UI
+for now. Allauth URLs are mounted under `/allauth/` so we can add social
+providers later without breaking the existing flow.
 
 We are **not switching to a custom `AUTH_USER_MODEL` at this stage** because the
 project already has applied `auth` migrations, a superuser, visit tracking tied
@@ -44,6 +48,11 @@ Current minimal accounts design:
   - `OrganizationMembership`
   - roles: `owner`, `admin`, `member`
 - Django admin registration for user profiles and organizations
+- django-allauth foundation:
+  - regular account support
+  - socialaccount support
+  - allauth URL namespace: `/allauth/`
+  - provider credentials can later be added via Django Admin `Social applications`
 
 Important paths:
 
