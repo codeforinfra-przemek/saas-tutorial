@@ -38,6 +38,7 @@ urlpatterns = [
     path('allauth/', include('allauth.urls')),
     path('', include('content.urls')),
     path('franchises/', include('franchises.urls')),
+    path('leads/', include('leads.urls')),
     path('vendor/', include('vendor.urls')),
     path('visits/', include('visits.urls')),
     path('sitemap.xml', sitemap, {"sitemaps": sitemaps}, name='django.contrib.sitemaps.views.sitemap'),

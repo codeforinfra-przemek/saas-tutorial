@@ -67,3 +67,53 @@ class LeadForm(forms.ModelForm):
         if value:
             raise forms.ValidationError("Invalid submission.")
         return value
+
+
+class LeadManagementForm(forms.ModelForm):
+    class Meta:
+        model = Lead
+        fields = (
+            "franchise",
+            "status",
+            "name",
+            "email",
+            "phone",
+            "city",
+            "investment_budget",
+            "message",
+            "privacy_consent",
+            "marketing_consent",
+            "admin_notes",
+            "contacted_at",
+            "sent_to_vendor_at",
+        )
+        labels = {
+            "franchise": "Franczyza",
+            "status": "Status",
+            "name": "Imię i nazwisko",
+            "email": "Email",
+            "phone": "Telefon",
+            "city": "Miasto",
+            "investment_budget": "Budżet inwestycyjny",
+            "message": "Wiadomość klienta",
+            "privacy_consent": "Zgoda na kontakt",
+            "marketing_consent": "Zgoda marketingowa",
+            "admin_notes": "Notatki administracyjne",
+            "contacted_at": "Data kontaktu",
+            "sent_to_vendor_at": "Data przekazania do vendora",
+        }
+        widgets = {
+            "message": forms.Textarea(attrs={"rows": 4}),
+            "admin_notes": forms.Textarea(attrs={"rows": 5}),
+            "contacted_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "sent_to_vendor_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "investment_budget": forms.NumberInput(attrs={"min": "0", "step": "1000"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            if name in ("privacy_consent", "marketing_consent"):
+                field.widget.attrs["class"] = "h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            else:
+                field.widget.attrs["class"] = FIELD_CLASSES

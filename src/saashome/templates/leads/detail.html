@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | {{ lead.name }}{% endblock %}
+
+{% block topbar_title %}
+    <div>
+        <p class="text-sm font-black text-slate-950">Lead</p>
+        <p class="hidden text-xs font-semibold text-slate-500 sm:block">{{ lead.franchise.name }}</p>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8 lg:px-10">
+        <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+                <a href="{% url 'leads:list' %}" class="text-sm font-bold text-brand-700 hover:text-brand-900">Wróć do leadów</a>
+                <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">{{ lead.name }}</h1>
+                <p class="mt-1 text-sm text-slate-600">{{ lead.franchise.name }} · {{ lead.created_at|date:"Y-m-d H:i" }}</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a href="{% url 'leads:edit' lead.pk %}" class="inline-flex min-h-10 items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-extrabold text-white hover:bg-brand-600">Edytuj</a>
+                <a href="{% url 'leads:delete' lead.pk %}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50">Usuń</a>
+            </div>
+        </div>
+
+        <div class="grid gap-5 lg:grid-cols-[1fr_360px]">
+            <div class="space-y-5">
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-700">{{ lead.get_status_display }}</span>
+                        {% if lead.privacy_consent %}
+                            <span class="inline-flex rounded-full bg-brand-50 px-3 py-1 text-xs font-extrabold text-brand-700">Zgoda kontaktowa</span>
+                        {% endif %}
+                        {% if lead.marketing_consent %}
+                            <span class="inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-extrabold text-amber-700">Marketing</span>
+                        {% endif %}
+                    </div>
+
+                    <dl class="mt-5 grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Email</dt>
+                            <dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.email }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Telefon</dt>
+                            <dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.phone }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Miasto</dt>
+                            <dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.city|default:"-" }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Budżet</dt>
+                            <dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.investment_budget|default:"-" }}</dd>
+                        </div>
+                    </dl>
+
+                    <div class="mt-5">
+                        <h2 class="text-sm font-black text-slate-950">Wiadomość</h2>
+                        <p class="mt-2 whitespace-pre-line rounded-lg bg-slate-50 p-4 text-sm leading-6 text-slate-700">{{ lead.message|default:"Brak wiadomości." }}</p>
+                    </div>
+                </section>
+
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 class="text-sm font-black text-slate-950">Notatki i obsługa</h2>
+                    <dl class="mt-4 grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Kontakt</dt>
+                            <dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.contacted_at|date:"Y-m-d H:i"|default:"-" }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Przekazano vendorowi</dt>
+                            <dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.sent_to_vendor_at|date:"Y-m-d H:i"|default:"-" }}</dd>
+                        </div>
+                    </dl>
+                    <p class="mt-4 whitespace-pre-line rounded-lg bg-slate-50 p-4 text-sm leading-6 text-slate-700">{{ lead.admin_notes|default:"Brak notatek." }}</p>
+                </section>
+            </div>
+
+            <aside class="space-y-5">
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 class="text-sm font-black text-slate-950">Źródło</h2>
+                    <dl class="mt-4 space-y-3 text-sm">
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Użytkownik</dt>
+                            <dd class="mt-1 text-slate-800">{{ lead.user|default:"anonymous" }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Session</dt>
+                            <dd class="mt-1 break-all text-slate-800">{{ lead.session_key|default:"-" }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Ścieżka</dt>
+                            <dd class="mt-1 break-all text-slate-800">{{ lead.source_path|default:"-" }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">Referrer</dt>
+                            <dd class="mt-1 break-all text-slate-800">{{ lead.referrer|default:"-" }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-bold uppercase text-slate-500">UTM</dt>
+                            <dd class="mt-1 text-slate-800">
+                                {{ lead.utm_source|default:"-" }} / {{ lead.utm_medium|default:"-" }} / {{ lead.utm_campaign|default:"-" }}
+                            </dd>
+                        </div>
+                    </dl>
+                </section>
+
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 class="text-sm font-black text-slate-950">Zdarzenia wizyty</h2>
+                    <div class="mt-4 space-y-3">
+                        {% for event in visit_events %}
+                            <div class="border-b border-slate-100 pb-3 last:border-b-0 last:pb-0">
+                                <p class="text-sm font-bold text-slate-800">{{ event.get_event_type_display }}</p>
+                                <p class="mt-1 text-xs text-slate-500">{{ event.created_at|date:"Y-m-d H:i:s" }}</p>
+                            </div>
+                        {% empty %}
+                            <p class="text-sm text-slate-500">Brak powiązanych zdarzeń wizyty.</p>
+                        {% endfor %}
+                    </div>
+                </section>
+            </aside>
+        </div>
+    </section>
+{% endblock %}
