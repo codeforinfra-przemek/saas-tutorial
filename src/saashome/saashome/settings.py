@@ -105,8 +105,13 @@ MIDDLEWARE = [
 ROOT_URLCONF = 'saashome.urls'
 
 LOGIN_URL = "accounts:login"
-LOGIN_REDIRECT_URL = "home"
+LOGIN_REDIRECT_URL = "accounts:dashboard"
 LOGOUT_REDIRECT_URL = "home"
+
+AUTHENTICATION_BACKENDS = [
+    "accounts.backends.EmailBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
 
 TEMPLATES = [
     {

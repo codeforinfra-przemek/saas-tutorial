@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | {{ page_title }}{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
+        <div class="mb-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <span class="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-extrabold uppercase tracking-wide text-brand-700">Dashboard</span>
+            <h1 class="mt-4 text-3xl font-black tracking-normal text-slate-950">Cześć, {{ request.user.username }}</h1>
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                To będzie centrum pracy użytkownika: zapisane franczyzy, rekomendacje, organizacje vendorów i później panel ofert.
+            </p>
+        </div>
+
+        <div class="grid gap-5 md:grid-cols-3">
+            <a href="{% url 'accounts:profile' %}" class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:border-brand-200 hover:shadow-md">
+                <p class="text-sm font-bold text-slate-500">Profil</p>
+                <h2 class="mt-2 text-xl font-black text-slate-950">Uzupełnij dane</h2>
+                <p class="mt-2 text-sm leading-6 text-slate-600">Avatar, bio, dane kontaktowe i typ konta.</p>
+            </a>
+            <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <p class="text-sm font-bold text-slate-500">Typ konta</p>
+                <h2 class="mt-2 text-xl font-black text-slate-950">{{ profile.get_user_type_display }}</h2>
+                <p class="mt-2 text-sm leading-6 text-slate-600">Vendorzy będą mogli zarządzać organizacją i profilami franczyz.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <p class="text-sm font-bold text-slate-500">Email</p>
+                <h2 class="mt-2 text-xl font-black text-slate-950">{% if profile.email_verified %}Zweryfikowany{% else %}Do weryfikacji{% endif %}</h2>
+                <p class="mt-2 text-sm leading-6 text-slate-600">Pole jest przygotowane pod pełną weryfikację emaila.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 class="text-xl font-black text-slate-950">Organizacje</h2>
+            <div class="mt-4 grid gap-3">
+                {% for membership in memberships %}
+                    <div class="rounded-lg border border-slate-200 p-4">
+                        <p class="font-black text-slate-950">{{ membership.organization.name }}</p>
+                        <p class="text-sm font-semibold text-slate-500">{{ membership.get_role_display }}</p>
+                    </div>
+                {% empty %}
+                    <p class="text-sm leading-6 text-slate-600">Nie należysz jeszcze do żadnej organizacji vendor account.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+{% endblock %}
