@@ -1,0 +1,17 @@
+Czesc,
+
+dziekujemy za zainteresowanie {{ site_name }}.
+
+Budujemy narzedzie, ktore pomoze porownywac franczyzy, sprawdzac lokalizacje na mapie i szybciej ocenic, ktore oferty sa warte blizszego kontaktu.
+
+Na starcie skupiamy sie na:
+- przejrzystym rankingu franczyz,
+- mapie lokalizacji i popytu,
+- prostym kontakcie z wybranymi ofertami,
+- danych, ktore pomagaja podejmowac lepsze decyzje.
+
+Gdy tylko bedziemy gotowi do pierwszych testow, odezwiemy sie z kolejnymi informacjami.
+
+Pozdrawiamy,
+Zespol {{ site_name }}
+{{ contact_email }}

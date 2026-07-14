@@ -128,6 +128,33 @@ if DATABASE_URL:
     )
 
 
+# Email
+# https://docs.djangoproject.com/en/5.0/topics/email/
+
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = get_bool_env("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = get_bool_env("EMAIL_USE_SSL", False)
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
+
+ADMIN_USER_NAME = os.environ.get("ADMIN_USER_NAME", "SaaS Home Admin")
+ADMIN_USER_EMAIL = os.environ.get("ADMIN_USER_EMAIL", EMAIL_HOST_USER)
+
+ADMINS = []
+MANAGERS = []
+
+if ADMIN_USER_NAME and ADMIN_USER_EMAIL:
+    ADMINS.append((ADMIN_USER_NAME, ADMIN_USER_EMAIL))
+    MANAGERS = ADMINS
+
+
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
 

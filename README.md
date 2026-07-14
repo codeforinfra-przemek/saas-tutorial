@@ -11,4 +11,5 @@ python manage.py runserver
 python manage.py startapp visits
 python manage.py makemigrations visits
 python manage.py migrate
+python manage.py collectstatic
 ```
