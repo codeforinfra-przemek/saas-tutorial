@@ -43,6 +43,13 @@ def get_bool_env(name, default=False):
     return value.lower() in ("1", "true", "t", "yes", "y", "on")
 
 
+def get_list_env(name, default=None):
+    value = os.environ.get(name)
+    if not value:
+        return default or []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
@@ -57,7 +64,18 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "[::1]",
     ".railway.app",
+    ".up.railway.app",
 ]
+
+CSRF_TRUSTED_ORIGINS = get_list_env(
+    "CSRF_TRUSTED_ORIGINS",
+    [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "https://*.railway.app",
+        "https://*.up.railway.app",
+    ],
+)
 
 
 # Application definition
