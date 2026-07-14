@@ -17,17 +17,31 @@ Including another URLconf
 from django.contrib import admin
 from django.conf import settings
 from django.conf.urls.static import static
+from django.contrib.sitemaps.views import sitemap
 from django.urls import include, path
 
+from content.sitemaps import ArticleSitemap, FranchiseSitemap, LandingPageSitemap
+from content.views import robots_txt_view
+
 from .views import home_view
+
+
+sitemaps = {
+    "articles": ArticleSitemap,
+    "landing_pages": LandingPageSitemap,
+    "franchises": FranchiseSitemap,
+}
 
 urlpatterns = [
     path('', home_view, name='home'),
     path('accounts/', include('accounts.urls')),
     path('allauth/', include('allauth.urls')),
+    path('', include('content.urls')),
     path('franchises/', include('franchises.urls')),
     path('vendor/', include('vendor.urls')),
     path('visits/', include('visits.urls')),
+    path('sitemap.xml', sitemap, {"sitemaps": sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
+    path('robots.txt', robots_txt_view, name='robots_txt'),
     path('admin/', admin.site.urls),
 ]
 

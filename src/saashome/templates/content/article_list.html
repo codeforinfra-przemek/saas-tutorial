@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}{{ seo_title }}{% endblock %}
+
+{% block topbar_title %}
+    <div class="min-w-0">
+        <p class="text-[10px] font-extrabold uppercase tracking-wide text-brand-700">Content</p>
+        <h1 class="truncate text-lg font-black tracking-normal text-slate-950 sm:text-xl">Poradnik franczyzowy</h1>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
+        <div class="max-w-3xl">
+            <p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Poradnik franczyzowy</p>
+            <h1 class="mt-2 text-4xl font-black tracking-normal text-slate-950">Jak wybrać i porównać franczyzę</h1>
+            <p class="mt-4 text-base leading-7 text-slate-600">Praktyczne przewodniki dla osób, które analizują modele franczyzowe, budżety inwestycyjne i ryzyka przed rozmową z franczyzodawcą.</p>
+        </div>
+
+        {% if categories %}
+            <div class="mt-6 flex gap-2 overflow-x-auto pb-1">
+                {% for category in categories %}
+                    <span class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700">{{ category.name }}</span>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% if featured_articles %}
+            <div class="mt-8">
+                <h2 class="text-2xl font-black tracking-normal text-slate-950">Polecane</h2>
+                <div class="mt-4 grid gap-4 md:grid-cols-3">
+                    {% for article in featured_articles %}
+                        {% include "content/partials/article_card.html" %}
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {% for article in articles %}
+                {% include "content/partials/article_card.html" %}
+            {% empty %}
+                <div class="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-slate-500">Nie ma jeszcze opublikowanych artykułów.</div>
+            {% endfor %}
+        </div>
+    </section>
+{% endblock %}

@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
     {% include "base/meta.html" %}
-    <title>{% block title %}{{ site_name|default:"SaaS Home" }}{% endblock %}</title>
+    <title>{% block title %}{% if seo_title %}{{ seo_title }}{% else %}{{ site_name|default:"SaaS Home" }}{% endif %}{% endblock %}</title>
     {% include "base/css.html" %}
     {% block extra_css %}{% endblock %}
 </head>
