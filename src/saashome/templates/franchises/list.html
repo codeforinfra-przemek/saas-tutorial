@@ -11,33 +11,62 @@
         <div class="franchise-layout">
             <div class="franchise-left-panel">
                 <div class="franchise-list-scroll">
-                    <div class="border-b border-slate-200 bg-white px-5 py-5 sm:px-8">
-                        <p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Ranking franczyz</p>
-                        <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">Znajdź franczyzę</h1>
-                        <p class="mt-2 text-sm leading-6 text-slate-600">Przeglądaj modele biznesowe, porównuj inwestycję i sprawdzaj lokalizacje na mapie.</p>
-
-                        <form method="get" class="mt-5 grid gap-3">
-                            <div class="relative">
-                                <label for="franchise-search" class="sr-only">Szukaj franczyzy</label>
-                                <input id="franchise-search" name="q" value="{{ q }}" type="search" class="block w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 focus:border-brand-500 focus:ring-brand-500" placeholder="Szukaj po nazwie, opisie lub branży">
+                    <div class="franchise-search-bar border-b border-slate-200 bg-white px-5 py-4 sm:px-8">
+                        <form method="get" class="grid gap-3">
+                            <div class="grid gap-3 sm:grid-cols-[1fr_auto]">
+                                <div class="relative">
+                                    <label for="franchise-search" class="sr-only">Szukaj franczyzy</label>
+                                    <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+                                        <svg class="h-5 w-5 text-slate-400" aria-hidden="true" fill="none" viewBox="0 0 20 20">
+                                            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"/>
+                                        </svg>
+                                    </div>
+                                    <input id="franchise-search" name="q" value="{{ q }}" type="search" class="block min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 pl-12 text-base font-semibold text-slate-950 shadow-sm focus:border-brand-500 focus:bg-white focus:ring-brand-500" placeholder="Szukaj franczyzy po nazwie">
+                                </div>
+                                <button type="submit" class="inline-flex min-h-12 items-center justify-center rounded-lg bg-slate-950 px-6 py-3 text-sm font-extrabold text-white hover:bg-slate-800">Szukaj</button>
                             </div>
-                            <div class="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-                                <input name="investment_max" value="{{ investment_max }}" inputmode="numeric" class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 focus:border-brand-500 focus:ring-brand-500" placeholder="Budżet max, np. 150000">
-                                <select name="business_type" class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 focus:border-brand-500 focus:ring-brand-500">
-                                    <option value="">Każdy typ</option>
+                            {% if selected_category %}
+                                <input type="hidden" name="category" value="{{ selected_category }}">
+                            {% endif %}
+                            {% if selected_business_type %}
+                                <input type="hidden" name="business_type" value="{{ selected_business_type }}">
+                            {% endif %}
+                            {% if investment_max %}
+                                <input type="hidden" name="investment_max" value="{{ investment_max }}">
+                            {% endif %}
+                        </form>
+                    </div>
+
+                    <div class="franchise-filter-toolbar border-b border-slate-200 bg-white px-5 py-3 sm:px-8">
+                        <div class="grid gap-3">
+                            <div>
+                                <p class="mb-2 text-xs font-extrabold uppercase tracking-wide text-slate-400">Kategorie franczyz</p>
+                                {% include "franchises/partials/category_filters.html" %}
+                            </div>
+
+                            <div>
+                                <p class="mb-2 text-xs font-extrabold uppercase tracking-wide text-slate-400">Typ franczyzy</p>
+                                <div class="flex gap-2 overflow-x-auto pb-1">
+                                    <a href="{% url 'franchises:list' %}?{% if q %}q={{ q|urlencode }}&{% endif %}{% if selected_category %}category={{ selected_category|urlencode }}&{% endif %}{% if investment_max %}investment_max={{ investment_max|urlencode }}{% endif %}" class="franchise-filter-pill rounded-full border px-4 py-2 text-sm font-bold {% if not selected_business_type %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}">Wszystkie typy</a>
                                     {% for value, label in business_type_choices %}
-                                        <option value="{{ value }}" {% if selected_business_type == value %}selected{% endif %}>{{ label }}</option>
+                                        <a href="{% url 'franchises:list' %}?{% if q %}q={{ q|urlencode }}&{% endif %}{% if selected_category %}category={{ selected_category|urlencode }}&{% endif %}business_type={{ value|urlencode }}{% if investment_max %}&investment_max={{ investment_max|urlencode }}{% endif %}" class="franchise-filter-pill rounded-full border px-4 py-2 text-sm font-bold {% if selected_business_type == value %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}">{{ label }}</a>
                                     {% endfor %}
-                                </select>
+                                </div>
+                            </div>
+
+                            <form method="get" class="grid gap-3 sm:grid-cols-[1fr_auto]">
+                                {% if q %}
+                                    <input type="hidden" name="q" value="{{ q }}">
+                                {% endif %}
                                 {% if selected_category %}
                                     <input type="hidden" name="category" value="{{ selected_category }}">
                                 {% endif %}
-                                <button type="submit" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-5 py-3 text-sm font-extrabold text-white hover:bg-slate-800">Szukaj</button>
-                            </div>
-                        </form>
-
-                        <div class="mt-5">
-                            {% include "franchises/partials/category_filters.html" %}
+                                {% if selected_business_type %}
+                                    <input type="hidden" name="business_type" value="{{ selected_business_type }}">
+                                {% endif %}
+                                <input name="investment_max" value="{{ investment_max }}" inputmode="numeric" class="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-950 focus:border-brand-500 focus:ring-brand-500" placeholder="Budżet max, np. 150000">
+                                <button type="submit" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Filtruj budżet</button>
+                            </form>
                         </div>
                     </div>
 

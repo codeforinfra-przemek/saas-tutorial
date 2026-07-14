@@ -19,6 +19,18 @@
     overflow-y: auto;
 }
 
+.franchise-search-bar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+}
+
+.franchise-filter-toolbar {
+    position: sticky;
+    top: 81px;
+    z-index: 19;
+}
+
 .franchise-map-panel {
     position: sticky;
     top: 0;
@@ -72,6 +84,11 @@
     .franchise-list-scroll {
         max-height: none;
         overflow: visible;
+    }
+
+    .franchise-search-bar,
+    .franchise-filter-toolbar {
+        position: static;
     }
 
     .franchise-map-panel {
