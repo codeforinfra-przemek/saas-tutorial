@@ -11,7 +11,7 @@
 .franchise-layout {
     display: grid;
     grid-template-columns: minmax(360px, 46%) minmax(420px, 1fr);
-    min-height: calc(100vh - 188px);
+    min-height: calc(100vh - 152px);
 }
 
 .franchise-left-panel {
@@ -21,14 +21,14 @@
 }
 
 .franchise-list-scroll {
-    max-height: calc(100vh - 188px);
+    max-height: calc(100vh - 152px);
     overflow-y: auto;
 }
 
 .franchise-map-panel {
     position: sticky;
     top: 0;
-    height: calc(100vh - 188px);
+    height: calc(100vh - 152px);
     min-height: 520px;
     min-width: 0;
     background: #e2e8f0;

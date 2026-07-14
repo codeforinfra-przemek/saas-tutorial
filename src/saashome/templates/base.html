@@ -11,7 +11,14 @@
 
     <main id="app-main" class="min-h-screen transition-[margin] duration-300 ease-in-out lg:ml-20">
         <header class="border-b border-slate-200 bg-white/90 backdrop-blur">
-            <div class="mx-auto flex w-full max-w-7xl items-center justify-end gap-3 px-5 py-3 sm:px-8 lg:px-10">
+            <div class="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-5 py-3 pl-16 sm:px-8 lg:px-10">
+                <div class="min-w-0">
+                    {% block topbar_title %}
+                        {% if page_title %}
+                            <p class="truncate text-sm font-black text-slate-950">{{ page_title }}</p>
+                        {% endif %}
+                    {% endblock %}
+                </div>
                 {% if request.user.is_authenticated %}
                     <a href="{% url 'accounts:profile' %}" class="flex items-center gap-3 rounded-full border border-slate-200 bg-slate-50 py-1.5 pl-2 pr-4 transition hover:border-brand-200 hover:bg-brand-50" title="Profil użytkownika">
                         {% if request.user.profile.avatar %}

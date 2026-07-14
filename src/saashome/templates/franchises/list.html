@@ -2,6 +2,13 @@
 
 {% block title %}{{ block.super }} | Franczyzy{% endblock %}
 
+{% block topbar_title %}
+    <div class="min-w-0">
+        <p class="text-[10px] font-extrabold uppercase tracking-wide text-brand-700">Ranking Franczyz</p>
+        <h1 class="truncate text-lg font-black tracking-normal text-slate-950 sm:text-xl">Porównaj Franczyzę</h1>
+    </div>
+{% endblock %}
+
 {% block extra_css %}
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 {% endblock %}
@@ -9,15 +16,7 @@
 {% block content %}
     <section class="franchise-shell">
         <div class="franchise-top-toolbar border-b border-slate-200 bg-white">
-            <div class="grid gap-2 px-4 py-3 sm:px-6">
-                <div class="flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                        <p class="text-[11px] font-extrabold uppercase tracking-wide text-brand-700">Ranking Franczyz</p>
-                        <h1 class="text-xl font-black tracking-normal text-slate-950 sm:text-2xl">Porównaj Franczyzę</h1>
-                    </div>
-                    <p class="text-xs font-bold text-slate-500">{{ franchises|length }} ofert</p>
-                </div>
-
+            <div class="grid gap-2 px-4 py-2.5 sm:px-6">
                 <form method="get" class="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_auto]">
                     <div class="relative">
                         <label for="franchise-search" class="sr-only">Szukaj franczyzy</label>
@@ -39,7 +38,6 @@
 
                 <div class="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(220px,300px)] xl:items-end">
                     <div>
-                        <p class="mb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Kategorie franczyz</p>
                         {% include "franchises/partials/category_filters.html" %}
                     </div>
 
