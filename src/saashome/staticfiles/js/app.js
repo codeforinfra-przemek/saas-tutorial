@@ -49,6 +49,14 @@ window.initFranchiseMap = function initFranchiseMap(options) {
     setTimeout(function () {
         map.invalidateSize();
     }, 100);
+
+    setTimeout(function () {
+        map.invalidateSize();
+    }, 500);
+
+    window.addEventListener("resize", function () {
+        map.invalidateSize();
+    });
 };
 
 function escapeHtml(value) {

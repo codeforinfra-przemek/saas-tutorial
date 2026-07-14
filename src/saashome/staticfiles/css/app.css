@@ -2,10 +2,16 @@
     min-height: calc(100vh - 65px);
 }
 
+.franchise-top-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+}
+
 .franchise-layout {
     display: grid;
     grid-template-columns: minmax(360px, 46%) minmax(420px, 1fr);
-    min-height: calc(100vh - 65px);
+    min-height: calc(100vh - 188px);
 }
 
 .franchise-left-panel {
@@ -15,27 +21,16 @@
 }
 
 .franchise-list-scroll {
-    max-height: calc(100vh - 65px);
+    max-height: calc(100vh - 188px);
     overflow-y: auto;
-}
-
-.franchise-search-bar {
-    position: sticky;
-    top: 0;
-    z-index: 20;
-}
-
-.franchise-filter-toolbar {
-    position: sticky;
-    top: 81px;
-    z-index: 19;
 }
 
 .franchise-map-panel {
     position: sticky;
     top: 0;
-    height: calc(100vh - 65px);
+    height: calc(100vh - 188px);
     min-height: 520px;
+    min-width: 0;
     background: #e2e8f0;
 }
 
@@ -75,6 +70,7 @@
     .franchise-layout {
         display: flex;
         flex-direction: column;
+        min-height: auto;
     }
 
     .franchise-left-panel {
@@ -86,27 +82,28 @@
         overflow: visible;
     }
 
-    .franchise-search-bar,
-    .franchise-filter-toolbar {
+    .franchise-top-toolbar {
         position: static;
     }
 
     .franchise-map-panel {
         position: relative;
-        height: 420px;
-        min-height: 420px;
-        order: -1;
+        height: 320px;
+        min-height: 320px;
+        width: 100%;
+        order: 0;
     }
 
     .franchise-map {
-        min-height: 420px;
+        height: 320px;
+        min-height: 320px;
     }
 }
 
 @media (max-width: 640px) {
     .franchise-map-panel,
     .franchise-map {
-        height: 340px;
-        min-height: 340px;
+        height: 300px;
+        min-height: 300px;
     }
 }

@@ -1,14 +1,14 @@
 <div class="flex gap-2 overflow-x-auto pb-1">
     <a
-        href="{% url 'franchises:list' %}{% if q or investment_max or selected_business_type %}?{% if q %}q={{ q|urlencode }}&{% endif %}{% if investment_max %}investment_max={{ investment_max|urlencode }}&{% endif %}{% if selected_business_type %}business_type={{ selected_business_type|urlencode }}{% endif %}{% endif %}"
-        class="franchise-filter-pill rounded-full border px-4 py-2 text-sm font-bold {% if not selected_category %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}"
+        href="{% url 'franchises:list' %}{% if q or investment_max %}?{% if q %}q={{ q|urlencode }}{% endif %}{% if q and investment_max %}&{% endif %}{% if investment_max %}investment_max={{ investment_max|urlencode }}{% endif %}{% endif %}"
+        class="franchise-filter-pill rounded-full border px-3 py-1.5 text-xs font-bold {% if not selected_category %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}"
     >
         Wszystkie
     </a>
     {% for category in categories %}
         <a
-            href="{% url 'franchises:list' %}?{% if q %}q={{ q|urlencode }}&{% endif %}category={{ category.slug|urlencode }}{% if investment_max %}&investment_max={{ investment_max|urlencode }}{% endif %}{% if selected_business_type %}&business_type={{ selected_business_type|urlencode }}{% endif %}"
-            class="franchise-filter-pill rounded-full border px-4 py-2 text-sm font-bold {% if selected_category == category.slug %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}"
+            href="{% url 'franchises:list' %}?{% if q %}q={{ q|urlencode }}&{% endif %}category={{ category.slug|urlencode }}{% if investment_max %}&investment_max={{ investment_max|urlencode }}{% endif %}"
+            class="franchise-filter-pill rounded-full border px-3 py-1.5 text-xs font-bold {% if selected_category == category.slug %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}"
         >
             {{ category.name }}
         </a>

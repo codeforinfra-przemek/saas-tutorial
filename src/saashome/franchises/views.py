@@ -25,7 +25,6 @@ def franchise_list_view(request):
     q = request.GET.get("q", "").strip()
     category_slug = request.GET.get("category", "").strip()
     investment_max = request.GET.get("investment_max", "").strip()
-    business_type = request.GET.get("business_type", "").strip()
 
     franchises = (
         Franchise.objects.filter(is_active=True)
@@ -54,9 +53,6 @@ def franchise_list_view(request):
                 | Q(max_investment__lte=investment_max_value)
             )
 
-    if business_type in dict(Franchise.BUSINESS_TYPE_CHOICES):
-        franchises = franchises.filter(business_type=business_type)
-
     active_locations = FranchiseLocation.objects.filter(
         franchise__in=franchises,
         is_active=True,
@@ -68,9 +64,7 @@ def franchise_list_view(request):
         "active_page": "franchises",
         "franchises": franchises,
         "categories": FranchiseCategory.objects.filter(is_active=True),
-        "business_type_choices": Franchise.BUSINESS_TYPE_CHOICES,
         "selected_category": category_slug,
-        "selected_business_type": business_type,
         "q": q,
         "investment_max": investment_max,
         "map_markers": build_map_markers(active_locations),
