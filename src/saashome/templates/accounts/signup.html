@@ -7,7 +7,7 @@
         <div class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
             <span class="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-extrabold uppercase tracking-wide text-brand-700">New account</span>
             <h1 class="mt-5 text-3xl font-black tracking-normal text-slate-950">Załóż konto</h1>
-            <p class="mt-2 text-sm leading-6 text-slate-600">Stwórz konto, żeby później zapisywać ulubione franczyzy i wracać do swoich analiz.</p>
+            <p class="mt-2 text-sm leading-6 text-slate-600">Stwórz konto, żeby później zapisywać ulubione franczyzy i wracać do swoich analiz. Po rejestracji wyślemy link do potwierdzenia adresu email.</p>
 
             <form method="post" class="mt-6 space-y-4">
                 {% csrf_token %}
@@ -22,7 +22,7 @@
                         {% endif %}
                     </div>
                 {% endfor %}
-                <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100">Utwórz konto</button>
+                <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100">Utwórz konto i wyślij link</button>
             </form>
 
             <p class="mt-5 text-center text-sm text-slate-600">

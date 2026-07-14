@@ -1,10 +1,12 @@
 Czesc {{ user.username }},
 
-witaj w {{ site_name }}.
+potwierdz rejestracje w {{ site_name }}.
 
-Twoje konto zostalo utworzone. Bedziemy rozwijac tu ranking franczyz, zapis interesujacych ofert, mape lokalizacji i narzedzia pomagajace szybciej porownywac mozliwosci.
+Kliknij ponizszy link, aby aktywowac konto:
 
-Na teraz mozesz wrocic do strony i obserwowac kolejne etapy budowy produktu.
+{{ activation_url }}
+
+Konto pozostanie nieaktywne do czasu potwierdzenia adresu email.
 
 Pozdrawiamy,
 Zespol {{ site_name }}

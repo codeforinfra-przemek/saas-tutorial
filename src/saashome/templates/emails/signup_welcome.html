@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Witaj w {{ site_name }}</title>
+    <title>Potwierdź rejestrację w {{ site_name }}</title>
 </head>
 <body style="margin:0;background:#f8fafc;color:#0f172a;font-family:Arial,Helvetica,sans-serif;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 16px;">
@@ -13,27 +13,27 @@
                     <tr>
                         <td style="padding:28px 28px 12px;">
                             <div style="display:inline-block;background:#19a974;color:#ffffff;font-weight:800;border-radius:8px;padding:10px 13px;">S</div>
-                            <h1 style="margin:22px 0 10px;font-size:28px;line-height:1.15;color:#0f172a;">Witaj, {{ user.username }}</h1>
-                            <p style="margin:0;color:#475569;font-size:16px;line-height:1.6;">Twoje konto w {{ site_name }} jest gotowe. Budujemy miejsce do porownywania franczyz, analizowania lokalizacji i wybierania ofert z wieksza pewnoscia.</p>
+                            <h1 style="margin:22px 0 10px;font-size:28px;line-height:1.15;color:#0f172a;">Potwierdź rejestrację</h1>
+                            <p style="margin:0;color:#475569;font-size:16px;line-height:1.6;">Cześć, {{ user.username }}. Kliknij poniższy przycisk, aby aktywować konto w {{ site_name }} i dokończyć rejestrację.</p>
                         </td>
                     </tr>
                     <tr>
                         <td style="padding:12px 28px 8px;">
                             <div style="background:#f1f5f9;border-radius:10px;padding:18px;">
-                                <p style="margin:0 0 12px;color:#0f172a;font-weight:700;">Co pojawi sie w kolejnych krokach:</p>
+                                <p style="margin:0 0 12px;color:#0f172a;font-weight:700;">Po aktywacji konta będziesz mógł:</p>
                                 <ul style="margin:0;padding-left:20px;color:#475569;font-size:15px;line-height:1.7;">
-                                    <li>ranking franczyz i filtrowanie ofert,</li>
-                                    <li>zapis interesujacych marek,</li>
-                                    <li>mapa lokalizacji i popytu,</li>
-                                    <li>kontakt z wybranymi partnerami.</li>
+                                    <li>wrócić do panelu użytkownika,</li>
+                                    <li>uzupełnić profil i typ konta,</li>
+                                    <li>w przyszłości zapisywać interesujące franczyzy,</li>
+                                    <li>korzystać z narzędzi dla użytkowników i vendorów.</li>
                                 </ul>
                             </div>
                         </td>
                     </tr>
                     <tr>
                         <td style="padding:16px 28px 28px;">
-                            <p style="margin:0 0 18px;color:#475569;font-size:16px;line-height:1.6;">Dziekujemy, ze jestes z nami na tak wczesnym etapie.</p>
-                            <a href="mailto:{{ contact_email }}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:700;border-radius:8px;padding:12px 18px;">Napisz do nas</a>
+                            <p style="margin:0 0 18px;color:#475569;font-size:16px;line-height:1.6;">Link aktywacyjny jest przeznaczony tylko dla Ciebie.</p>
+                            <a href="{{ activation_url }}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:700;border-radius:8px;padding:12px 18px;">Aktywuj konto</a>
                         </td>
                     </tr>
                     <tr>

@@ -9,7 +9,13 @@ from django.contrib.auth.views import (
 from django.urls import path
 
 from .forms import EmailAuthenticationForm, StyledPasswordResetForm
-from .views import SignupView, dashboard_view, profile_view
+from .views import (
+    ActivationSentView,
+    SignupView,
+    activate_account_view,
+    dashboard_view,
+    profile_view,
+)
 
 
 app_name = "accounts"
@@ -26,6 +32,8 @@ urlpatterns = [
     ),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("signup/", SignupView.as_view(), name="signup"),
+    path("signup/check-email/", ActivationSentView.as_view(), name="activation_sent"),
+    path("activate/<uidb64>/<token>/", activate_account_view, name="activate"),
     path("dashboard/", dashboard_view, name="dashboard"),
     path("profile/", profile_view, name="profile"),
     path(

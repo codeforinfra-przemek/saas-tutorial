@@ -55,6 +55,7 @@ class SignupForm(UserCreationForm):
         user = super().save(commit=False)
         user.email = self.cleaned_data["email"]
         user.username = self.generate_username(user.email)
+        user.is_active = False
         if commit:
             user.save()
             profile, _ = UserProfile.objects.get_or_create(user=user)

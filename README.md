@@ -27,6 +27,7 @@ would require a planned migration/reset strategy.
 Current minimal accounts design:
 
 - registration with email and password
+- new accounts start as inactive until the user clicks the email activation link
 - login with email and password
 - logout
 - password reset using Django auth views
@@ -35,7 +36,7 @@ Current minimal accounts design:
 - profile fields:
   - avatar/icon
   - user type: `user` or `vendor`
-  - `email_verified` field prepared for future email verification
+  - `email_verified` is set after successful email activation
   - headline, bio, location, website
 - password change from the profile page
 - organization/vendor account models:
