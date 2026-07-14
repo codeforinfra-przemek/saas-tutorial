@@ -1,3 +1,4 @@
+from django.db import OperationalError, ProgrammingError
 from django.db.models import Q
 from django.utils import timezone
 
@@ -15,24 +16,30 @@ def get_active_subscription(organization):
         return None
 
     now = timezone.now()
-    return (
-        OrganizationSubscription.objects.select_related("plan")
-        .filter(
-            organization=organization,
-            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
-            starts_at__lte=now,
+    try:
+        return (
+            OrganizationSubscription.objects.select_related("plan")
+            .filter(
+                organization=organization,
+                status__in=ACTIVE_SUBSCRIPTION_STATUSES,
+                starts_at__lte=now,
+            )
+            .filter(Q(ends_at__isnull=True) | Q(ends_at__gte=now))
+            .order_by("-starts_at")
+            .first()
         )
-        .filter(Q(ends_at__isnull=True) | Q(ends_at__gte=now))
-        .order_by("-starts_at")
-        .first()
-    )
+    except (OperationalError, ProgrammingError):
+        return None
 
 
 def get_organization_plan(organization):
     subscription = get_active_subscription(organization)
     if subscription:
         return subscription.plan
-    return Plan.objects.filter(slug="free", is_active=True).first()
+    try:
+        return Plan.objects.filter(slug="free", is_active=True).first()
+    except (OperationalError, ProgrammingError):
+        return None
 
 
 def organization_has_feature(organization, feature_name):
@@ -47,15 +54,18 @@ def get_active_promotions_for_franchise(franchise):
         return FranchisePromotion.objects.none()
 
     now = timezone.now()
-    return (
-        FranchisePromotion.objects.filter(
-            franchise=franchise,
-            status=FranchisePromotion.STATUS_ACTIVE,
-            starts_at__lte=now,
+    try:
+        return (
+            FranchisePromotion.objects.filter(
+                franchise=franchise,
+                status=FranchisePromotion.STATUS_ACTIVE,
+                starts_at__lte=now,
+            )
+            .filter(Q(ends_at__isnull=True) | Q(ends_at__gte=now))
+            .order_by("-priority", "-starts_at")
         )
-        .filter(Q(ends_at__isnull=True) | Q(ends_at__gte=now))
-        .order_by("-priority", "-starts_at")
-    )
+    except (OperationalError, ProgrammingError):
+        return FranchisePromotion.objects.none()
 
 
 def franchise_has_active_promotion(franchise, promotion_type):
@@ -68,14 +78,17 @@ def get_active_promotion_map(franchises):
         return {}
 
     now = timezone.now()
-    promotions = (
-        FranchisePromotion.objects.filter(
-            franchise_id__in=franchise_ids,
-            status=FranchisePromotion.STATUS_ACTIVE,
-            starts_at__lte=now,
+    try:
+        promotions = list(
+            FranchisePromotion.objects.filter(
+                franchise_id__in=franchise_ids,
+                status=FranchisePromotion.STATUS_ACTIVE,
+                starts_at__lte=now,
+            )
+            .filter(Q(ends_at__isnull=True) | Q(ends_at__gte=now))
         )
-        .filter(Q(ends_at__isnull=True) | Q(ends_at__gte=now))
-    )
+    except (OperationalError, ProgrammingError):
+        return {}
 
     promotion_map = {}
     for promotion in promotions:
