@@ -1,4 +1,4 @@
-DJango>=5.0,<5.1
+Django>=6.0,<6.1
 gunicorn
 psycopg[binary]
 dj-database-url
