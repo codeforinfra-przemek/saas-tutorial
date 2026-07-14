@@ -8,6 +8,7 @@ from django.forms.utils import ErrorList
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 
+from billing.services import apply_promotion_flags, get_organization_plan
 from leads.forms import LeadForm
 from leads.models import Lead
 from visits.models import Visit
@@ -99,6 +100,8 @@ def franchise_list_view(request):
                 | Q(max_investment__lte=investment_max_value)
             )
 
+    franchises = apply_promotion_flags(franchises)
+
     active_locations = FranchiseLocation.objects.filter(
         franchise__in=franchises,
         is_active=True,
@@ -120,10 +123,11 @@ def franchise_list_view(request):
 
 def franchise_detail_view(request, slug):
     franchise = get_object_or_404(
-        Franchise.objects.select_related("category").prefetch_related("locations"),
+        Franchise.objects.select_related("category", "organization").prefetch_related("locations"),
         slug=slug,
         is_active=True,
     )
+    franchise = apply_promotion_flags([franchise])[0]
     if request.method == "GET":
         create_visit(request, page_type=Visit.PAGE_TYPE_FRANCHISE_DETAIL, franchise=franchise)
 
@@ -150,6 +154,7 @@ def franchise_detail_view(request, slug):
         "locations": locations,
         "lead_form": lead_form,
         "map_markers": build_map_markers(locations),
+        "organization_plan": get_organization_plan(franchise.organization),
     }
     return render(request, "franchises/detail.html", context)
 

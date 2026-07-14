@@ -10,10 +10,10 @@
         <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-1.5">
                 <h2 class="truncate text-base font-black text-slate-950">{{ franchise.name }}</h2>
-                {% if franchise.is_promoted %}
+                {% if franchise.display_promoted %}
                     <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700">Promowane</span>
                 {% endif %}
-                {% if franchise.is_verified %}
+                {% if franchise.display_verified %}
                     <span class="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-extrabold text-sky-700">Zweryfikowane</span>
                 {% endif %}
             </div>
