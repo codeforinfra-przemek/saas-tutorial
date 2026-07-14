@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | {{ form_title }}{% endblock %}
+
+{% block topbar_title %}
+    <div>
+        <p class="text-sm font-black text-slate-950">{{ form_title }}</p>
+        <p class="hidden text-xs font-semibold text-slate-500 sm:block">{{ franchise.name }}</p>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-4xl px-5 py-6 sm:px-8 lg:px-10">
+        <div class="mb-5">
+            <a href="{% url 'franchises:manage_detail' franchise.pk %}" class="text-sm font-bold text-brand-700 hover:text-brand-900">Wróć do franczyzy</a>
+            <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">{{ form_title }}</h1>
+            <p class="mt-1 text-sm leading-6 text-slate-600">
+                Lokalizacja zasila mapę katalogu. W MVP wpisujemy współrzędne ręcznie.
+            </p>
+        </div>
+
+        <form method="post" class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="mb-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <div class="grid gap-4 md:grid-cols-2">
+                {% for field in form %}
+                    <div class="{% if field.name == 'address' %}md:col-span-2{% endif %}">
+                        {% if field.field.widget.input_type == "checkbox" %}
+                            <label class="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
+                                {{ field }}
+                                <span>{{ field.label }}</span>
+                            </label>
+                        {% else %}
+                            <label for="{{ field.id_for_label }}" class="mb-1 block text-xs font-bold uppercase text-slate-500">{{ field.label }}</label>
+                            {{ field }}
+                        {% endif %}
+                        {% for error in field.errors %}
+                            <p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+            </div>
+            <div class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
+                <a href="{% url 'franchises:manage_detail' franchise.pk %}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Anuluj</a>
+                <button type="submit" class="inline-flex min-h-10 items-center justify-center rounded-lg bg-brand-500 px-5 py-2 text-sm font-extrabold text-white hover:bg-brand-600">
+                    {{ submit_label }}
+                </button>
+            </div>
+        </form>
+    </section>
+{% endblock %}

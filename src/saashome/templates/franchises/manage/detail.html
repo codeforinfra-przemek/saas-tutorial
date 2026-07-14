@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | {{ franchise.name }}{% endblock %}
+
+{% block topbar_title %}
+    <div>
+        <p class="text-sm font-black text-slate-950">{{ franchise.name }}</p>
+        <p class="hidden text-xs font-semibold text-slate-500 sm:block">Panel franczyzy</p>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8 lg:px-10">
+        <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+                <a href="{% url 'franchises:manage_list' %}" class="text-sm font-bold text-brand-700 hover:text-brand-900">Wróć do zarządzania</a>
+                <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">{{ franchise.name }}</h1>
+                <p class="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{{ franchise.short_description }}</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a href="{{ franchise.get_absolute_url }}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Podgląd</a>
+                <a href="{% url 'franchises:manage_edit' franchise.pk %}" class="inline-flex min-h-10 items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-extrabold text-white hover:bg-brand-600">Edytuj</a>
+                <a href="{% url 'franchises:manage_delete' franchise.pk %}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50">Usuń</a>
+            </div>
+        </div>
+
+        <div class="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="text-xs font-bold uppercase text-slate-500">Leady</p>
+                <p class="mt-2 text-2xl font-black text-slate-950">{{ metrics.lead_count }}</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="text-xs font-bold uppercase text-slate-500">Nowe leady</p>
+                <p class="mt-2 text-2xl font-black text-slate-950">{{ metrics.new_leads }}</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="text-xs font-bold uppercase text-slate-500">Wizyty</p>
+                <p class="mt-2 text-2xl font-black text-slate-950">{{ metrics.visit_count }}</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="text-xs font-bold uppercase text-slate-500">Lokalizacje</p>
+                <p class="mt-2 text-2xl font-black text-slate-950">{{ metrics.location_count }}</p>
+            </div>
+        </div>
+
+        <div class="grid gap-5 lg:grid-cols-[1fr_360px]">
+            <div class="space-y-5">
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <div class="flex flex-wrap gap-2">
+                        {% if franchise.is_active %}<span class="rounded-full bg-brand-50 px-3 py-1 text-xs font-black text-brand-700">Aktywna</span>{% endif %}
+                        {% if franchise.is_verified %}<span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">Zweryfikowana</span>{% endif %}
+                        {% if franchise.is_promoted %}<span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-black text-amber-700">Promowana</span>{% endif %}
+                        {% if franchise.is_featured %}<span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Wyróżniona</span>{% endif %}
+                    </div>
+                    <dl class="mt-5 grid gap-4 sm:grid-cols-2">
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Kategoria</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ franchise.category.name }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Organizacja</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ franchise.organization|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Strona WWW</dt><dd class="mt-1 break-all text-sm font-semibold text-slate-950">{{ franchise.website_url|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Slug</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ franchise.slug }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Inwestycja</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ franchise.min_investment|default:"-" }} - {{ franchise.max_investment|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Opłata wstępna</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ franchise.initial_fee|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Ranking</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ franchise.rank_score }} / popularność {{ franchise.popularity_score }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Placówki</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ franchise.poland_units|default:"-" }} PL / {{ franchise.total_units|default:"-" }} total</dd></div>
+                    </dl>
+                    <div class="mt-5">
+                        <h2 class="text-sm font-black text-slate-950">Opis</h2>
+                        <p class="mt-2 whitespace-pre-line rounded-lg bg-slate-50 p-4 text-sm leading-6 text-slate-700">{{ franchise.description|default:"Brak opisu." }}</p>
+                    </div>
+                </section>
+
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <div class="mb-4 flex items-center justify-between gap-3">
+                        <h2 class="text-sm font-black text-slate-950">Lokalizacje</h2>
+                        <a href="{% url 'franchises:location_create' franchise.pk %}" class="inline-flex min-h-9 items-center rounded-lg bg-slate-950 px-3 py-2 text-xs font-extrabold text-white hover:bg-slate-800">Dodaj lokalizację</a>
+                    </div>
+                    <div class="space-y-3">
+                        {% for location in locations %}
+                            <div class="flex flex-col gap-3 rounded-lg border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <p class="text-sm font-black text-slate-950">{{ location.name }}</p>
+                                    <p class="mt-1 text-xs text-slate-500">{{ location.city }}{% if location.region %}, {{ location.region }}{% endif %} · {{ location.latitude }}, {{ location.longitude }}</p>
+                                </div>
+                                <div class="flex gap-3">
+                                    <a href="{% url 'franchises:location_edit' location.pk %}" class="text-sm font-bold text-brand-700 hover:text-brand-900">Edytuj</a>
+                                    <a href="{% url 'franchises:location_delete' location.pk %}" class="text-sm font-bold text-red-700 hover:text-red-900">Usuń</a>
+                                </div>
+                            </div>
+                        {% empty %}
+                            <p class="text-sm text-slate-500">Brak lokalizacji. Dodaj pierwszą, żeby franczyza pojawiła się na mapie.</p>
+                        {% endfor %}
+                    </div>
+                </section>
+            </div>
+
+            <aside class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-sm font-black text-slate-950">Ostatnie leady</h2>
+                <div class="mt-4 space-y-3">
+                    {% for lead in recent_leads %}
+                        <a href="{% url 'leads:detail' lead.pk %}" class="block rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
+                            <p class="text-sm font-black text-slate-950">{{ lead.name }}</p>
+                            <p class="mt-1 text-xs text-slate-500">{{ lead.email }} · {{ lead.get_status_display }} · {{ lead.created_at|date:"Y-m-d H:i" }}</p>
+                        </a>
+                    {% empty %}
+                        <p class="text-sm text-slate-500">Ta franczyza nie ma jeszcze leadów.</p>
+                    {% endfor %}
+                </div>
+            </aside>
+        </div>
+    </section>
+{% endblock %}
