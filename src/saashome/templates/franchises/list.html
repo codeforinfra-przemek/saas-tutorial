@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | Franczyzy{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+{% endblock %}
+
+{% block content %}
+    <section class="franchise-shell">
+        <div class="franchise-layout">
+            <div class="franchise-left-panel">
+                <div class="franchise-list-scroll">
+                    <div class="border-b border-slate-200 bg-white px-5 py-5 sm:px-8">
+                        <p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Ranking franczyz</p>
+                        <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">Znajdź franczyzę</h1>
+                        <p class="mt-2 text-sm leading-6 text-slate-600">Przeglądaj modele biznesowe, porównuj inwestycję i sprawdzaj lokalizacje na mapie.</p>
+
+                        <form method="get" class="mt-5 grid gap-3">
+                            <div class="relative">
+                                <label for="franchise-search" class="sr-only">Szukaj franczyzy</label>
+                                <input id="franchise-search" name="q" value="{{ q }}" type="search" class="block w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 focus:border-brand-500 focus:ring-brand-500" placeholder="Szukaj po nazwie, opisie lub branży">
+                            </div>
+                            <div class="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                                <input name="investment_max" value="{{ investment_max }}" inputmode="numeric" class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 focus:border-brand-500 focus:ring-brand-500" placeholder="Budżet max, np. 150000">
+                                <select name="business_type" class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 focus:border-brand-500 focus:ring-brand-500">
+                                    <option value="">Każdy typ</option>
+                                    {% for value, label in business_type_choices %}
+                                        <option value="{{ value }}" {% if selected_business_type == value %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% if selected_category %}
+                                    <input type="hidden" name="category" value="{{ selected_category }}">
+                                {% endif %}
+                                <button type="submit" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-5 py-3 text-sm font-extrabold text-white hover:bg-slate-800">Szukaj</button>
+                            </div>
+                        </form>
+
+                        <div class="mt-5">
+                            {% include "franchises/partials/category_filters.html" %}
+                        </div>
+                    </div>
+
+                    <div class="space-y-4 px-5 py-5 sm:px-8">
+                        <div class="flex items-center justify-between gap-3">
+                            <p class="text-sm font-bold text-slate-600">{{ franchises|length }} ofert w wynikach</p>
+                            <a href="{% url 'franchises:list' %}" class="text-sm font-bold text-brand-700 hover:text-brand-600">Wyczyść filtry</a>
+                        </div>
+
+                        {% for franchise in franchises %}
+                            {% include "franchises/partials/franchise_card.html" %}
+                        {% empty %}
+                            <div class="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center">
+                                <h2 class="text-xl font-black text-slate-950">Brak wyników</h2>
+                                <p class="mt-2 text-sm leading-6 text-slate-600">Zmień kategorię, budżet lub frazę wyszukiwania.</p>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="franchise-map-panel">
+                {% include "franchises/partials/map.html" %}
+            </div>
+        </div>
+    </section>
+{% endblock %}
+
+{% block extra_body %}
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            window.initFranchiseMap({ mapId: "franchise-map", markerScriptId: "franchise-map-markers" });
+        });
+    </script>
+{% endblock %}

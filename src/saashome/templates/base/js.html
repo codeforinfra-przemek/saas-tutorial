@@ -1,4 +1,6 @@
+{% load static %}
 <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
+<script src="{% static 'js/app.js' %}"></script>
 <script>
     document.addEventListener("DOMContentLoaded", function () {
         const sidebar = document.getElementById("app-sidebar");
@@ -46,7 +48,7 @@
             localStorage.setItem("sidebarCollapsed", isCollapsed ? "true" : "false");
         }
 
-        setCollapsed(localStorage.getItem("sidebarCollapsed") === "true");
+        setCollapsed(localStorage.getItem("sidebarCollapsed") !== "false");
 
         toggle.addEventListener("click", function () {
             setCollapsed(document.body.dataset.sidebarState !== "collapsed");

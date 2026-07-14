@@ -6,10 +6,10 @@
     {% include "base/css.html" %}
     {% block extra_css %}{% endblock %}
 </head>
-<body class="bg-slate-50 text-slate-950 antialiased" data-sidebar-state="expanded">
+<body class="bg-slate-50 text-slate-950 antialiased" data-sidebar-state="collapsed">
     {% include "includes/sidebar.html" %}
 
-    <main id="app-main" class="min-h-screen transition-[margin] duration-300 ease-in-out lg:ml-72">
+    <main id="app-main" class="min-h-screen transition-[margin] duration-300 ease-in-out lg:ml-20">
         <header class="border-b border-slate-200 bg-white/90 backdrop-blur">
             <div class="mx-auto flex w-full max-w-7xl items-center justify-end gap-3 px-5 py-3 sm:px-8 lg:px-10">
                 {% if request.user.is_authenticated %}

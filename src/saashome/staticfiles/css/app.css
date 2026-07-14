@@ -1,0 +1,95 @@
+.franchise-shell {
+    min-height: calc(100vh - 65px);
+}
+
+.franchise-layout {
+    display: grid;
+    grid-template-columns: minmax(360px, 46%) minmax(420px, 1fr);
+    min-height: calc(100vh - 65px);
+}
+
+.franchise-left-panel {
+    min-width: 0;
+    border-right: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+.franchise-list-scroll {
+    max-height: calc(100vh - 65px);
+    overflow-y: auto;
+}
+
+.franchise-map-panel {
+    position: sticky;
+    top: 0;
+    height: calc(100vh - 65px);
+    min-height: 520px;
+    background: #e2e8f0;
+}
+
+.franchise-map {
+    height: 100%;
+    min-height: 520px;
+    width: 100%;
+    z-index: 1;
+}
+
+.franchise-card {
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.franchise-card:hover {
+    border-color: #99f6e4;
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.10);
+    transform: translateY(-1px);
+}
+
+.franchise-filter-pill {
+    white-space: nowrap;
+}
+
+.leaflet-popup-content-wrapper {
+    border-radius: 10px;
+}
+
+.leaflet-popup-content {
+    margin: 12px 14px;
+    min-width: 180px;
+}
+
+@media (max-width: 1023px) {
+    .franchise-layout {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .franchise-left-panel {
+        border-right: 0;
+    }
+
+    .franchise-list-scroll {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .franchise-map-panel {
+        position: relative;
+        height: 420px;
+        min-height: 420px;
+        order: -1;
+    }
+
+    .franchise-map {
+        min-height: 420px;
+    }
+}
+
+@media (max-width: 640px) {
+    .franchise-map-panel,
+    .franchise-map {
+        height: 340px;
+        min-height: 340px;
+    }
+}

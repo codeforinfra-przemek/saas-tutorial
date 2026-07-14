@@ -59,3 +59,32 @@ Run migrations after pulling account changes:
 cd src/saashome
 python manage.py migrate
 ```
+
+## Franchises MVP
+
+The `franchises` app powers the first directory/ranking view:
+
+- list page: `/franchises/`
+- detail page: `/franchises/<slug>/`
+- models:
+  - `FranchiseCategory`
+  - `Franchise`
+  - `FranchiseLocation`
+- filters:
+  - search query: `q`
+  - category slug: `category`
+  - max investment: `investment_max`
+  - business type: `business_type`
+- map:
+  - Leaflet.js loaded from CDN
+  - OpenStreetMap tiles
+  - markers generated from active franchise locations
+
+After pulling franchise changes:
+
+```bash
+cd src/saashome
+python manage.py makemigrations franchises
+python manage.py migrate
+python manage.py runserver
+```
