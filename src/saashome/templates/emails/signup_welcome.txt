@@ -1,0 +1,11 @@
+Czesc {{ user.username }},
+
+witaj w {{ site_name }}.
+
+Twoje konto zostalo utworzone. Bedziemy rozwijac tu ranking franczyz, zapis interesujacych ofert, mape lokalizacji i narzedzia pomagajace szybciej porownywac mozliwosci.
+
+Na teraz mozesz wrocic do strony i obserwowac kolejne etapy budowy produktu.
+
+Pozdrawiamy,
+Zespol {{ site_name }}
+{{ contact_email }}
