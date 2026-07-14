@@ -97,3 +97,31 @@ python manage.py makemigrations franchises
 python manage.py migrate
 python manage.py runserver
 ```
+
+## Leads MVP
+
+The `leads` app stores one-franchise request-info submissions.
+
+- form location: franchise detail page
+- POST endpoint: `/franchises/<slug>/request-info/`
+- admin model: `Lead`
+- status flow:
+  - `new`
+  - `contacted`
+  - `qualified`
+  - `sent_to_vendor`
+  - `rejected`
+  - `closed`
+- attribution captured:
+  - source path
+  - referrer
+  - session key
+  - UTM params
+  - user agent
+  - hashed IP
+
+Optional notification email:
+
+```bash
+LEADS_NOTIFICATION_EMAIL=admin@example.com
+```

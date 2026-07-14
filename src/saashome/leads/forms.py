@@ -1,0 +1,69 @@
+from django import forms
+
+from .models import Lead
+
+
+FIELD_CLASSES = (
+    "block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 "
+    "text-sm text-slate-950 shadow-sm focus:border-brand-500 focus:ring-brand-500"
+)
+
+
+class LeadForm(forms.ModelForm):
+    website = forms.CharField(required=False, widget=forms.HiddenInput)
+
+    class Meta:
+        model = Lead
+        fields = (
+            "name",
+            "email",
+            "phone",
+            "city",
+            "investment_budget",
+            "message",
+            "privacy_consent",
+            "marketing_consent",
+        )
+        labels = {
+            "name": "Imię i nazwisko",
+            "email": "Email",
+            "phone": "Telefon",
+            "city": "Miasto",
+            "investment_budget": "Budżet inwestycyjny",
+            "message": "Wiadomość",
+            "privacy_consent": "Akceptuję kontakt w sprawie tej franczyzy i przetwarzanie danych w tym celu.",
+            "marketing_consent": "Chcę otrzymywać dodatkowe informacje o podobnych franczyzach.",
+        }
+        widgets = {
+            "message": forms.Textarea(
+                attrs={
+                    "rows": 3,
+                    "placeholder": "Napisz krótko, czego chcesz się dowiedzieć.",
+                }
+            ),
+            "investment_budget": forms.NumberInput(attrs={"min": "0", "step": "1000"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["privacy_consent"].required = True
+        for name, field in self.fields.items():
+            if name in ("privacy_consent", "marketing_consent", "website"):
+                continue
+            field.widget.attrs["class"] = FIELD_CLASSES
+
+        self.fields["name"].widget.attrs["placeholder"] = "Jan Kowalski"
+        self.fields["email"].widget.attrs["placeholder"] = "jan@example.com"
+        self.fields["phone"].widget.attrs["placeholder"] = "+48 600 000 000"
+        self.fields["city"].widget.attrs["placeholder"] = "Warszawa"
+        self.fields["investment_budget"].widget.attrs["placeholder"] = "150000"
+
+        checkbox_class = "h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+        self.fields["privacy_consent"].widget.attrs["class"] = checkbox_class
+        self.fields["marketing_consent"].widget.attrs["class"] = checkbox_class
+
+    def clean_website(self):
+        value = self.cleaned_data.get("website", "")
+        if value:
+            raise forms.ValidationError("Invalid submission.")
+        return value

@@ -1,5 +1,8 @@
 from django.db.models import Q
+from django.forms.utils import ErrorList
 from django.shortcuts import get_object_or_404, render
+
+from leads.forms import LeadForm
 
 from .models import Franchise, FranchiseCategory, FranchiseLocation
 
@@ -82,12 +85,24 @@ def franchise_detail_view(request, slug):
     for location in locations:
         location.franchise = franchise
 
+    lead_form_data = request.session.pop("lead_form_data", None)
+    lead_form_errors = request.session.pop("lead_form_errors", None)
+    lead_form = LeadForm(lead_form_data or None)
+    if lead_form_errors:
+        for field_name, errors in lead_form_errors.items():
+            error_messages = [error["message"] for error in errors]
+            if field_name in lead_form.fields:
+                lead_form.errors[field_name] = ErrorList(error_messages)
+            else:
+                lead_form.add_error(None, " ".join(error_messages))
+
     context = {
         "site_name": "SaaS Home",
         "page_title": franchise.name,
         "active_page": "franchises",
         "franchise": franchise,
         "locations": locations,
+        "lead_form": lead_form,
         "map_markers": build_map_markers(locations),
     }
     return render(request, "franchises/detail.html", context)
