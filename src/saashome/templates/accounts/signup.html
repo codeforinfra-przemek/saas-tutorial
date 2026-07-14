@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | Rejestracja{% endblock %}
+
+{% block content %}
+    <section class="mx-auto grid min-h-[calc(100vh-72px)] w-full max-w-7xl place-items-center px-5 py-10 sm:px-8 lg:px-10">
+        <div class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <span class="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-extrabold uppercase tracking-wide text-brand-700">New account</span>
+            <h1 class="mt-5 text-3xl font-black tracking-normal text-slate-950">Załóż konto</h1>
+            <p class="mt-2 text-sm leading-6 text-slate-600">Stwórz konto, żeby później zapisywać ulubione franczyzy i wracać do swoich analiz.</p>
+
+            <form method="post" class="mt-6 space-y-4">
+                {% csrf_token %}
+                {% for field in form %}
+                    <div>
+                        <label for="{{ field.id_for_label }}" class="mb-2 block text-sm font-bold text-slate-950">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <p class="mt-2 text-sm font-semibold text-red-600">{{ field.errors|first }}</p>
+                        {% elif field.help_text %}
+                            <p class="mt-2 text-xs leading-5 text-slate-500">{{ field.help_text }}</p>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+                <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-brand-500 px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-100">Utwórz konto</button>
+            </form>
+
+            <p class="mt-5 text-center text-sm text-slate-600">
+                Masz już konto?
+                <a href="{% url 'accounts:login' %}" class="font-bold text-brand-700 hover:text-brand-600">Zaloguj się</a>
+            </p>
+        </div>
+    </section>
+{% endblock %}

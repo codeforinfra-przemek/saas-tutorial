@@ -62,12 +62,14 @@
                 </svg>
                 <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200">Mapa</span>
             </a>
-            <a href="/visits/" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'visits' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Wizyty">
-                <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
-                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6"/>
-                </svg>
-                <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200">Wizyty</span>
-            </a>
+            {% if request.user.is_staff %}
+                <a href="/visits/" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'visits' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Wizyty">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                        <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6"/>
+                    </svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200">Wizyty</span>
+                </a>
+            {% endif %}
             <a href="/admin/" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950" title="Admin">
                 <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
                     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.5 6h3m-6 4h9m-11 4h13M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/>

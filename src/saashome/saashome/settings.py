@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'accounts',
     'visits',
 ]
 
@@ -102,6 +103,10 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'saashome.urls'
+
+LOGIN_URL = "accounts:login"
+LOGIN_REDIRECT_URL = "home"
+LOGOUT_REDIRECT_URL = "home"
 
 TEMPLATES = [
     {

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | Logowanie{% endblock %}
+
+{% block content %}
+    <section class="mx-auto grid min-h-[calc(100vh-72px)] w-full max-w-7xl place-items-center px-5 py-10 sm:px-8 lg:px-10">
+        <div class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <span class="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-extrabold uppercase tracking-wide text-brand-700">Account</span>
+            <h1 class="mt-5 text-3xl font-black tracking-normal text-slate-950">Zaloguj się</h1>
+            <p class="mt-2 text-sm leading-6 text-slate-600">Wejdź do panelu i wróć do pracy nad rankingiem franczyz.</p>
+
+            {% if form.non_field_errors %}
+                <div class="mt-5 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                    {{ form.non_field_errors|first }}
+                </div>
+            {% endif %}
+
+            <form method="post" class="mt-6 space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label for="{{ form.username.id_for_label }}" class="mb-2 block text-sm font-bold text-slate-950">Nazwa użytkownika</label>
+                    <input type="text" name="{{ form.username.html_name }}" id="{{ form.username.id_for_label }}" value="{{ form.username.value|default:'' }}" autocomplete="username" required class="block w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 shadow-sm focus:border-brand-500 focus:ring-brand-500">
+                </div>
+                <div>
+                    <label for="{{ form.password.id_for_label }}" class="mb-2 block text-sm font-bold text-slate-950">Hasło</label>
+                    <input type="password" name="{{ form.password.html_name }}" id="{{ form.password.id_for_label }}" autocomplete="current-password" required class="block w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 shadow-sm focus:border-brand-500 focus:ring-brand-500">
+                </div>
+                <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-brand-500 px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-100">Zaloguj</button>
+            </form>
+
+            <p class="mt-5 text-center text-sm text-slate-600">
+                Nie masz konta?
+                <a href="{% url 'accounts:signup' %}" class="font-bold text-brand-700 hover:text-brand-600">Załóż konto</a>
+            </p>
+        </div>
+    </section>
+{% endblock %}
