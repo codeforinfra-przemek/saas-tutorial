@@ -18,15 +18,16 @@ class OrganizationMembershipInline(admin.TabularInline):
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "website", "created_at")
+    list_display = ("name", "status", "package_type", "contact_email", "billing_email", "created_at")
+    list_filter = ("status", "package_type", "created_at")
     prepopulated_fields = {"slug": ("name",)}
-    search_fields = ("name", "slug", "website")
+    search_fields = ("name", "contact_email", "billing_email")
     inlines = (OrganizationMembershipInline,)
 
 
 @admin.register(OrganizationMembership)
 class OrganizationMembershipAdmin(admin.ModelAdmin):
-    list_display = ("organization", "user", "role", "created_at")
-    list_filter = ("role",)
+    list_display = ("organization", "user", "role", "is_active", "created_at")
+    list_filter = ("role", "is_active")
     search_fields = ("organization__name", "user__username", "user__email")
     autocomplete_fields = ("organization", "user")

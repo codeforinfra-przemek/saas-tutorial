@@ -11,6 +11,7 @@ class LeadAdmin(admin.ModelAdmin):
         "phone",
         "city",
         "franchise",
+        "visit",
         "investment_budget",
         "status",
         "created_at",
@@ -27,6 +28,7 @@ class LeadAdmin(admin.ModelAdmin):
     list_editable = ("status",)
     readonly_fields = (
         "source_path",
+        "visit",
         "referrer",
         "session_key",
         "utm_source",
@@ -47,6 +49,7 @@ class LeadAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "franchise",
+                    "visit",
                     "user",
                     "name",
                     "email",

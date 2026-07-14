@@ -3,6 +3,8 @@ from django.forms.utils import ErrorList
 from django.shortcuts import get_object_or_404, render
 
 from leads.forms import LeadForm
+from visits.models import Visit
+from visits.services import create_visit
 
 from .models import Franchise, FranchiseCategory, FranchiseLocation
 
@@ -81,6 +83,9 @@ def franchise_detail_view(request, slug):
         slug=slug,
         is_active=True,
     )
+    if request.method == "GET":
+        create_visit(request, page_type=Visit.PAGE_TYPE_FRANCHISE_DETAIL, franchise=franchise)
+
     locations = [location for location in franchise.locations.all() if location.is_active]
     for location in locations:
         location.franchise = franchise

@@ -33,9 +33,32 @@ class UserProfile(models.Model):
 
 
 class Organization(models.Model):
+    STATUS_ACTIVE = "active"
+    STATUS_INACTIVE = "inactive"
+    STATUS_SUSPENDED = "suspended"
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_INACTIVE, "Inactive"),
+        (STATUS_SUSPENDED, "Suspended"),
+    )
+    PACKAGE_FREE = "free"
+    PACKAGE_BASIC = "basic"
+    PACKAGE_PREMIUM = "premium"
+    PACKAGE_ENTERPRISE = "enterprise"
+    PACKAGE_CHOICES = (
+        (PACKAGE_FREE, "Free"),
+        (PACKAGE_BASIC, "Basic"),
+        (PACKAGE_PREMIUM, "Premium"),
+        (PACKAGE_ENTERPRISE, "Enterprise"),
+    )
+
     name = models.CharField(max_length=160)
     slug = models.SlugField(max_length=180, unique=True)
-    website = models.URLField(blank=True)
+    website_url = models.URLField(blank=True)
+    contact_email = models.EmailField(blank=True)
+    billing_email = models.EmailField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    package_type = models.CharField(max_length=20, choices=PACKAGE_CHOICES, default=PACKAGE_FREE)
     description = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -68,7 +91,9 @@ class OrganizationMembership(models.Model):
         related_name="organization_memberships",
     )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_MEMBER)
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = ("organization", "user")

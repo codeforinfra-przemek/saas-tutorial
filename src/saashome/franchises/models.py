@@ -36,6 +36,13 @@ class Franchise(models.Model):
         on_delete=models.PROTECT,
         related_name="franchises",
     )
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="franchises",
+    )
     short_description = models.CharField(max_length=260)
     description = models.TextField(blank=True)
     logo = models.FileField(upload_to="franchise_logos/", blank=True)

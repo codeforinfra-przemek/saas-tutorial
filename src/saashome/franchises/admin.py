@@ -30,6 +30,7 @@ class FranchiseLocationInline(admin.TabularInline):
 class FranchiseAdmin(admin.ModelAdmin):
     list_display = (
         "name",
+        "organization",
         "category",
         "business_type",
         "min_investment",
@@ -41,6 +42,7 @@ class FranchiseAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "category",
+        "organization",
         "business_type",
         "home_based",
         "part_time_possible",
@@ -56,7 +58,7 @@ class FranchiseAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at")
     inlines = [FranchiseLocationInline]
     fieldsets = (
-        (None, {"fields": ("name", "slug", "category", "short_description", "description", "logo", "website_url")}),
+        (None, {"fields": ("name", "slug", "organization", "category", "short_description", "description", "logo", "website_url")}),
         ("Investment", {"fields": ("min_investment", "max_investment", "initial_fee", "royalty_fee_text", "marketing_fee_text")}),
         ("Business model", {"fields": ("business_type", "required_premises", "home_based", "part_time_possible", "training_provided", "financing_available")}),
         ("Scale", {"fields": ("founded_year", "franchising_since", "total_units", "poland_units")}),

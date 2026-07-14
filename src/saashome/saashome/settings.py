@@ -94,6 +94,7 @@ INSTALLED_APPS = [
     'accounts',
     'franchises',
     'leads',
+    'vendor',
     'visits',
 ]
 
@@ -104,7 +105,6 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'allauth.account.middleware.AccountMiddleware',
-    'visits.middleware.VisitTrackingMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import logging
 from smtplib import SMTPException
 
@@ -9,28 +7,13 @@ from django.core.mail import BadHeaderError, send_mail
 from django.shortcuts import get_object_or_404, redirect
 
 from franchises.models import Franchise
+from visits.models import Visit, VisitEvent
+from visits.services import ensure_session_key, get_client_ip, hash_ip
 
 from .forms import LeadForm
 
 
 logger = logging.getLogger(__name__)
-
-
-def get_client_ip(request):
-    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "")
-
-
-def hash_ip(ip_address):
-    if not ip_address:
-        return ""
-    return hmac.new(
-        settings.SECRET_KEY.encode("utf-8"),
-        ip_address.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
 
 
 def send_lead_notification(lead):
@@ -57,6 +40,29 @@ def send_lead_notification(lead):
     )
 
 
+def get_related_visit(request, franchise):
+    session_key = ensure_session_key(request)
+    visit_id = request.session.get("last_franchise_visit_id")
+    if visit_id:
+        visit = Visit.objects.filter(
+            id=visit_id,
+            franchise=franchise,
+            session_key=session_key,
+        ).first()
+        if visit:
+            return visit
+
+    return (
+        Visit.objects.filter(
+            session_key=session_key,
+            franchise=franchise,
+            page_type=Visit.PAGE_TYPE_FRANCHISE_DETAIL,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
 def create_lead_view(request, slug):
     franchise = get_object_or_404(Franchise, slug=slug, is_active=True)
 
@@ -74,14 +80,15 @@ def create_lead_view(request, slug):
         messages.error(request, "Sprawdź formularz kontaktowy i spróbuj ponownie.")
         return redirect(franchise.get_absolute_url() + "#request-info")
 
-    if not request.session.session_key:
-        request.session.create()
+    session_key = ensure_session_key(request)
+    related_visit = get_related_visit(request, franchise)
 
     lead = form.save(commit=False)
     lead.franchise = franchise
+    lead.visit = related_visit
     if request.user.is_authenticated:
         lead.user = request.user
-    lead.session_key = request.session.session_key or ""
+    lead.session_key = session_key
     lead.source_path = request.get_full_path()
     lead.referrer = request.META.get("HTTP_REFERER", "")
     lead.user_agent = request.META.get("HTTP_USER_AGENT", "")
@@ -92,6 +99,14 @@ def create_lead_view(request, slug):
     lead.utm_content = request.GET.get("utm_content", request.POST.get("utm_content", ""))
     lead.utm_term = request.GET.get("utm_term", request.POST.get("utm_term", ""))
     lead.save()
+
+    if related_visit:
+        VisitEvent.objects.create(
+            visit=related_visit,
+            event_type=VisitEvent.EVENT_SUBMIT_LEAD_FORM,
+            value=lead.email,
+            metadata={"lead_id": lead.id},
+        )
 
     try:
         send_lead_notification(lead)

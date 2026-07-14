@@ -82,6 +82,14 @@
                     <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Admin</span>
                 </a>
             {% endif %}
+            {% if request.user.is_authenticated %}
+                <a href="{% url 'vendor:dashboard' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'vendor' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Vendor dashboard">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                        <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 20V6a1 1 0 0 1 1-1h7v15M4 20h16M9 9h1m-1 4h1m6-5h3a1 1 0 0 1 1 1v11m-4-7h1m-1 4h1"/>
+                    </svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Vendor</span>
+                </a>
+            {% endif %}
         </nav>
 
         <div class="sidebar-card mt-auto lg:hidden rounded-lg border border-slate-200 bg-slate-50 p-4 transition-opacity duration-200">

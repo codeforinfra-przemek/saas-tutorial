@@ -10,7 +10,7 @@ def visit_list_view(request):
     if not request.user.is_staff:
         raise PermissionDenied
 
-    visits = Visit.objects.select_related("user")[:100]
+    visits = Visit.objects.select_related("user", "franchise").prefetch_related("events")[:100]
     context = {
         "site_name": "SaaS Home",
         "page_title": "Wizyty",

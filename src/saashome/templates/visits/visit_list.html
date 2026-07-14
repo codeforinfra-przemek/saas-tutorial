@@ -34,9 +34,9 @@
                             <td class="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{{ visit.created_at|date:"Y-m-d H:i:s" }}</td>
                             <td class="px-4 py-3">{{ visit.page_type|default:"-" }}</td>
                             <td class="px-4 py-3">
-                                <div class="max-w-[240px] truncate" title="{{ visit.full_url }}">{{ visit.url_path }}</div>
+                                <div class="max-w-[240px] truncate" title="{{ visit.full_path }}">{{ visit.path }}</div>
                             </td>
-                            <td class="px-4 py-3">{{ visit.franchise_id|default:"-" }}</td>
+                            <td class="px-4 py-3">{{ visit.franchise|default:"-" }}</td>
                             <td class="px-4 py-3">
                                 {% if visit.user %}
                                     {{ visit.user }}
