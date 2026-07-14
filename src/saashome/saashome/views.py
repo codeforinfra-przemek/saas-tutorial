@@ -1,10 +1,17 @@
+import logging
+from smtplib import SMTPException
+
 from django.conf import settings
 from django.contrib import messages
+from django.core.mail import BadHeaderError
 from django.core.mail import EmailMultiAlternatives
 from django.shortcuts import render
 from django.template.loader import render_to_string
 
 from .forms import ContactRequestForm
+
+
+logger = logging.getLogger(__name__)
 
 
 def send_contact_invitation_email(email):
@@ -35,12 +42,20 @@ def home_view(request):
         contact_form = ContactRequestForm(request.POST)
         if contact_form.is_valid():
             email = contact_form.cleaned_data["email"]
-            send_contact_invitation_email(email)
-            messages.success(
-                request,
-                "Wyslalismy zaproszenie. Sprawdz skrzynke email.",
-            )
-            contact_form = ContactRequestForm()
+            try:
+                send_contact_invitation_email(email)
+            except (BadHeaderError, OSError, SMTPException):
+                logger.exception("Could not send contact invitation email.")
+                messages.error(
+                    request,
+                    "Nie udalo sie wyslac maila. Sprobuj ponownie za chwile.",
+                )
+            else:
+                messages.success(
+                    request,
+                    "Wyslalismy zaproszenie. Sprawdz skrzynke email.",
+                )
+                contact_form = ContactRequestForm()
         else:
             messages.error(
                 request,
