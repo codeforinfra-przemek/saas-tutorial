@@ -38,9 +38,8 @@ class VisitTrackingMiddleware:
         if not self.should_track(request, response):
             return
 
-        session_key = self.get_session_key(request)
-
         try:
+            session_key = self.get_session_key(request)
             Visit.objects.create(
                 url_path=request.path,
                 full_url=request.build_absolute_uri(),
@@ -53,14 +52,17 @@ class VisitTrackingMiddleware:
                 ip_hash=self.get_ip_hash(request),
             )
         except DatabaseError:
-            # The course project may run before migrations are applied.
+            # Analytics must never make the page unavailable.
             pass
 
     def get_session_key(self, request):
         if not hasattr(request, "session"):
             return ""
         if not request.session.session_key:
-            request.session.create()
+            try:
+                request.session.create()
+            except DatabaseError:
+                return ""
         return request.session.session_key or ""
 
     def get_page_type(self, request):
