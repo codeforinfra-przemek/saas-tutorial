@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load socialaccount %}
+{% load widget_tweaks %}
 
 {% block title %}{{ block.super }} | Zaloguj się{% endblock %}
 
@@ -21,13 +22,13 @@
                     {% if field.name != "remember" %}
                         <div>
                             <label for="{{ field.id_for_label }}" class="mb-2 block text-sm font-bold text-slate-950">{{ field.label }}</label>
-                            {{ field }}
+                            {% render_field field class="block w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:ring-brand-500" %}
                             {% for error in field.errors %}<p class="mt-2 text-sm font-semibold text-red-600">{{ error }}</p>{% endfor %}
                         </div>
                     {% endif %}
                 {% endfor %}
                 {% if form.remember %}
-                    <label class="flex items-center gap-2 text-sm font-semibold text-slate-600">{{ form.remember }} Zapamiętaj mnie</label>
+                    <label class="flex items-center gap-2 text-sm font-semibold text-slate-600">{% render_field form.remember class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" %} Zapamiętaj mnie</label>
                 {% endif %}
                 <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100">Zaloguj się przez email</button>
             </form>

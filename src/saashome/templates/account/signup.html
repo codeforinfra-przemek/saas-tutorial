@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load socialaccount %}
+{% load widget_tweaks %}
 
 {% block title %}{{ block.super }} | Załóż konto{% endblock %}
 
@@ -20,9 +21,8 @@
                 {% for field in form %}
                     <div>
                         <label for="{{ field.id_for_label }}" class="mb-2 block text-sm font-bold text-slate-950">{{ field.label }}</label>
-                        {{ field }}
+                        {% render_field field class="block w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:ring-brand-500" %}
                         {% for error in field.errors %}<p class="mt-2 text-sm font-semibold text-red-600">{{ error }}</p>{% endfor %}
-                        {% if field.help_text %}<p class="mt-2 text-xs leading-5 text-slate-500">{{ field.help_text }}</p>{% endif %}
                     </div>
                 {% endfor %}
                 <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100">Załóż konto przez email</button>
