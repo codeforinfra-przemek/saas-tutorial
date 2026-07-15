@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.db.models import Count, Q
 from django.forms.utils import ErrorList
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.text import slugify
 
 from billing.services import apply_promotion_flags, get_organization_plan
@@ -53,6 +54,8 @@ def build_map_markers(locations):
                 "city": location.city,
                 "category": franchise.category.name,
                 "categoryColor": category_visual(franchise.category.slug)["color"],
+                "locationName": location.name,
+                "locationType": location.location_type,
                 "url": franchise.get_absolute_url(),
             }
         )
@@ -118,7 +121,7 @@ def filtered_directory_franchises(filters):
 
 def franchise_list_view(request):
     q = request.GET.get("q", "").strip()
-    category_slug = request.GET.get("category", "").strip()
+    selected_categories = list(dict.fromkeys(filter(None, request.GET.getlist("category"))))
     investment_max = request.GET.get("investment_max", "").strip()
 
     franchises = (
@@ -134,8 +137,8 @@ def franchise_list_view(request):
             | Q(description__icontains=q)
         )
 
-    if category_slug:
-        franchises = franchises.filter(category__slug=category_slug, category__is_active=True)
+    if selected_categories:
+        franchises = franchises.filter(category__slug__in=selected_categories, category__is_active=True)
 
     if investment_max:
         try:
@@ -156,13 +159,29 @@ def franchise_list_view(request):
     ).select_related("franchise", "franchise__category")
 
     categories = decorate_categories(FranchiseCategory.objects.filter(is_active=True))
+    filter_params = request.GET.copy()
+    filter_params.pop("category", None)
+    category_filter_reset_url = reverse("franchises:list")
+    if filter_params:
+        category_filter_reset_url = f"{category_filter_reset_url}?{filter_params.urlencode()}"
+
+    for category in categories:
+        category_params = filter_params.copy()
+        updated_categories = [slug for slug in selected_categories if slug != category.slug]
+        if category.slug not in selected_categories:
+            updated_categories.append(category.slug)
+        for slug in updated_categories:
+            category_params.appendlist("category", slug)
+        category.filter_url = f"{reverse('franchises:list')}?{category_params.urlencode()}"
+
     context = {
         "site_name": "SaaS Home",
         "page_title": "Franczyzy",
         "active_page": "franchises",
         "franchises": franchises,
         "categories": categories,
-        "selected_category": category_slug,
+        "selected_categories": selected_categories,
+        "category_filter_reset_url": category_filter_reset_url,
         "q": q,
         "investment_max": investment_max,
         "map_markers": build_map_markers(active_locations),

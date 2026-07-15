@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load franchise_formatters %}
 
 {% block title %}{{ block.super }} | Porównaj franczyzy{% endblock %}
 
@@ -76,7 +77,15 @@
 
         <div class="directory-selection-bar mt-4 hidden items-center justify-between gap-3 rounded-lg border border-brand-200 bg-brand-50 p-3" data-directory-selection-bar aria-live="polite">
             <p class="text-sm font-bold text-brand-900"><span data-directory-selection-count>0</span> z 4 wybranych do porównania</p>
-            <button type="button" data-directory-compare class="inline-flex min-h-10 items-center justify-center rounded-lg bg-brand-700 px-4 py-2 text-sm font-extrabold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-slate-300">Porównaj wybrane</button>
+            <div class="flex flex-wrap items-center justify-end gap-2">
+                <button type="button" data-directory-select-visible class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-brand-200 bg-white text-brand-800 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50" title="Zaznacz kolejne widoczne oferty, maksymalnie 4" aria-label="Zaznacz kolejne widoczne oferty, maksymalnie 4">
+                    <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 11l3 3L22 4M3 4h3M3 10h3M3 16h3M3 22h3"/></svg>
+                </button>
+                <button type="button" data-directory-clear-selection class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-brand-200 bg-white text-brand-800 hover:bg-brand-100" title="Odznacz wszystkie franczyzy" aria-label="Odznacz wszystkie franczyzy">
+                    <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6 6 18"/></svg>
+                </button>
+                <button type="button" data-directory-compare class="inline-flex min-h-10 items-center justify-center rounded-lg bg-brand-700 px-4 py-2 text-sm font-extrabold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-slate-300">Porównaj wybrane</button>
+            </div>
         </div>
 
         <div class="mobile-records mt-4">
@@ -87,12 +96,12 @@
                         <label class="flex shrink-0 items-center gap-2 text-xs font-bold text-slate-700"><input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" data-directory-select value="{{ franchise.id }}"> Porównaj</label>
                     </div>
                     <dl class="mobile-record-grid">
-                        <div><dt>Inwestycja</dt><dd>{% if franchise.min_investment %}od {{ franchise.min_investment|floatformat:0 }} zł{% else %}b/d{% endif %}</dd></div>
-                        <div><dt>Sieć w PL</dt><dd>{{ franchise.poland_units|default:"b/d" }}</dd></div>
+                        <div><dt>Inwestycja</dt><dd>{% if franchise.min_investment %}od {{ franchise.min_investment|grouped_number }} zł{% else %}b/d{% endif %}</dd></div>
+                        <div><dt>Sieć w PL</dt><dd>{% if franchise.poland_units is not None %}{{ franchise.poland_units|grouped_number }}{% else %}b/d{% endif %}</dd></div>
                         <div><dt>Wzrost 1 rok</dt><dd>{% if franchise.unit_growth_percent_1y is not None %}{{ franchise.unit_growth_percent_1y|floatformat:1 }}%{% else %}b/d{% endif %}</dd></div>
                         <div><dt>Zwrot</dt><dd>{% if franchise.estimated_payback_months %}{{ franchise.estimated_payback_months }} mies.{% else %}b/d{% endif %}</dd></div>
-                        <div><dt>Przychód dojrzałej placówki</dt><dd>{% if franchise.mature_unit_revenue_annual %}{{ franchise.mature_unit_revenue_annual|floatformat:0 }} zł{% else %}b/d{% endif %}</dd></div>
-                        <div><dt>Kapitał płynny</dt><dd>{% if franchise.liquid_capital_required %}{{ franchise.liquid_capital_required|floatformat:0 }} zł{% else %}b/d{% endif %}</dd></div>
+                        <div><dt>Przychód dojrzałej placówki</dt><dd>{% if franchise.mature_unit_revenue_annual %}{{ franchise.mature_unit_revenue_annual|grouped_number }} zł{% else %}b/d{% endif %}</dd></div>
+                        <div><dt>Kapitał płynny</dt><dd>{% if franchise.liquid_capital_required %}{{ franchise.liquid_capital_required|grouped_number }} zł{% else %}b/d{% endif %}</dd></div>
                     </dl>
                 </article>
             {% empty %}
@@ -120,10 +129,10 @@
                         <tr class="border-t border-slate-200 hover:bg-slate-50" data-directory-franchise-id="{{ franchise.id }}" data-sort-name="{{ franchise.name|lower }}" data-sort-investment="{{ franchise.min_investment|default_if_none:'' }}" data-sort-liquid="{{ franchise.liquid_capital_required|default_if_none:'' }}" data-sort-network="{{ franchise.poland_units|default_if_none:'' }}" data-sort-growth="{{ franchise.unit_growth_percent_1y|default_if_none:'' }}" data-sort-revenue="{{ franchise.mature_unit_revenue_annual|default_if_none:'' }}" data-sort-payback="{{ franchise.estimated_payback_months|default_if_none:'' }}" data-sort-term="{{ franchise.franchise_term_years|default_if_none:'' }}" data-sort-data="{{ franchise.get_data_status_display|lower }}">
                             <td class="px-4 py-3"><label class="inline-flex items-center"><input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" data-directory-select value="{{ franchise.id }}"><span class="sr-only">Wybierz {{ franchise.name }} do porównania</span></label></td>
                             <td class="px-4 py-3"><a href="{{ franchise.get_absolute_url }}" class="font-black text-slate-950 hover:text-brand-700">{{ franchise.name }}</a><p class="mt-1 text-xs text-slate-500">{{ franchise.category.name }} · {{ franchise.get_business_type_display }}</p></td>
-                            <td class="px-4 py-3">{% if franchise.min_investment %}{{ franchise.min_investment|floatformat:0 }} - {{ franchise.max_investment|floatformat:0 }} zł{% else %}b/d{% endif %}</td>
-                            <td class="px-4 py-3">{% if franchise.liquid_capital_required %}{{ franchise.liquid_capital_required|floatformat:0 }} zł{% else %}b/d{% endif %}</td>
-                            <td class="px-4 py-3">{{ franchise.poland_units|default:"b/d" }} / {% if franchise.unit_growth_percent_1y is not None %}{{ franchise.unit_growth_percent_1y|floatformat:1 }}%{% else %}b/d{% endif %}</td>
-                            <td class="px-4 py-3">{% if franchise.mature_unit_revenue_annual %}<p class="font-bold text-slate-950">{{ franchise.mature_unit_revenue_annual|floatformat:0 }} zł</p><p class="mt-1 text-xs text-slate-500">przychód / rok</p>{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3">{% if franchise.min_investment %}{{ franchise.min_investment|grouped_number }} - {{ franchise.max_investment|grouped_number }} zł{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3">{% if franchise.liquid_capital_required %}{{ franchise.liquid_capital_required|grouped_number }} zł{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3">{% if franchise.poland_units is not None %}{{ franchise.poland_units|grouped_number }}{% else %}b/d{% endif %} / {% if franchise.unit_growth_percent_1y is not None %}{{ franchise.unit_growth_percent_1y|floatformat:1 }}%{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3">{% if franchise.mature_unit_revenue_annual %}<p class="font-bold text-slate-950">{{ franchise.mature_unit_revenue_annual|grouped_number }} zł</p><p class="mt-1 text-xs text-slate-500">przychód / rok</p>{% else %}b/d{% endif %}</td>
                             <td class="px-4 py-3">{% if franchise.estimated_payback_months %}{{ franchise.estimated_payback_months }} mies.{% else %}b/d{% endif %}</td>
                             <td class="px-4 py-3">{% if franchise.franchise_term_years %}{{ franchise.franchise_term_years }} lat{% else %}b/d{% endif %}</td>
                             <td class="px-4 py-3"><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">{{ franchise.get_data_status_display }}</span></td>

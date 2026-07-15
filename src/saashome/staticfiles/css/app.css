@@ -1,3 +1,24 @@
+.sidebar-collapse-toggle {
+    left: 5rem;
+    transform: translateX(-50%);
+    transition: left 300ms ease-in-out, background-color 160ms ease-in-out, color 160ms ease-in-out;
+}
+
+body[data-sidebar-state="expanded"] .sidebar-collapse-toggle {
+    left: 18rem;
+}
+
+@media (min-width: 1024px) {
+    .sidebar-brand-mark {
+        flex: 0 0 2.5rem;
+        min-width: 2.5rem;
+    }
+
+    body[data-sidebar-state="collapsed"] .sidebar-brand-label {
+        width: 0;
+    }
+}
+
 .bg-brand-50 { background-color: #effdf6; }
 .bg-brand-500 { background-color: #19a974; }
 .bg-brand-700 { background-color: #0f704f; }

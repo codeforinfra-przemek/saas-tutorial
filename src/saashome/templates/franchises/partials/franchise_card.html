@@ -1,3 +1,4 @@
+{% load franchise_formatters %}
 <article
     class="franchise-card cursor-pointer rounded-lg p-3.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
     data-franchise-card
@@ -36,7 +37,7 @@
             <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Inwestycja</p>
             <p class="mt-0.5 font-black text-slate-950">
                 {% if franchise.min_investment %}
-                    od {{ franchise.min_investment|floatformat:0 }} zł
+                    od {{ franchise.min_investment|grouped_number }} zł
                 {% else %}
                     b/d
                 {% endif %}
@@ -48,7 +49,7 @@
         </div>
         <div class="rounded-lg bg-slate-50 p-2">
             <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Jednostki PL</p>
-            <p class="mt-0.5 font-black text-slate-950">{{ franchise.poland_units|default:"b/d" }}</p>
+            <p class="mt-0.5 font-black text-slate-950">{% if franchise.poland_units is not None %}{{ franchise.poland_units|grouped_number }}{% else %}b/d{% endif %}</p>
         </div>
     </div>
 

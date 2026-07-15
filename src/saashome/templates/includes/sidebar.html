@@ -11,32 +11,31 @@
     </svg>
 </button>
 
+<button
+    id="sidebar-collapse-toggle"
+    type="button"
+    class="sidebar-collapse-toggle fixed top-6 z-50 hidden h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-brand-500 lg:inline-flex"
+    aria-label="Rozwiń menu"
+    aria-expanded="false"
+    title="Rozwiń menu"
+>
+    <span id="sidebar-collapse-icon" class="text-lg font-bold leading-none" aria-hidden="true">&gt;</span>
+</button>
+
 <aside
     id="app-sidebar"
     class="fixed left-0 top-0 z-40 h-dvh w-[min(86vw,320px)] -translate-x-full overflow-x-hidden border-r border-slate-200 bg-white transition-[transform,width] duration-300 ease-in-out lg:h-screen lg:w-20 lg:translate-x-0"
     aria-label="Główna nawigacja"
 >
     <div id="sidebar-inner" class="flex h-full flex-col overflow-y-auto px-5 py-6 transition-[padding] duration-300 ease-in-out lg:px-3">
-        <button
-            id="sidebar-collapse-toggle"
-            type="button"
-            class="absolute -right-4 top-6 hidden h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-brand-500 lg:inline-flex"
-            aria-label="Rozwiń menu"
-            aria-expanded="false"
-        >
-            <svg id="sidebar-collapse-icon" class="h-4 w-4 rotate-180 transition-transform duration-300" aria-hidden="true" fill="none" viewBox="0 0 24 24">
-                <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m15 19-7-7 7-7"/>
-            </svg>
-        </button>
-
         <button type="button" data-drawer-hide="app-sidebar" aria-controls="app-sidebar" class="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-950 lg:hidden">
             <span class="sr-only">Zamknij menu</span>
             <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M6 6l12 12M18 6 6 18"/></svg>
         </button>
 
         <a href="/" data-drawer-hide="app-sidebar" class="sidebar-link mb-8 flex items-center gap-3 pr-10 lg:justify-center lg:pr-0">
-            <span class="grid h-10 w-10 place-items-center rounded-lg bg-brand-500 text-base font-black text-white">S</span>
-            <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">
+            <span class="sidebar-brand-mark grid h-10 w-10 place-items-center rounded-lg bg-brand-500 text-base font-black text-white">S</span>
+            <span class="sidebar-brand-label sidebar-label overflow-hidden whitespace-nowrap transition-[opacity,width] duration-200 lg:pointer-events-none lg:opacity-0">
                 <span class="block text-lg font-black tracking-normal text-slate-950">{{ site_name|default:"SaaS Home" }}</span>
                 <span class="block text-xs font-semibold uppercase tracking-wide text-brand-700">franchise intelligence</span>
             </span>

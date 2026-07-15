@@ -1,15 +1,16 @@
 <div class="franchise-filter-scroll flex w-full max-w-full gap-2 overflow-x-auto pb-1">
     <a
-        href="{% url 'franchises:list' %}{% if q or investment_max %}?{% if q %}q={{ q|urlencode }}{% endif %}{% if q and investment_max %}&{% endif %}{% if investment_max %}investment_max={{ investment_max|urlencode }}{% endif %}{% endif %}"
-        class="franchise-filter-pill rounded-full border px-3 py-1.5 text-xs font-bold {% if not selected_category %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}"
+        href="{{ category_filter_reset_url }}"
+        class="franchise-filter-pill rounded-full border px-3 py-1.5 text-xs font-bold {% if not selected_categories %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}"
     >
         Wszystkie
     </a>
     {% for category in categories %}
         <a
-            href="{% url 'franchises:list' %}?{% if q %}q={{ q|urlencode }}&{% endif %}category={{ category.slug|urlencode }}{% if investment_max %}&investment_max={{ investment_max|urlencode }}{% endif %}"
-            class="franchise-filter-pill franchise-filter-pill--category rounded-full border px-3 py-1.5 text-xs font-bold {% if selected_category == category.slug %}is-selected{% endif %}"
+            href="{{ category.filter_url }}"
+            class="franchise-filter-pill franchise-filter-pill--category rounded-full border px-3 py-1.5 text-xs font-bold {% if category.slug in selected_categories %}is-selected{% endif %}"
             style="--category-color: {{ category.ui_color }}; --category-tint: {{ category.ui_tint }};"
+            aria-pressed="{% if category.slug in selected_categories %}true{% else %}false{% endif %}"
         >
             <span class="franchise-filter-pill__dot" aria-hidden="true"></span>
             {{ category.name }}

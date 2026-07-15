@@ -137,6 +137,16 @@ cd src/saashome
 python manage.py enrich_mcdonalds_reference
 ```
 
+To populate the catalogue/map presentation data without creating leads, visits, or subscriptions:
+
+```bash
+cd src/saashome
+python manage.py seed_directory_coverage
+```
+
+The command adds 20 additional real-brand examples and gives every seeded profile 10 locations
+labelled as demonstrative map areas. They are intentionally not presented as verified operating locations.
+
 ### Franchise data and comparison
 
 The public comparison table is available at `/franchises/directory/`. It has no

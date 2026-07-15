@@ -450,6 +450,7 @@ class Command(BaseCommand):
                 "is_featured": True,
             },
         ]
+        data.extend(self.additional_demo_franchises())
         # The financial and network values below are deliberately marked as demo.
         # They make the MVP usable without presenting illustrative figures as a brand disclosure.
         for index, item in enumerate(data):
@@ -498,7 +499,7 @@ class Command(BaseCommand):
             defaults = {
                 "name": item["name"],
                 "category": categories[item["category"]],
-                "organization": organizations[item["organization"]],
+                "organization": organizations.get(item["organization"]) if item.get("organization") else None,
                 "short_description": item["short_description"],
                 "description": item["description"],
                 "website_url": item["website_url"],
@@ -552,6 +553,78 @@ class Command(BaseCommand):
             franchises[slug] = franchise
         return franchises
 
+    def additional_demo_franchises(self):
+        """Real brand examples with illustrative MVP figures, not commercial offers."""
+        specs = [
+            ("abc", "abc", "convenience", "https://www.sklepyabc.pl", "Sieć niezależnych sklepów spożywczych."),
+            ("groszek", "Groszek", "convenience", "https://www.groszek.com.pl", "Format sklepu spożywczego dla lokalnych przedsiębiorców."),
+            ("lewiatan", "Lewiatan", "convenience", "https://www.lewiatan.pl", "Sieć sklepów działających pod wspólną marką."),
+            ("delikatesy-centrum", "Delikatesy Centrum", "convenience", "https://www.delikatesycentrum.pl", "Format supermarketu i sklepu osiedlowego."),
+            ("chorten", "Chorten", "convenience", "https://chorten.pl", "Sieć sklepów spożywczych o lokalnym charakterze."),
+            ("lodolandia", "Lodolandia", "gastronomia", "https://lodolandia.pl", "Sezonowy format street food z lodami i goframi."),
+            ("bafra-kebab", "Bafra Kebab", "gastronomia", "https://franczyza.bafrakebab.pl", "Format szybkiej gastronomii z obsługą na miejscu i na wynos."),
+            ("fit-cake", "Fit Cake", "gastronomia", "https://fitcake.pl", "Kawiarniany koncept z ofertą bez cukru i dietetyczną."),
+            ("makarun", "Makarun", "gastronomia", "https://makarun.pl", "Szybka gastronomia oparta o dania makaronowe."),
+            ("crazy-bubble", "Crazy Bubble", "gastronomia", "https://crazybubble.pl", "Punkt napojów bubble tea w formacie retail i food court."),
+            ("kolacz-na-okraglo", "Kołacz na Okrągło", "gastronomia", "https://kolaczonakraglo.pl", "Punkt street food z ofertą słodkich wypieków."),
+            ("lody-bonano", "Lody Bonano", "gastronomia", "https://lodybonano.pl", "Sezonowy punkt gastronomiczny z lodami i deserami."),
+            ("early-stage", "Early Stage", "edukacja", "https://franczyza.earlystage.pl", "Szkoła języka angielskiego rozwijana w modelu franczyzowym."),
+            ("helen-doron", "Helen Doron English", "edukacja", "https://www.helendoron.pl", "Edukacyjny format nauki języka angielskiego dla dzieci."),
+            ("mathriders", "MathRiders", "edukacja", "https://mathriders.pl", "Sieć zajęć matematycznych dla dzieci."),
+            ("edukido", "Edukido", "edukacja", "https://edukido.com.pl", "Mobilny format zajęć edukacyjnych bez stałego lokalu."),
+            ("depilconcept", "DepilConcept", "uslugi", "https://depilconcept.pl", "Salon usług beauty w modelu sieciowym."),
+            ("yasumi", "YASUMI", "uslugi", "https://yasumi.pl", "Gabinet kosmetyczny i spa w formacie usługowym."),
+            ("5asec", "5 a sec", "uslugi", "https://www.5asec.pl", "Usługi pralnicze dla klientów indywidualnych i biznesowych."),
+            ("36-minut", "36 MINUT", "fitness", "https://36minut.pl", "Kameralny format treningowy i klub fitness."),
+        ]
+        category_defaults = {
+            "convenience": (90000, 380000, 14000, 130, Franchise.BUSINESS_TYPE_STATIONARY),
+            "gastronomia": (120000, 850000, 35000, 95, Franchise.BUSINESS_TYPE_HYBRID),
+            "edukacja": (30000, 180000, 5000, 80, Franchise.BUSINESS_TYPE_HYBRID),
+            "uslugi": (180000, 720000, 40000, 55, Franchise.BUSINESS_TYPE_STATIONARY),
+            "fitness": (550000, 1600000, 75000, 45, Franchise.BUSINESS_TYPE_STATIONARY),
+        }
+        profiles = []
+        for index, (slug, name, category, website_url, short_description) in enumerate(specs):
+            min_investment, max_investment, initial_fee, poland_units, business_type = category_defaults[category]
+            profiles.append(
+                {
+                    "slug": slug,
+                    "name": name,
+                    "category": category,
+                    "organization": None,
+                    "short_description": short_description,
+                    "description": (
+                        f"{name} to przykład realnie istniejącej marki użyty do rozbudowy katalogu MVP. "
+                        "Opis, wartości inwestycyjne, wskaźniki sieci i lokalizacje w tym profilu są demonstracyjne "
+                        "i nie stanowią oferty franczyzodawcy."
+                    ),
+                    "website_url": website_url,
+                    "min_investment": str(min_investment),
+                    "max_investment": str(max_investment),
+                    "initial_fee": str(initial_fee),
+                    "royalty_fee_text": "dane demonstracyjne - sprawdź warunki marki",
+                    "marketing_fee_text": "dane demonstracyjne - sprawdź warunki marki",
+                    "business_type": business_type,
+                    "required_premises": "format i lokalizacja do potwierdzenia z franczyzodawcą",
+                    "home_based": category == "edukacja",
+                    "part_time_possible": category == "edukacja",
+                    "training_provided": True,
+                    "financing_available": category in {"convenience", "gastronomia", "fitness"},
+                    "founded_year": None,
+                    "franchising_since": None,
+                    "total_units": poland_units,
+                    "poland_units": poland_units,
+                    "rank_score": str(72 + (index % 16)),
+                    "popularity_score": str(65 + (index % 20)),
+                    "editor_rating": "0.00",
+                    "is_verified": False,
+                    "is_promoted": False,
+                    "is_featured": False,
+                }
+            )
+        return profiles
+
     def seed_locations(self, franchises):
         cities = [
             ("Warszawa", "Mazowieckie", Decimal("52.229700"), Decimal("21.012200")),
@@ -560,26 +633,44 @@ class Command(BaseCommand):
             ("Poznań", "Wielkopolskie", Decimal("52.406400"), Decimal("16.925200")),
             ("Gdańsk", "Pomorskie", Decimal("54.352000"), Decimal("18.646600")),
             ("Łódź", "Łódzkie", Decimal("51.759200"), Decimal("19.456000")),
+            ("Białystok", "Podlaskie", Decimal("53.132500"), Decimal("23.168800")),
+            ("Lublin", "Lubelskie", Decimal("51.246500"), Decimal("22.568400")),
+            ("Szczecin", "Zachodniopomorskie", Decimal("53.428500"), Decimal("14.552800")),
+            ("Katowice", "Śląskie", Decimal("50.264900"), Decimal("19.023800")),
+            ("Rzeszów", "Podkarpackie", Decimal("50.041300"), Decimal("21.999000")),
+            ("Bydgoszcz", "Kujawsko-pomorskie", Decimal("53.123500"), Decimal("18.008400")),
+            ("Olsztyn", "Warmińsko-mazurskie", Decimal("53.778400"), Decimal("20.480100")),
+            ("Kielce", "Świętokrzyskie", Decimal("50.866100"), Decimal("20.628600")),
+            ("Opole", "Opolskie", Decimal("50.675100"), Decimal("17.921300")),
+            ("Zielona Góra", "Lubuskie", Decimal("51.935600"), Decimal("15.506200")),
+            ("Kalisz", "Wielkopolskie", Decimal("51.761100"), Decimal("18.091000")),
+            ("Płock", "Mazowieckie", Decimal("52.546300"), Decimal("19.706500")),
+            ("Nowy Sącz", "Małopolskie", Decimal("49.617500"), Decimal("20.715300")),
+            ("Kołobrzeg", "Zachodniopomorskie", Decimal("54.175900"), Decimal("15.583300")),
         ]
         for index, franchise in enumerate(franchises.values()):
-            if franchise.slug == "mcdonalds" and franchise.data_status == Franchise.DATA_STATUS_EDITOR_VERIFIED:
-                FranchiseLocation.objects.filter(
-                    franchise=franchise,
-                    address__startswith="Demo street",
-                ).delete()
-                continue
-            for offset in range(2):
-                city, region, lat, lng = cities[(index + offset) % len(cities)]
+            FranchiseLocation.objects.filter(
+                franchise=franchise,
+                address__startswith="Demo street",
+            ).delete()
+            FranchiseLocation.objects.filter(
+                franchise=franchise,
+                address__startswith="Punkt demonstracyjny na mapie",
+            ).delete()
+            for offset in range(10):
+                city, region, lat, lng = cities[(index * 3 + offset * 2) % len(cities)]
+                latitude_offset = Decimal(((index + offset) % 5) - 2) / Decimal("1000")
+                longitude_offset = Decimal(((index * 2 + offset) % 5) - 2) / Decimal("1000")
                 FranchiseLocation.objects.update_or_create(
                     franchise=franchise,
-                    name=f"{franchise.name} - {city}",
+                    name=f"Obszar demonstracyjny - {city}",
                     defaults={
-                        "location_type": FranchiseLocation.LOCATION_TYPE_EXISTING_UNIT if offset == 0 else FranchiseLocation.LOCATION_TYPE_AVAILABLE_AREA,
+                        "location_type": FranchiseLocation.LOCATION_TYPE_AVAILABLE_AREA,
                         "city": city,
                         "region": region,
-                        "address": f"Demo street {index + offset + 1}",
-                        "latitude": lat + Decimal(index) / Decimal("1000"),
-                        "longitude": lng + Decimal(offset) / Decimal("1000"),
+                        "address": "Punkt demonstracyjny na mapie - nie jest potwierdzoną placówką.",
+                        "latitude": lat + latitude_offset,
+                        "longitude": lng + longitude_offset,
                         "is_active": True,
                     },
                 )

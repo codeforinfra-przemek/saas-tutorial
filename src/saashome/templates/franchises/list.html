@@ -27,9 +27,9 @@
                         </div>
                         <input id="franchise-search" name="q" value="{{ q }}" type="search" class="block min-h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 pl-10 text-sm font-semibold text-slate-950 shadow-sm focus:border-brand-500 focus:bg-white focus:ring-brand-500" placeholder="Szukaj franczyzy po nazwie">
                     </div>
-                    {% if selected_category %}
-                        <input type="hidden" name="category" value="{{ selected_category }}">
-                    {% endif %}
+                    {% for category_slug in selected_categories %}
+                        <input type="hidden" name="category" value="{{ category_slug }}">
+                    {% endfor %}
                     {% if investment_max %}
                         <input type="hidden" name="investment_max" value="{{ investment_max }}">
                     {% endif %}
@@ -45,9 +45,9 @@
                         {% if q %}
                             <input type="hidden" name="q" value="{{ q }}">
                         {% endif %}
-                        {% if selected_category %}
-                            <input type="hidden" name="category" value="{{ selected_category }}">
-                        {% endif %}
+                        {% for category_slug in selected_categories %}
+                            <input type="hidden" name="category" value="{{ category_slug }}">
+                        {% endfor %}
                         <input name="investment_max" value="{{ investment_max }}" inputmode="numeric" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-950 focus:border-brand-500 focus:ring-brand-500" placeholder="Budżet max, np. 150000">
                         <button type="submit" class="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">Filtruj</button>
                     </form>

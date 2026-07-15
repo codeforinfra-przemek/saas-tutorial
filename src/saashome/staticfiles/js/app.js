@@ -62,8 +62,11 @@ window.initFranchiseMap = function initFranchiseMap(options) {
                 "<strong>" + escapeHtml(marker.franchiseName || "") + "</strong>",
                 "<span>" + escapeHtml(marker.city || "") + "</span>",
                 "<small>" + escapeHtml(marker.category || "") + "</small>",
+                marker.locationType === "available_area"
+                    ? "<small>Obszar demonstracyjny - niepotwierdzona placówka</small>"
+                    : "",
                 '<a href="' + encodeURI(marker.url || "#") + '">Zobacz szczegóły</a>',
-            ].join("<br>");
+            ].filter(Boolean).join("<br>");
 
             L.marker([marker.lat, marker.lng], { icon: markerIcon(marker.categoryColor) }).addTo(markerLayer).bindPopup(popup);
             bounds.push([marker.lat, marker.lng]);
@@ -138,6 +141,8 @@ function initDirectorySelection() {
     const selectionBar = directory.querySelector("[data-directory-selection-bar]");
     const selectionCount = directory.querySelector("[data-directory-selection-count]");
     const compareButton = directory.querySelector("[data-directory-compare]");
+    const selectVisibleButton = directory.querySelector("[data-directory-select-visible]");
+    const clearSelectionButton = directory.querySelector("[data-directory-clear-selection]");
     let selectedIds = [];
 
     try {
@@ -193,7 +198,26 @@ function initDirectorySelection() {
         if (compareButton) {
             compareButton.disabled = selectedIds.length < 2;
         }
+        if (selectVisibleButton) {
+            selectVisibleButton.disabled = selectedIds.length >= maximumSelections || availableFranchiseIds().every(function (id) {
+                return selectedIds.indexOf(id) !== -1;
+            });
+        }
         reorderSelectedRecords();
+    }
+
+    function availableFranchiseIds() {
+        const ids = [];
+        const records = directory.querySelectorAll(".desktop-table [data-directory-franchise-id], .mobile-records [data-directory-franchise-id]");
+
+        records.forEach(function (record) {
+            const id = String(record.dataset.directoryFranchiseId || "");
+            if (id && ids.indexOf(id) === -1) {
+                ids.push(id);
+            }
+        });
+
+        return ids;
     }
 
     directory.querySelectorAll("[data-directory-select]").forEach(function (checkbox) {
@@ -221,6 +245,30 @@ function initDirectorySelection() {
                 return;
             }
             window.location.href = directory.dataset.compareUrl + "?ids=" + encodeURIComponent(selectedIds.join(","));
+        });
+    }
+
+    if (selectVisibleButton) {
+        selectVisibleButton.addEventListener("click", function () {
+            availableFranchiseIds().some(function (id) {
+                if (selectedIds.length >= maximumSelections) {
+                    return true;
+                }
+                if (selectedIds.indexOf(id) === -1) {
+                    selectedIds.push(id);
+                }
+                return false;
+            });
+            persistSelection();
+            updateSelectionUI();
+        });
+    }
+
+    if (clearSelectionButton) {
+        clearSelectionButton.addEventListener("click", function () {
+            selectedIds = [];
+            persistSelection();
+            updateSelectionUI();
         });
     }
 

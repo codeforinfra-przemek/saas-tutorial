@@ -25,9 +25,12 @@
             sidebarInner.classList.toggle("lg:px-5", !isCollapsed);
             main.classList.toggle("lg:ml-20", isCollapsed);
             main.classList.toggle("lg:ml-72", !isCollapsed);
-            icon.classList.toggle("rotate-180", isCollapsed);
+            if (icon) {
+                icon.textContent = isCollapsed ? ">" : "<";
+            }
             toggle.setAttribute("aria-expanded", String(!isCollapsed));
             toggle.setAttribute("aria-label", isCollapsed ? "Rozwiń menu" : "Zwiń menu");
+            toggle.setAttribute("title", isCollapsed ? "Rozwiń menu" : "Zwiń menu");
 
             labels.forEach(function (label) {
                 label.classList.toggle("lg:opacity-0", isCollapsed);

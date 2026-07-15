@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load franchise_formatters %}
 
 {% block title %}{{ block.super }} | Porównanie franczyz{% endblock %}
 
@@ -35,14 +36,14 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">
-                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Inwestycja początkowa</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.min_investment %}{{ franchise.min_investment|floatformat:0 }} - {{ franchise.max_investment|floatformat:0 }} zł{% else %}b/d{% endif %}</td>{% endfor %}</tr>
-                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Kapitał płynny</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.liquid_capital_required %}{{ franchise.liquid_capital_required|floatformat:0 }} zł{% else %}b/d{% endif %}</td>{% endfor %}</tr>
-                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Placówki w Polsce</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.poland_units|default:"b/d" }}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Inwestycja początkowa</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.min_investment %}{{ franchise.min_investment|grouped_number }} - {{ franchise.max_investment|grouped_number }} zł{% else %}b/d{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Kapitał płynny</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.liquid_capital_required %}{{ franchise.liquid_capital_required|grouped_number }} zł{% else %}b/d{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Placówki w Polsce</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.poland_units is not None %}{{ franchise.poland_units|grouped_number }}{% else %}b/d{% endif %}</td>{% endfor %}</tr>
                         <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Wzrost sieci w 1 rok</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.unit_growth_percent_1y is not None %}{{ franchise.unit_growth_percent_1y|floatformat:1 }}%{% else %}b/d{% endif %}</td>{% endfor %}</tr>
-                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Przychód dojrzałej placówki</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.mature_unit_revenue_annual %}{{ franchise.mature_unit_revenue_annual|floatformat:0 }} zł / rok{% else %}b/d{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Przychód dojrzałej placówki</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.mature_unit_revenue_annual %}{{ franchise.mature_unit_revenue_annual|grouped_number }} zł / rok{% else %}b/d{% endif %}</td>{% endfor %}</tr>
                         <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Szacowany zwrot</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.estimated_payback_months %}{{ franchise.estimated_payback_months }} mies.{% else %}b/d{% endif %}</td>{% endfor %}</tr>
                         <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Czas trwania umowy</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.franchise_term_years %}{{ franchise.franchise_term_years }} lat{% else %}b/d{% endif %}</td>{% endfor %}</tr>
-                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Opłata wstępna</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.initial_fee %}{{ franchise.initial_fee|floatformat:0 }} zł{% else %}b/d{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Opłata wstępna</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.initial_fee %}{{ franchise.initial_fee|grouped_number }} zł{% else %}b/d{% endif %}</td>{% endfor %}</tr>
                         <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Opłata bieżąca</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.royalty_fee_text|default:"b/d" }}</td>{% endfor %}</tr>
                         <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Finansowanie</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.financing_available %}Dostępne{% else %}b/d{% endif %}</td>{% endfor %}</tr>
                         <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Status danych</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.get_data_status_display }}</td>{% endfor %}</tr>
