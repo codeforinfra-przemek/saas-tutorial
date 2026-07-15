@@ -30,6 +30,21 @@ window.initFranchiseMap = function initFranchiseMap(options) {
     }).addTo(map);
 
     const markerLayer = L.layerGroup().addTo(map);
+    const markerIcons = {};
+
+    function markerIcon(color) {
+        const markerColor = /^#[0-9a-f]{6}$/i.test(color || "") ? color : "#475569";
+        if (!markerIcons[markerColor]) {
+            markerIcons[markerColor] = L.divIcon({
+                className: "category-map-marker",
+                html: '<span class="category-map-marker__pin" style="--marker-color: ' + markerColor + '"></span>',
+                iconSize: [30, 38],
+                iconAnchor: [15, 36],
+                popupAnchor: [0, -34],
+            });
+        }
+        return markerIcons[markerColor];
+    }
 
     function renderMarkers(franchiseSlug) {
         const visibleMarkers = franchiseSlug
@@ -50,7 +65,7 @@ window.initFranchiseMap = function initFranchiseMap(options) {
                 '<a href="' + encodeURI(marker.url || "#") + '">Zobacz szczegóły</a>',
             ].join("<br>");
 
-            L.marker([marker.lat, marker.lng]).addTo(markerLayer).bindPopup(popup);
+            L.marker([marker.lat, marker.lng], { icon: markerIcon(marker.categoryColor) }).addTo(markerLayer).bindPopup(popup);
             bounds.push([marker.lat, marker.lng]);
         });
 

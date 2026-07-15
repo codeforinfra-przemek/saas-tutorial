@@ -176,6 +176,64 @@ button {
     white-space: nowrap;
 }
 
+.franchise-filter-pill--category {
+    align-items: center;
+    border-color: var(--category-color);
+    color: var(--category-color);
+    display: inline-flex;
+    gap: 0.4rem;
+    background: var(--category-tint);
+}
+
+.franchise-filter-pill--category:hover {
+    border-color: var(--category-color);
+    background: var(--category-tint);
+    color: var(--category-color);
+    filter: brightness(0.97);
+}
+
+.franchise-filter-pill--category.is-selected {
+    background: var(--category-color);
+    border-color: var(--category-color);
+    color: #ffffff;
+}
+
+.franchise-filter-pill__dot {
+    background: currentColor;
+    border-radius: 999px;
+    height: 0.5rem;
+    width: 0.5rem;
+}
+
+.category-map-marker {
+    background: transparent;
+    border: 0;
+}
+
+.category-map-marker__pin {
+    background: var(--marker-color);
+    border: 2px solid #ffffff;
+    border-radius: 50% 50% 50% 0;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+    display: block;
+    height: 28px;
+    position: relative;
+    transform: rotate(-45deg);
+    width: 28px;
+}
+
+.category-map-marker__pin::after {
+    background: #ffffff;
+    border-radius: 999px;
+    content: "";
+    height: 8px;
+    left: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%) rotate(45deg);
+    width: 8px;
+}
+
 .franchise-filter-scroll {
     -ms-overflow-style: none;
     scrollbar-width: none;

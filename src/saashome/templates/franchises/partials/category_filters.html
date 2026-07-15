@@ -8,8 +8,10 @@
     {% for category in categories %}
         <a
             href="{% url 'franchises:list' %}?{% if q %}q={{ q|urlencode }}&{% endif %}category={{ category.slug|urlencode }}{% if investment_max %}&investment_max={{ investment_max|urlencode }}{% endif %}"
-            class="franchise-filter-pill rounded-full border px-3 py-1.5 text-xs font-bold {% if selected_category == category.slug %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}"
+            class="franchise-filter-pill franchise-filter-pill--category rounded-full border px-3 py-1.5 text-xs font-bold {% if selected_category == category.slug %}is-selected{% endif %}"
+            style="--category-color: {{ category.ui_color }}; --category-tint: {{ category.ui_tint }};"
         >
+            <span class="franchise-filter-pill__dot" aria-hidden="true"></span>
             {{ category.name }}
         </a>
     {% endfor %}

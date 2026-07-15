@@ -16,6 +16,7 @@ from visits.services import create_visit
 
 from .forms import FranchiseLocationForm, FranchiseManagementForm
 from .models import Franchise, FranchiseCategory, FranchiseLocation
+from .presentation import category_visual, decorate_categories
 
 def management_context(**kwargs):
     context = {
@@ -51,6 +52,7 @@ def build_map_markers(locations):
                 "franchiseSlug": franchise.slug,
                 "city": location.city,
                 "category": franchise.category.name,
+                "categoryColor": category_visual(franchise.category.slug)["color"],
                 "url": franchise.get_absolute_url(),
             }
         )
@@ -153,12 +155,13 @@ def franchise_list_view(request):
         is_active=True,
     ).select_related("franchise", "franchise__category")
 
+    categories = decorate_categories(FranchiseCategory.objects.filter(is_active=True))
     context = {
         "site_name": "SaaS Home",
         "page_title": "Franczyzy",
         "active_page": "franchises",
         "franchises": franchises,
-        "categories": FranchiseCategory.objects.filter(is_active=True),
+        "categories": categories,
         "selected_category": category_slug,
         "q": q,
         "investment_max": investment_max,
