@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | Internal analytics{% endblock %}
+
+{% block topbar_title %}
+    <div>
+        <p class="text-sm font-black text-slate-950">Internal analytics</p>
+        <p class="hidden text-xs font-semibold text-slate-500 sm:block">Global platform reporting</p>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8 lg:px-10">
+        <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+                <h1 class="text-3xl font-black tracking-normal text-slate-950">Internal analytics</h1>
+                <p class="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+                    Data range: {{ analytics.start_date|date:"Y-m-d" }} - {{ analytics.end_date|date:"Y-m-d" }}
+                </p>
+            </div>
+            <div class="flex gap-2">
+                {% for option in range_options %}
+                    <a href="?range={{ option }}" class="rounded-lg border px-3 py-2 text-sm font-bold {% if analytics.range_key == option %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:bg-slate-100{% endif %}">{{ option }}</a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {% include "analytics/partials/metric_card.html" with label="Profile views" value=analytics.visits_count %}
+            {% include "analytics/partials/metric_card.html" with label="Leads" value=analytics.leads_count %}
+            {% include "analytics/partials/metric_card.html" with label="Conversion rate" value=analytics.conversion_rate|stringformat:"s"|add:"%" %}
+        </div>
+
+        <div class="grid gap-5 lg:grid-cols-2">
+            <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-black text-slate-950">Top franchises by views</h2>
+                <div class="mt-4 space-y-3">
+                    {% for row in analytics.top_franchises_by_views %}
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-3 last:border-b-0 last:pb-0">
+                            <span class="text-sm font-semibold text-slate-700">{{ row.franchise__name|default:"Unknown" }}</span>
+                            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{{ row.count }}</span>
+                        </div>
+                    {% empty %}<p class="text-sm text-slate-500">No data.</p>{% endfor %}
+                </div>
+            </section>
+
+            <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-black text-slate-950">Top franchises by leads</h2>
+                <div class="mt-4 space-y-3">
+                    {% for row in analytics.top_franchises_by_leads %}
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-3 last:border-b-0 last:pb-0">
+                            <span class="text-sm font-semibold text-slate-700">{{ row.franchise__name|default:"Unknown" }}</span>
+                            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{{ row.count }}</span>
+                        </div>
+                    {% empty %}<p class="text-sm text-slate-500">No data.</p>{% endfor %}
+                </div>
+            </section>
+
+            <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-black text-slate-950">Top categories by leads</h2>
+                <div class="mt-4 space-y-3">
+                    {% for row in analytics.top_categories_by_leads %}
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-3 last:border-b-0 last:pb-0">
+                            <span class="text-sm font-semibold text-slate-700">{{ row.franchise__category__name|default:"Unknown" }}</span>
+                            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{{ row.count }}</span>
+                        </div>
+                    {% empty %}<p class="text-sm text-slate-500">No data.</p>{% endfor %}
+                </div>
+            </section>
+
+            <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-black text-slate-950">Top organizations by leads</h2>
+                <div class="mt-4 space-y-3">
+                    {% for row in analytics.top_organizations_by_leads %}
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-3 last:border-b-0 last:pb-0">
+                            <span class="text-sm font-semibold text-slate-700">{{ row.franchise__organization__name|default:"Unassigned" }}</span>
+                            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{{ row.count }}</span>
+                        </div>
+                    {% empty %}<p class="text-sm text-slate-500">No data.</p>{% endfor %}
+                </div>
+            </section>
+
+            {% include "analytics/partials/lead_status_breakdown.html" %}
+            {% include "analytics/partials/traffic_sources.html" %}
+        </div>
+    </section>
+{% endblock %}

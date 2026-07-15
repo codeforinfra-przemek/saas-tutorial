@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     'allauth.account',
     'allauth.socialaccount',
     'accounts',
+    'analytics',
     'billing',
     'content',
     'franchises',

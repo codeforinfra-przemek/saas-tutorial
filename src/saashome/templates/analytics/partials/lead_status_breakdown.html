@@ -1,0 +1,13 @@
+<section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <h2 class="text-lg font-black text-slate-950">Lead status</h2>
+    <div class="mt-4 space-y-3">
+        {% for row in analytics.status_breakdown %}
+            <div class="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 last:border-b-0 last:pb-0">
+                <span class="text-sm font-semibold text-slate-700">{{ row.status|default:"Unknown" }}</span>
+                <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{{ row.count }}</span>
+            </div>
+        {% empty %}
+            <p class="text-sm text-slate-500">No lead statuses in this range.</p>
+        {% endfor %}
+    </div>
+</section>

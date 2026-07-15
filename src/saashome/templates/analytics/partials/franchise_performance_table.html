@@ -1,0 +1,37 @@
+<section class="rounded-lg border border-slate-200 bg-white shadow-sm">
+    <div class="border-b border-slate-200 px-5 py-4">
+        <h2 class="text-lg font-black text-slate-950">Franchise performance</h2>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full min-w-[820px] text-left text-sm">
+            <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                    <th class="px-4 py-3">Franchise</th>
+                    <th class="px-4 py-3">Views</th>
+                    <th class="px-4 py-3">Leads</th>
+                    <th class="px-4 py-3">Conversion</th>
+                    <th class="px-4 py-3">New</th>
+                    <th class="px-4 py-3">Qualified</th>
+                    <th class="px-4 py-3">Last lead</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in analytics.franchise_rows %}
+                    <tr class="border-t border-slate-200">
+                        <td class="px-4 py-3 font-bold text-slate-950">{{ row.franchise.name }}</td>
+                        <td class="px-4 py-3">{{ row.views_count }}</td>
+                        <td class="px-4 py-3">{{ row.leads_count }}</td>
+                        <td class="px-4 py-3">{{ row.conversion_rate }}%</td>
+                        <td class="px-4 py-3">{{ row.new_leads_count }}</td>
+                        <td class="px-4 py-3">{{ row.qualified_leads_count }}</td>
+                        <td class="px-4 py-3">{{ row.last_lead_at|date:"Y-m-d H:i"|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr class="border-t border-slate-200">
+                        <td colspan="7" class="px-4 py-6 text-slate-500">No franchise data for this range.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
