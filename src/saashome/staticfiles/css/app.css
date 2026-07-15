@@ -135,6 +135,14 @@ button {
     display: none;
 }
 
+.franchise-lead-panel > summary::-webkit-details-marker {
+    display: none;
+}
+
+.franchise-lead-panel[open] > summary > span {
+    transform: rotate(45deg);
+}
+
 .franchise-filter-pill {
     white-space: nowrap;
 }

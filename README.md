@@ -119,6 +119,26 @@ python manage.py migrate
 python manage.py runserver
 ```
 
+### Franchise data and comparison
+
+The public comparison table is available at `/franchises/directory/`. It has no
+map and supports filters for investment, business type, network growth, mature
+unit revenue, payback period, financing, and financial-data availability.
+
+The extended profile fields are inspired by the US Franchise Disclosure Document
+(FDD): investment and fees, support/territory, agreement terms, financial
+performance, and outlet statistics. This project is not a substitute for a
+legal FDD or investment advice. Seeded metrics use `data_status=demo` and must
+never be presented as official brand disclosures.
+
+To add the schema and populate the local development database:
+
+```bash
+cd src/saashome
+python manage.py migrate
+python manage.py seed_demo_data
+```
+
 ## Leads MVP
 
 The `leads` app stores one-franchise request-info submissions.

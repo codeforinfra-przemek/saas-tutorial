@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | Porównaj franczyzy{% endblock %}
+
+{% block topbar_title %}
+    <div class="min-w-0">
+        <p class="text-[10px] font-extrabold uppercase tracking-wide text-brand-700">Ranking franczyz</p>
+        <h1 class="truncate text-lg font-black tracking-normal text-slate-950 sm:text-xl">Porównaj dane</h1>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8 lg:px-10">
+        <div class="mb-5 flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+                <p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Katalog analityczny</p>
+                <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">Porównaj franczyzy bez mapy</h1>
+                <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">Filtruj oferty po parametrach inwestycyjnych, skali sieci i danych operacyjnych.</p>
+            </div>
+            <a href="{% url 'franchises:list' %}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Widok mapy</a>
+        </div>
+
+        <form method="get" class="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-4">
+            <div class="xl:col-span-2">
+                <label for="directory-q" class="mb-1 block text-xs font-bold uppercase text-slate-500">Szukaj</label>
+                <input id="directory-q" name="q" value="{{ filters.q }}" type="search" class="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950" placeholder="Nazwa, opis lub segment">
+            </div>
+            <div>
+                <label for="directory-category" class="mb-1 block text-xs font-bold uppercase text-slate-500">Kategoria</label>
+                <select id="directory-category" name="category" class="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950">
+                    <option value="">Wszystkie</option>
+                    {% for category in categories %}<option value="{{ category.slug }}" {% if filters.category == category.slug %}selected{% endif %}>{{ category.name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="directory-type" class="mb-1 block text-xs font-bold uppercase text-slate-500">Format</label>
+                <select id="directory-type" name="business_type" class="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950">
+                    <option value="">Wszystkie</option>
+                    {% for value, label in business_type_choices %}<option value="{{ value }}" {% if filters.business_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="directory-investment" class="mb-1 block text-xs font-bold uppercase text-slate-500">Inwestycja maks.</label>
+                <input id="directory-investment" name="investment_max" value="{{ filters.investment_max|default_if_none:'' }}" inputmode="numeric" class="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950" placeholder="np. 500000">
+            </div>
+            <div>
+                <label for="directory-growth" class="mb-1 block text-xs font-bold uppercase text-slate-500">Wzrost sieci min.</label>
+                <input id="directory-growth" name="growth_min" value="{{ filters.growth_min|default_if_none:'' }}" inputmode="decimal" class="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950" placeholder="np. 5 (%)">
+            </div>
+            <div>
+                <label for="directory-revenue" class="mb-1 block text-xs font-bold uppercase text-slate-500">Przychód roczny min.</label>
+                <input id="directory-revenue" name="revenue_min" value="{{ filters.revenue_min|default_if_none:'' }}" inputmode="numeric" class="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950" placeholder="np. 1000000">
+            </div>
+            <div>
+                <label for="directory-payback" class="mb-1 block text-xs font-bold uppercase text-slate-500">Zwrot maks.</label>
+                <input id="directory-payback" name="payback_max" value="{{ filters.payback_max }}" inputmode="numeric" class="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950" placeholder="miesiące">
+            </div>
+            <label class="flex min-h-10 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700">
+                <input type="checkbox" name="financing" value="yes" {% if filters.financing == 'yes' %}checked{% endif %} class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                Finansowanie dostępne
+            </label>
+            <label class="flex min-h-10 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700">
+                <input type="checkbox" name="financials" value="yes" {% if filters.financials == 'yes' %}checked{% endif %} class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                Dane finansowe
+            </label>
+            <div class="flex items-end gap-2 xl:col-span-2">
+                <button type="submit" class="inline-flex min-h-10 flex-1 items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800">Zastosuj filtry</button>
+                <a href="{% url 'franchises:directory' %}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Reset</a>
+            </div>
+        </form>
+
+        <div class="mt-5 flex items-center justify-between gap-3">
+            <p class="text-sm font-bold text-slate-600">{{ franchises|length }} ofert spełnia wybrane kryteria</p>
+            <p class="text-xs text-slate-500">Kwoty są prezentowane w PLN.</p>
+        </div>
+
+        <div class="mobile-records mt-4">
+            {% for franchise in franchises %}
+                <article class="mobile-record">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0"><a href="{{ franchise.get_absolute_url }}" class="font-black text-slate-950">{{ franchise.name }}</a><p class="mt-1 text-xs text-slate-500">{{ franchise.category.name }}</p></div>
+                        <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-black text-slate-700">{{ franchise.get_data_status_display }}</span>
+                    </div>
+                    <dl class="mobile-record-grid">
+                        <div><dt>Inwestycja</dt><dd>{% if franchise.min_investment %}od {{ franchise.min_investment|floatformat:0 }} zł{% else %}b/d{% endif %}</dd></div>
+                        <div><dt>Sieć w PL</dt><dd>{{ franchise.poland_units|default:"b/d" }}</dd></div>
+                        <div><dt>Wzrost 1 rok</dt><dd>{% if franchise.unit_growth_percent_1y is not None %}{{ franchise.unit_growth_percent_1y|floatformat:1 }}%{% else %}b/d{% endif %}</dd></div>
+                        <div><dt>Zwrot</dt><dd>{% if franchise.estimated_payback_months %}{{ franchise.estimated_payback_months }} mies.{% else %}b/d{% endif %}</dd></div>
+                        <div><dt>Przychód dojrzałej placówki</dt><dd>{% if franchise.mature_unit_revenue_annual %}{{ franchise.mature_unit_revenue_annual|floatformat:0 }} zł{% else %}b/d{% endif %}</dd></div>
+                        <div><dt>Kapitał płynny</dt><dd>{% if franchise.liquid_capital_required %}{{ franchise.liquid_capital_required|floatformat:0 }} zł{% else %}b/d{% endif %}</dd></div>
+                    </dl>
+                </article>
+            {% empty %}
+                <p class="mobile-record text-sm text-slate-500">Brak ofert dla tych filtrów.</p>
+            {% endfor %}
+        </div>
+
+        <div class="desktop-table table-scroll mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+            <table class="w-full min-w-[1180px] text-left text-sm text-slate-600">
+                <thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Franczyza</th><th class="px-4 py-3">Inwestycja</th><th class="px-4 py-3">Kapitał płynny</th><th class="px-4 py-3">PL / wzrost</th><th class="px-4 py-3">Dojrzała placówka</th><th class="px-4 py-3">Zwrot</th><th class="px-4 py-3">Umowa</th><th class="px-4 py-3">Dane</th></tr></thead>
+                <tbody>
+                    {% for franchise in franchises %}
+                        <tr class="border-t border-slate-200 hover:bg-slate-50">
+                            <td class="px-4 py-3"><a href="{{ franchise.get_absolute_url }}" class="font-black text-slate-950 hover:text-brand-700">{{ franchise.name }}</a><p class="mt-1 text-xs text-slate-500">{{ franchise.category.name }} · {{ franchise.get_business_type_display }}</p></td>
+                            <td class="px-4 py-3">{% if franchise.min_investment %}{{ franchise.min_investment|floatformat:0 }} - {{ franchise.max_investment|floatformat:0 }} zł{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3">{% if franchise.liquid_capital_required %}{{ franchise.liquid_capital_required|floatformat:0 }} zł{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3">{{ franchise.poland_units|default:"b/d" }} / {% if franchise.unit_growth_percent_1y is not None %}{{ franchise.unit_growth_percent_1y|floatformat:1 }}%{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3">{% if franchise.mature_unit_revenue_annual %}<p class="font-bold text-slate-950">{{ franchise.mature_unit_revenue_annual|floatformat:0 }} zł</p><p class="mt-1 text-xs text-slate-500">przychód / rok</p>{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3">{% if franchise.estimated_payback_months %}{{ franchise.estimated_payback_months }} mies.{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3">{% if franchise.franchise_term_years %}{{ franchise.franchise_term_years }} lat{% else %}b/d{% endif %}</td>
+                            <td class="px-4 py-3"><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">{{ franchise.get_data_status_display }}</span></td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="8" class="px-4 py-8 text-center text-slate-500">Brak ofert dla tych filtrów.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% endblock %}

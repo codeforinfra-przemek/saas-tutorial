@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from django.contrib import messages
 from django.db.models import Count, Q
 from django.forms.utils import ErrorList
@@ -55,6 +57,63 @@ def build_map_markers(locations):
     return markers
 
 
+def get_decimal_filter(value):
+    if not value:
+        return None
+    try:
+        return Decimal(value)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def directory_filters_from_request(request):
+    return {
+        "q": request.GET.get("q", "").strip(),
+        "category": request.GET.get("category", "").strip(),
+        "investment_max": get_decimal_filter(request.GET.get("investment_max", "").strip()),
+        "business_type": request.GET.get("business_type", "").strip(),
+        "growth_min": get_decimal_filter(request.GET.get("growth_min", "").strip()),
+        "revenue_min": get_decimal_filter(request.GET.get("revenue_min", "").strip()),
+        "payback_max": request.GET.get("payback_max", "").strip(),
+        "financing": request.GET.get("financing", "").strip(),
+        "financials": request.GET.get("financials", "").strip(),
+    }
+
+
+def filtered_directory_franchises(filters):
+    franchises = Franchise.objects.filter(is_active=True).select_related("category", "organization")
+
+    if filters["q"]:
+        franchises = franchises.filter(
+            Q(name__icontains=filters["q"])
+            | Q(short_description__icontains=filters["q"])
+            | Q(description__icontains=filters["q"])
+        )
+    if filters["category"]:
+        franchises = franchises.filter(category__slug=filters["category"], category__is_active=True)
+    if filters["investment_max"] is not None:
+        franchises = franchises.filter(
+            Q(min_investment__lte=filters["investment_max"])
+            | Q(max_investment__lte=filters["investment_max"])
+        )
+    if filters["business_type"]:
+        franchises = franchises.filter(business_type=filters["business_type"])
+    if filters["growth_min"] is not None:
+        franchises = franchises.filter(unit_growth_percent_1y__gte=filters["growth_min"])
+    if filters["revenue_min"] is not None:
+        franchises = franchises.filter(mature_unit_revenue_annual__gte=filters["revenue_min"])
+    if filters["payback_max"]:
+        try:
+            franchises = franchises.filter(estimated_payback_months__lte=int(filters["payback_max"]))
+        except ValueError:
+            pass
+    if filters["financing"] == "yes":
+        franchises = franchises.filter(financing_available=True)
+    if filters["financials"] == "yes":
+        franchises = franchises.filter(financial_performance_disclosed=True)
+    return apply_promotion_flags(franchises)
+
+
 def franchise_list_view(request):
     q = request.GET.get("q", "").strip()
     category_slug = request.GET.get("category", "").strip()
@@ -107,6 +166,22 @@ def franchise_list_view(request):
         "saved_franchise_ids": get_saved_franchise_ids_for_user(request.user),
     }
     return render(request, "franchises/list.html", context)
+
+
+def franchise_directory_view(request):
+    filters = directory_filters_from_request(request)
+    franchises = filtered_directory_franchises(filters)
+    context = {
+        "site_name": "SaaS Home",
+        "page_title": "Porównaj franczyzy",
+        "active_page": "franchises",
+        "franchises": franchises,
+        "categories": FranchiseCategory.objects.filter(is_active=True),
+        "business_type_choices": Franchise.BUSINESS_TYPE_CHOICES,
+        "filters": filters,
+        "saved_franchise_ids": get_saved_franchise_ids_for_user(request.user),
+    }
+    return render(request, "franchises/directory.html", context)
 
 
 def franchise_detail_view(request, slug):

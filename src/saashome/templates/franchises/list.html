@@ -61,7 +61,10 @@
                     <div class="space-y-3 px-4 py-4 sm:px-6">
                         <div class="flex items-center justify-between gap-3">
                             <p class="text-xs font-bold text-slate-600">{{ franchises|length }} ofert w wynikach</p>
-                            <a href="{% url 'franchises:list' %}" class="text-xs font-bold text-brand-700 hover:text-brand-600">Wyczyść filtry</a>
+                            <div class="flex items-center gap-3">
+                                <a href="{% url 'franchises:directory' %}" class="text-xs font-bold text-slate-700 hover:text-brand-700">Tabela danych</a>
+                                <a href="{% url 'franchises:list' %}" class="text-xs font-bold text-brand-700 hover:text-brand-600">Wyczyść filtry</a>
+                            </div>
                         </div>
 
                         {% for franchise in franchises %}

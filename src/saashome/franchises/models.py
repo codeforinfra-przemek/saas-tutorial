@@ -23,6 +23,29 @@ FRANCHISE_VENDOR_EDITABLE_FIELDS = (
     "franchising_since",
     "total_units",
     "poland_units",
+    "franchised_units",
+    "company_owned_units",
+    "units_opened_last_year",
+    "units_closed_last_year",
+    "units_transferred_last_year",
+    "unit_growth_percent_1y",
+    "liquid_capital_required",
+    "net_worth_required",
+    "franchise_term_years",
+    "renewal_term_years",
+    "estimated_payback_months",
+    "mature_unit_revenue_annual",
+    "mature_unit_operating_profit_annual",
+    "mature_unit_count",
+    "typical_unit_size_min_sqm",
+    "typical_unit_size_max_sqm",
+    "typical_staff_count",
+    "territory_type",
+    "financial_performance_disclosed",
+    "financial_performance_note",
+    "financial_data_as_of",
+    "data_status",
+    "data_source_url",
 )
 
 
@@ -51,6 +74,24 @@ class Franchise(models.Model):
         (BUSINESS_TYPE_MOBILE, "Mobile"),
         (BUSINESS_TYPE_ONLINE, "Online"),
         (BUSINESS_TYPE_HYBRID, "Hybrid"),
+    ]
+    TERRITORY_EXCLUSIVE = "exclusive"
+    TERRITORY_PROTECTED = "protected"
+    TERRITORY_NON_EXCLUSIVE = "non_exclusive"
+    TERRITORY_NOT_DISCLOSED = "not_disclosed"
+    TERRITORY_TYPE_CHOICES = [
+        (TERRITORY_EXCLUSIVE, "Wyłączna"),
+        (TERRITORY_PROTECTED, "Chroniona"),
+        (TERRITORY_NON_EXCLUSIVE, "Niewyłączna"),
+        (TERRITORY_NOT_DISCLOSED, "Do ustalenia w umowie"),
+    ]
+    DATA_STATUS_DEMO = "demo"
+    DATA_STATUS_VENDOR = "vendor"
+    DATA_STATUS_EDITOR_VERIFIED = "editor_verified"
+    DATA_STATUS_CHOICES = [
+        (DATA_STATUS_DEMO, "Dane demonstracyjne"),
+        (DATA_STATUS_VENDOR, "Dane przekazane przez franczyzodawcę"),
+        (DATA_STATUS_EDITOR_VERIFIED, "Dane zweryfikowane przez redakcję"),
     ]
 
     name = models.CharField(max_length=180)
@@ -90,6 +131,29 @@ class Franchise(models.Model):
     franchising_since = models.PositiveIntegerField(null=True, blank=True)
     total_units = models.PositiveIntegerField(null=True, blank=True)
     poland_units = models.PositiveIntegerField(null=True, blank=True)
+    franchised_units = models.PositiveIntegerField(null=True, blank=True)
+    company_owned_units = models.PositiveIntegerField(null=True, blank=True)
+    units_opened_last_year = models.PositiveIntegerField(null=True, blank=True)
+    units_closed_last_year = models.PositiveIntegerField(null=True, blank=True)
+    units_transferred_last_year = models.PositiveIntegerField(null=True, blank=True)
+    unit_growth_percent_1y = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    liquid_capital_required = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    net_worth_required = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    franchise_term_years = models.PositiveSmallIntegerField(null=True, blank=True)
+    renewal_term_years = models.PositiveSmallIntegerField(null=True, blank=True)
+    estimated_payback_months = models.PositiveSmallIntegerField(null=True, blank=True)
+    mature_unit_revenue_annual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    mature_unit_operating_profit_annual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    mature_unit_count = models.PositiveIntegerField(null=True, blank=True)
+    typical_unit_size_min_sqm = models.PositiveIntegerField(null=True, blank=True)
+    typical_unit_size_max_sqm = models.PositiveIntegerField(null=True, blank=True)
+    typical_staff_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    territory_type = models.CharField(max_length=20, choices=TERRITORY_TYPE_CHOICES, blank=True)
+    financial_performance_disclosed = models.BooleanField(default=False)
+    financial_performance_note = models.TextField(blank=True)
+    financial_data_as_of = models.DateField(null=True, blank=True)
+    data_status = models.CharField(max_length=20, choices=DATA_STATUS_CHOICES, default=DATA_STATUS_DEMO)
+    data_source_url = models.URLField(blank=True)
     rank_score = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     popularity_score = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     editor_rating = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
@@ -207,6 +271,29 @@ class FranchiseUpdateRequest(models.Model):
     franchising_since = models.PositiveIntegerField(null=True, blank=True)
     total_units = models.PositiveIntegerField(null=True, blank=True)
     poland_units = models.PositiveIntegerField(null=True, blank=True)
+    franchised_units = models.PositiveIntegerField(null=True, blank=True)
+    company_owned_units = models.PositiveIntegerField(null=True, blank=True)
+    units_opened_last_year = models.PositiveIntegerField(null=True, blank=True)
+    units_closed_last_year = models.PositiveIntegerField(null=True, blank=True)
+    units_transferred_last_year = models.PositiveIntegerField(null=True, blank=True)
+    unit_growth_percent_1y = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    liquid_capital_required = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    net_worth_required = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    franchise_term_years = models.PositiveSmallIntegerField(null=True, blank=True)
+    renewal_term_years = models.PositiveSmallIntegerField(null=True, blank=True)
+    estimated_payback_months = models.PositiveSmallIntegerField(null=True, blank=True)
+    mature_unit_revenue_annual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    mature_unit_operating_profit_annual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    mature_unit_count = models.PositiveIntegerField(null=True, blank=True)
+    typical_unit_size_min_sqm = models.PositiveIntegerField(null=True, blank=True)
+    typical_unit_size_max_sqm = models.PositiveIntegerField(null=True, blank=True)
+    typical_staff_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    territory_type = models.CharField(max_length=20, choices=Franchise.TERRITORY_TYPE_CHOICES, blank=True)
+    financial_performance_disclosed = models.BooleanField(default=False)
+    financial_performance_note = models.TextField(blank=True)
+    financial_data_as_of = models.DateField(null=True, blank=True)
+    data_status = models.CharField(max_length=20, choices=Franchise.DATA_STATUS_CHOICES, default=Franchise.DATA_STATUS_DEMO)
+    data_source_url = models.URLField(blank=True)
 
     admin_feedback = models.TextField(blank=True)
     submitted_at = models.DateTimeField(null=True, blank=True)

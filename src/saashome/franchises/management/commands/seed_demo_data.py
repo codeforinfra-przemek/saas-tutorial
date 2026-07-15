@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from django.core.management import call_command
@@ -448,6 +449,44 @@ class Command(BaseCommand):
                 "is_featured": True,
             },
         ]
+        # The financial and network values below are deliberately marked as demo.
+        # They make the MVP usable without presenting illustrative figures as a brand disclosure.
+        for index, item in enumerate(data):
+            min_investment = Decimal(item["min_investment"])
+            max_investment = Decimal(item["max_investment"])
+            poland_units = item["poland_units"]
+            total_units = item["total_units"]
+            opened = max(1, poland_units // (24 + index * 2))
+            closed = max(0, opened // 5)
+            mature_revenue = max_investment * Decimal("4.6")
+            item.update(
+                {
+                    "franchised_units": max(1, int(total_units * 0.82)),
+                    "company_owned_units": max(0, total_units - int(total_units * 0.82)),
+                    "units_opened_last_year": opened,
+                    "units_closed_last_year": closed,
+                    "units_transferred_last_year": max(0, opened // 3),
+                    "unit_growth_percent_1y": (Decimal(opened * 100) / Decimal(max(1, poland_units - opened))).quantize(Decimal("0.01")),
+                    "liquid_capital_required": (min_investment * Decimal("0.30")).quantize(Decimal("1")),
+                    "net_worth_required": (max_investment * Decimal("0.65")).quantize(Decimal("1")),
+                    "franchise_term_years": 5,
+                    "renewal_term_years": 5,
+                    "estimated_payback_months": 18 + (index % 6) * 6,
+                    "mature_unit_revenue_annual": mature_revenue.quantize(Decimal("1")),
+                    "mature_unit_operating_profit_annual": (mature_revenue * Decimal("0.14")).quantize(Decimal("1")),
+                    "mature_unit_count": max(5, poland_units // 8),
+                    "typical_unit_size_min_sqm": 30 + (index % 5) * 15,
+                    "typical_unit_size_max_sqm": 80 + (index % 5) * 40,
+                    "typical_staff_count": 4 + (index % 5) * 3,
+                    "territory_type": Franchise.TERRITORY_PROTECTED if index % 2 else Franchise.TERRITORY_NOT_DISCLOSED,
+                    "financial_performance_disclosed": True,
+                    "financial_performance_note": "Dane demonstracyjne inspirowane zakresem Item 19 FDD. Przed decyzją inwestycyjną potwierdź metodykę, liczbę placówek w próbie i aktualność danych.",
+                    "financial_data_as_of": date(2026, 6, 30),
+                    "data_status": Franchise.DATA_STATUS_DEMO,
+                    "data_source_url": "",
+                }
+            )
+
         franchises = {}
         for item in data:
             slug = item["slug"]
@@ -473,6 +512,29 @@ class Command(BaseCommand):
                 "franchising_since": item["franchising_since"],
                 "total_units": item["total_units"],
                 "poland_units": item["poland_units"],
+                "franchised_units": item["franchised_units"],
+                "company_owned_units": item["company_owned_units"],
+                "units_opened_last_year": item["units_opened_last_year"],
+                "units_closed_last_year": item["units_closed_last_year"],
+                "units_transferred_last_year": item["units_transferred_last_year"],
+                "unit_growth_percent_1y": item["unit_growth_percent_1y"],
+                "liquid_capital_required": item["liquid_capital_required"],
+                "net_worth_required": item["net_worth_required"],
+                "franchise_term_years": item["franchise_term_years"],
+                "renewal_term_years": item["renewal_term_years"],
+                "estimated_payback_months": item["estimated_payback_months"],
+                "mature_unit_revenue_annual": item["mature_unit_revenue_annual"],
+                "mature_unit_operating_profit_annual": item["mature_unit_operating_profit_annual"],
+                "mature_unit_count": item["mature_unit_count"],
+                "typical_unit_size_min_sqm": item["typical_unit_size_min_sqm"],
+                "typical_unit_size_max_sqm": item["typical_unit_size_max_sqm"],
+                "typical_staff_count": item["typical_staff_count"],
+                "territory_type": item["territory_type"],
+                "financial_performance_disclosed": item["financial_performance_disclosed"],
+                "financial_performance_note": item["financial_performance_note"],
+                "financial_data_as_of": item["financial_data_as_of"],
+                "data_status": item["data_status"],
+                "data_source_url": item["data_source_url"],
                 "rank_score": Decimal(item["rank_score"]),
                 "popularity_score": Decimal(item["popularity_score"]),
                 "editor_rating": Decimal(item["editor_rating"]),
