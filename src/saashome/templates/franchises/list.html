@@ -85,52 +85,7 @@
 
 {% block extra_body %}
     <script>
-        document.addEventListener("DOMContentLoaded", function () {
-            window.loadFranchiseMap({ mapId: "franchise-map", markerScriptId: "franchise-map-markers" });
-
-            document.querySelectorAll("[data-franchise-card]").forEach(function (card) {
-                function toggleCard() {
-                    const isExpanded = card.getAttribute("aria-expanded") === "true";
-                    const slug = card.dataset.franchiseSlug;
-                    const details = card.querySelector("[data-franchise-details]");
-
-                    document.querySelectorAll("[data-franchise-card]").forEach(function (otherCard) {
-                        if (otherCard === card) {
-                            return;
-                        }
-                        otherCard.setAttribute("aria-expanded", "false");
-                        otherCard.classList.remove("is-expanded");
-                        const otherDetails = otherCard.querySelector("[data-franchise-details]");
-                        if (otherDetails) {
-                            otherDetails.hidden = true;
-                        }
-                    });
-
-                    card.setAttribute("aria-expanded", String(!isExpanded));
-                    card.classList.toggle("is-expanded", !isExpanded);
-                    if (details) {
-                        details.hidden = isExpanded;
-                    }
-
-                    if (window.franchiseMapController) {
-                        window.franchiseMapController.filterByFranchise(isExpanded ? null : slug);
-                    }
-                }
-
-                card.addEventListener("click", function (event) {
-                    if (event.target.closest("a, button, input, label, form")) {
-                        return;
-                    }
-                    toggleCard();
-                });
-
-                card.addEventListener("keydown", function (event) {
-                    if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        toggleCard();
-                    }
-                });
-            });
-        });
+        window.loadFranchiseMap({ mapId: "franchise-map", markerScriptId: "franchise-map-markers" });
+        window.initFranchiseCards();
     </script>
 {% endblock %}
