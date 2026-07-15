@@ -44,10 +44,10 @@
                 </div>
 
                 <div class="mt-6 grid gap-4 md:grid-cols-2">
-                    <div>
-                        <label for="{{ profile_form.user_type.id_for_label }}" class="mb-2 block text-sm font-bold text-slate-950">Typ konta</label>
-                        {{ profile_form.user_type }}
-                        {% if profile_form.user_type.errors %}<p class="mt-2 text-sm font-semibold text-red-600">{{ profile_form.user_type.errors|first }}</p>{% endif %}
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <p class="text-xs font-bold uppercase text-slate-500">Poziom dostępu</p>
+                        <p class="mt-1 font-black text-slate-950">{{ access_role_label }}</p>
+                        <p class="mt-1 text-xs leading-5 text-slate-500">Dostęp vendor jest nadawany przez aktywne członkostwo w organizacji.</p>
                     </div>
                     <div>
                         <label for="{{ profile_form.headline.id_for_label }}" class="mb-2 block text-sm font-bold text-slate-950">Nagłówek</label>

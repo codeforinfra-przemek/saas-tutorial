@@ -17,7 +17,7 @@ from django.views.generic import FormView, TemplateView
 from allauth.socialaccount.models import SocialAccount
 
 from .forms import ProfileForm, SignupForm, UserProfileForm
-from .models import UserProfile
+from .models import Organization, UserProfile
 
 
 logger = logging.getLogger(__name__)
@@ -116,12 +116,15 @@ def activate_account_view(request, uidb64, token):
 @login_required
 def dashboard_view(request):
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
-    organizations = request.user.organization_memberships.select_related("organization")
+    memberships = request.user.organization_memberships.filter(
+        is_active=True,
+        organization__status=Organization.STATUS_ACTIVE,
+    ).select_related("organization")
     context = {
         "site_name": "SaaS Home",
         "page_title": "Dashboard",
         "profile": profile,
-        "memberships": organizations,
+        "memberships": memberships,
     }
     return render(request, "accounts/dashboard.html", context)
 

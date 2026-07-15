@@ -169,3 +169,22 @@ cd src/saashome
 python manage.py migrate
 python manage.py runserver
 ```
+
+## Access roles
+
+Application access is based on server-side checks, not only on hidden menu links:
+
+| Area | Guest | User | Vendor member | Staff/admin |
+| --- | --- | --- | --- | --- |
+| Public franchise and content pages | View | View | View | View |
+| Request franchise information | Create | Create | Create | Create |
+| Profile, saved list and comparison | Login required | Own data | Own data | Own data |
+| Claim an unclaimed franchise | Login required | Create/view own claims | Create/view own claims | Create/view own claims |
+| Vendor dashboard onboarding page | Login required | View empty onboarding state | View own organization data | View all active organizations |
+| Vendor franchises, leads and analytics | No | No | Own active organizations only | All active organizations |
+| Internal leads, visits and franchise management | No | No | No | Full access |
+| Django `/admin/` | No | No | No | Staff permissions apply |
+
+Vendor access comes from an active `OrganizationMembership` in an active
+`Organization`. The editable profile `user_type` value is not an authorization
+mechanism and users cannot grant themselves vendor access.

@@ -1,15 +1,12 @@
-from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
 from django.shortcuts import render
+
+from accounts.permissions import staff_required
 
 from .models import Visit
 
 
-@login_required
+@staff_required
 def visit_list_view(request):
-    if not request.user.is_staff:
-        raise PermissionDenied
-
     visits = Visit.objects.select_related("user", "franchise").prefetch_related("events")[:100]
     context = {
         "site_name": "SaaS Home",

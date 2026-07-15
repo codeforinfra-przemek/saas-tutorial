@@ -14,12 +14,6 @@ FIELD_CLASSES = (
 
 
 class SignupForm(UserCreationForm):
-    user_type = forms.ChoiceField(
-        choices=UserProfile.USER_TYPE_CHOICES,
-        initial=UserProfile.USER_TYPE_USER,
-        label="Typ konta",
-    )
-
     class Meta:
         model = get_user_model()
         fields = ("email",)
@@ -58,9 +52,7 @@ class SignupForm(UserCreationForm):
         user.is_active = False
         if commit:
             user.save()
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.user_type = self.cleaned_data["user_type"]
-            profile.save()
+            UserProfile.objects.get_or_create(user=user)
         return user
 
 
@@ -120,7 +112,7 @@ class ProfileForm(forms.ModelForm):
 
     class Meta:
         model = UserProfile
-        fields = ("user_type", "avatar", "headline", "bio", "location", "website")
+        fields = ("avatar", "headline", "bio", "location", "website")
         widgets = {
             "avatar": forms.FileInput(
                 attrs={

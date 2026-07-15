@@ -7,6 +7,9 @@ def get_user_organizations(user):
     if not user or not user.is_authenticated:
         return Organization.objects.none()
 
+    if user.is_staff:
+        return Organization.objects.filter(status=Organization.STATUS_ACTIVE)
+
     return Organization.objects.filter(
         memberships__user=user,
         memberships__is_active=True,
@@ -16,9 +19,6 @@ def get_user_organizations(user):
 
 def get_user_franchises(user):
     organizations = get_user_organizations(user)
-    if not organizations.exists():
-        return Franchise.objects.none()
-
     return Franchise.objects.filter(
         organization__in=organizations,
         organization__status=Organization.STATUS_ACTIVE,

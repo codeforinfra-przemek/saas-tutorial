@@ -1,14 +1,11 @@
-from functools import wraps
-
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q
 from django.forms.utils import ErrorList
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 
 from billing.services import apply_promotion_flags, get_organization_plan
+from accounts.permissions import staff_required
 from leads.forms import LeadForm
 from leads.models import Lead
 from shortlists.services import get_saved_franchise_ids_for_user, is_franchise_saved_by_user
@@ -17,18 +14,6 @@ from visits.services import create_visit
 
 from .forms import FranchiseLocationForm, FranchiseManagementForm
 from .models import Franchise, FranchiseCategory, FranchiseLocation
-
-
-def staff_required(view_func):
-    @wraps(view_func)
-    @login_required
-    def wrapper(request, *args, **kwargs):
-        if not request.user.is_staff:
-            raise PermissionDenied
-        return view_func(request, *args, **kwargs)
-
-    return wrapper
-
 
 def management_context(**kwargs):
     context = {

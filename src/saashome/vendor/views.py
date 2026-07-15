@@ -5,7 +5,9 @@ from django.db.models import Count
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
+from accounts.permissions import vendor_required
 from accounts.services import get_user_franchises, get_user_organizations
 from billing.services import get_active_subscription, get_organization_plan, organization_has_feature
 from franchises.forms import FranchiseUpdateRequestForm
@@ -137,7 +139,7 @@ def vendor_dashboard_view(request):
     return render(request, "vendor/dashboard.html", context)
 
 
-@login_required
+@vendor_required
 def vendor_franchise_list_view(request):
     franchises = list(get_user_franchises(request.user))
     latest_updates = {}
@@ -165,7 +167,7 @@ def vendor_franchise_list_view(request):
     return render(request, "vendor/franchises/list.html", context)
 
 
-@login_required
+@vendor_required
 def vendor_franchise_edit_view(request, slug):
     franchises = get_user_franchises(request.user)
     franchise = get_object_or_404(franchises, slug=slug)
@@ -230,7 +232,8 @@ def vendor_franchise_edit_view(request, slug):
     return render(request, "vendor/franchises/edit.html", context)
 
 
-@login_required
+@vendor_required
+@require_POST
 def vendor_franchise_update_submit_view(request, pk):
     update_request = get_object_or_404(
         FranchiseUpdateRequest.objects.select_related("franchise", "organization"),
@@ -239,7 +242,7 @@ def vendor_franchise_update_submit_view(request, pk):
     manageable_franchises = get_user_franchises(request.user)
     if not manageable_franchises.filter(pk=update_request.franchise_id).exists():
         return redirect("vendor:franchises")
-    if request.method == "POST" and update_request.status in (
+    if update_request.status in (
         FranchiseUpdateRequest.STATUS_DRAFT,
         FranchiseUpdateRequest.STATUS_REJECTED,
     ):
@@ -250,7 +253,7 @@ def vendor_franchise_update_submit_view(request, pk):
     return redirect("vendor:franchise_edit", slug=update_request.franchise.slug)
 
 
-@login_required
+@vendor_required
 def vendor_lead_list_view(request):
     leads = get_vendor_leads_for_user(request.user)
     status = request.GET.get("status", "").strip()
@@ -287,7 +290,7 @@ def vendor_lead_list_view(request):
     return render(request, "vendor/leads/list.html", context)
 
 
-@login_required
+@vendor_required
 def vendor_lead_detail_view(request, pk):
     lead = get_object_or_404(get_vendor_leads_for_user(request.user), pk=pk)
     can_view_contact = organization_has_feature(lead.franchise.organization, "can_view_leads")

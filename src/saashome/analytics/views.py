@@ -1,11 +1,12 @@
 from django.contrib.admin.views.decorators import staff_member_required
-from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
+
+from accounts.permissions import vendor_required
 
 from .services import get_admin_analytics, get_vendor_analytics
 
 
-@login_required
+@vendor_required
 def vendor_analytics_view(request):
     range_key = request.GET.get("range", "30d")
     analytics = get_vendor_analytics(request.user, range_key=range_key)

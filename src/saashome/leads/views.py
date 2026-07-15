@@ -1,14 +1,12 @@
-from functools import wraps
 from datetime import timedelta
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from franchises.models import Franchise
+from accounts.permissions import staff_required
 from visits.models import Visit, VisitEvent
 from visits.services import ensure_session_key, get_client_ip, hash_ip
 
@@ -24,18 +22,6 @@ def lead_management_context(**kwargs):
     }
     context.update(kwargs)
     return context
-
-
-def staff_required(view_func):
-    @wraps(view_func)
-    @login_required
-    def wrapper(request, *args, **kwargs):
-        if not request.user.is_staff:
-            raise PermissionDenied
-        return view_func(request, *args, **kwargs)
-
-    return wrapper
-
 
 def get_related_visit(request, franchise):
     session_key = ensure_session_key(request)

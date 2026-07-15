@@ -30,7 +30,7 @@
                         {% endif %}
                         <div class="hidden text-right sm:block">
                             <p class="text-sm font-black leading-4 text-slate-950">{{ request.user.username }}</p>
-                            <p class="text-xs font-semibold text-slate-500">{{ request.user.profile.get_user_type_display }}</p>
+                            <p class="text-xs font-semibold text-slate-500">{{ access_role_label }}</p>
                         </div>
                     </a>
                     <form method="post" action="{% url 'account_logout' %}">
