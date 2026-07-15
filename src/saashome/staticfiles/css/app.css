@@ -131,10 +131,6 @@ button {
     box-shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
 }
 
-.franchise-card.is-expanded [data-franchise-toggle-icon] {
-    transform: rotate(180deg);
-}
-
 .franchise-card-details[hidden] {
     display: none;
 }

@@ -1,7 +1,9 @@
 <article
-    class="franchise-card cursor-pointer rounded-lg p-3.5"
+    class="franchise-card cursor-pointer rounded-lg p-3.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
     data-franchise-card
     data-franchise-slug="{{ franchise.slug }}"
+    role="button"
+    tabindex="0"
     aria-expanded="false"
 >
     <div class="flex items-start gap-3">
@@ -50,19 +52,15 @@
         </div>
     </div>
 
-    <div id="franchise-details-{{ franchise.pk }}" class="franchise-card-details mt-3 border-t border-slate-100 pt-3" data-franchise-details hidden>
+    <div class="franchise-card-details mt-3 border-t border-slate-100 pt-3" data-franchise-details hidden>
         <p class="text-xs leading-5 text-slate-600">{{ franchise.description|default:franchise.short_description|truncatechars:320 }}</p>
         <div class="mt-3 flex items-center justify-between gap-3 text-xs">
-            <span class="font-bold text-slate-500">Dostępne lokalizacje: {{ franchise.locations.all|length }}</span>
+            <span class="font-bold text-slate-500">{{ franchise.locations.all|length }} lokalizacje na mapie</span>
             <span class="font-extrabold text-brand-700">Kliknij ponownie, aby zwinąć</span>
         </div>
     </div>
 
-    <div class="mt-3 flex flex-wrap items-center gap-2">
-        <button type="button" data-franchise-toggle aria-controls="franchise-details-{{ franchise.pk }}" aria-expanded="false" class="franchise-card-toggle inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-extrabold text-slate-800 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-800 sm:w-auto">
-            <span data-franchise-toggle-label>Pokaż więcej</span>
-            <svg data-franchise-toggle-icon class="h-4 w-4 transition-transform duration-200" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m6 9 6 6 6-6"/></svg>
-        </button>
+    <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
         <a href="{{ franchise.get_absolute_url }}" class="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-950 px-3 py-2 text-xs font-extrabold text-white hover:bg-slate-800">
             Szczegóły
         </a>
