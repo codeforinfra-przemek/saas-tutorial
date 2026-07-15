@@ -54,6 +54,23 @@ button {
     scrollbar-width: thin;
 }
 
+.compact-filter-form {
+    display: flex;
+    width: 100%;
+}
+
+.compact-filter-form > * {
+    min-width: 0;
+}
+
+.compact-filter-form > :first-child {
+    flex: 1 1 0%;
+}
+
+.compact-filter-form > button {
+    flex: 0 0 auto;
+}
+
 .franchise-shell {
     min-height: calc(100vh - 65px);
 }
@@ -120,6 +137,15 @@ button {
 
 .franchise-filter-pill {
     white-space: nowrap;
+}
+
+.franchise-filter-scroll {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+.franchise-filter-scroll::-webkit-scrollbar {
+    display: none;
 }
 
 .leaflet-popup-content-wrapper {
@@ -221,9 +247,11 @@ button {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 12px;
+        margin-top: 14px;
     }
 
-    .mobile-record-label {
+    .mobile-record-label,
+    .mobile-record-grid dt {
         color: #64748b;
         font-size: 10px;
         font-weight: 800;
@@ -231,12 +259,38 @@ button {
         text-transform: uppercase;
     }
 
-    .mobile-record-value {
+    .mobile-record-value,
+    .mobile-record-grid dd {
         margin-top: 3px;
         color: #0f172a;
         font-size: 13px;
         font-weight: 700;
         line-height: 1.4;
+    }
+
+    #app-main input:not([type="checkbox"]):not([type="radio"]),
+    #app-main select,
+    #app-main textarea {
+        width: 100%;
+        min-width: 0;
+    }
+
+    #app-main button,
+    #app-main a {
+        touch-action: manipulation;
+    }
+
+    .comparison-scroll th:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        min-width: 132px;
+        background: #f8fafc;
+        box-shadow: 1px 0 0 #e2e8f0;
+    }
+
+    .comparison-scroll tbody th:first-child {
+        background: #ffffff;
     }
 
     #app-main h1 {

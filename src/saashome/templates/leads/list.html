@@ -73,7 +73,30 @@
         </form>
 
         <div class="grid gap-5 xl:grid-cols-[1fr_280px]">
-            <div class="relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div class="mobile-records">
+                {% for lead in leads %}
+                    <article class="mobile-record">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <a href="{% url 'leads:detail' lead.pk %}" class="font-black text-slate-950">{{ lead.name }}</a>
+                                <p class="mt-1 text-xs font-bold text-brand-700">{{ lead.franchise.name }}</p>
+                            </div>
+                            <span class="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-extrabold text-slate-700">{{ lead.get_status_display }}</span>
+                        </div>
+                        <dl class="mobile-record-grid">
+                            <div><dt>Miasto</dt><dd>{{ lead.city|default:"-" }}</dd></div>
+                            <div><dt>Budżet</dt><dd>{{ lead.investment_budget|default:"-" }}</dd></div>
+                            <div><dt>Email</dt><dd>{{ lead.email|default:"-" }}</dd></div>
+                            <div><dt>Telefon</dt><dd>{{ lead.phone|default:"-" }}</dd></div>
+                            <div><dt>Data</dt><dd>{{ lead.created_at|date:"Y-m-d H:i" }}</dd></div>
+                        </dl>
+                        <a href="{% url 'leads:edit' lead.pk %}" class="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white">Edytuj lead</a>
+                    </article>
+                {% empty %}
+                    <p class="mobile-record text-sm text-slate-500">Brak leadów dla wybranych filtrów.</p>
+                {% endfor %}
+            </div>
+            <div class="desktop-table relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
                 <table class="w-full min-w-[980px] text-left text-sm text-slate-600">
                     <thead class="bg-slate-50 text-xs uppercase text-slate-500">
                         <tr>

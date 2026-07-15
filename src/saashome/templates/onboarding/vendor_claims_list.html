@@ -8,7 +8,24 @@
         <div><p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Vendor</p><h1 class="mt-1 text-2xl font-black text-slate-950">Moje zgłoszenia profili</h1></div>
         <a href="{% url 'franchises:list' %}" class="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Zobacz franczyzy</a>
     </div>
-    <div class="mt-5 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+    <div class="mobile-records mt-5">
+        {% for claim in claims %}
+            <article class="mobile-record">
+                <div class="flex items-start justify-between gap-3">
+                    <div><p class="font-black text-slate-950">{{ claim.franchise.name }}</p><p class="mt-1 text-xs text-slate-500">{{ claim.company_name }}</p></div>
+                    <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">{{ claim.get_status_display }}</span>
+                </div>
+                <dl class="mobile-record-grid">
+                    <div><dt>Wysłano</dt><dd>{{ claim.created_at|date:"Y-m-d H:i" }}</dd></div>
+                    <div><dt>Sprawdzono</dt><dd>{% if claim.reviewed_at %}{{ claim.reviewed_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</dd></div>
+                </dl>
+                {% if claim.admin_feedback %}<p class="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">{{ claim.admin_feedback }}</p>{% endif %}
+            </article>
+        {% empty %}
+            <p class="mobile-record text-sm text-slate-500">Nie masz jeszcze zgłoszeń. Wybierz niezarządzany profil franczyzy z katalogu.</p>
+        {% endfor %}
+    </div>
+    <div class="desktop-table mt-5 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
         <table class="w-full min-w-[760px] text-left text-sm"><thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Franczyza</th><th class="px-4 py-3">Firma</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Wysłano</th><th class="px-4 py-3">Sprawdzono</th><th class="px-4 py-3">Informacja</th></tr></thead><tbody>{% for claim in claims %}<tr class="border-t border-slate-200"><td class="px-4 py-3 font-bold text-slate-950">{{ claim.franchise.name }}</td><td class="px-4 py-3">{{ claim.company_name }}</td><td class="px-4 py-3"><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">{{ claim.get_status_display }}</span></td><td class="px-4 py-3 text-slate-600">{{ claim.created_at|date:"Y-m-d H:i" }}</td><td class="px-4 py-3 text-slate-600">{% if claim.reviewed_at %}{{ claim.reviewed_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</td><td class="px-4 py-3 text-slate-600">{{ claim.admin_feedback|default:"-" }}</td></tr>{% empty %}<tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">Nie masz jeszcze zgłoszeń. Wybierz niezarządzany profil franczyzy z katalogu.</td></tr>{% endfor %}</tbody></table>
     </div>
 </section>

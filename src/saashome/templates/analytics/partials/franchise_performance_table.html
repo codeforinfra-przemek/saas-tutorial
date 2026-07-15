@@ -2,7 +2,24 @@
     <div class="border-b border-slate-200 px-5 py-4">
         <h2 class="text-lg font-black text-slate-950">Franchise performance</h2>
     </div>
-    <div class="overflow-x-auto">
+    <div class="mobile-records p-4">
+        {% for row in analytics.franchise_rows %}
+            <article class="mobile-record">
+                <p class="font-black text-slate-950">{{ row.franchise.name }}</p>
+                <dl class="mobile-record-grid">
+                    <div><dt>Views</dt><dd>{{ row.views_count }}</dd></div>
+                    <div><dt>Leads</dt><dd>{{ row.leads_count }}</dd></div>
+                    <div><dt>Conversion</dt><dd>{{ row.conversion_rate }}%</dd></div>
+                    <div><dt>New</dt><dd>{{ row.new_leads_count }}</dd></div>
+                    <div><dt>Qualified</dt><dd>{{ row.qualified_leads_count }}</dd></div>
+                    <div><dt>Last lead</dt><dd>{{ row.last_lead_at|date:"Y-m-d H:i"|default:"-" }}</dd></div>
+                </dl>
+            </article>
+        {% empty %}
+            <p class="text-sm text-slate-500">No franchise data for this range.</p>
+        {% endfor %}
+    </div>
+    <div class="desktop-table overflow-x-auto">
         <table class="w-full min-w-[820px] text-left text-sm">
             <thead class="bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>

@@ -1,4 +1,4 @@
-<div class="flex gap-2 overflow-x-auto pb-1">
+<div class="franchise-filter-scroll flex w-full max-w-full gap-2 overflow-x-auto pb-1">
     <a
         href="{% url 'franchises:list' %}{% if q or investment_max %}?{% if q %}q={{ q|urlencode }}{% endif %}{% if q and investment_max %}&{% endif %}{% if investment_max %}investment_max={{ investment_max|urlencode }}{% endif %}{% endif %}"
         class="franchise-filter-pill rounded-full border px-3 py-1.5 text-xs font-bold {% if not selected_category %}border-slate-950 bg-slate-950 text-white{% else %}border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700{% endif %}"

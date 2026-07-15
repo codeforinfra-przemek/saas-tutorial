@@ -16,8 +16,8 @@
 {% block content %}
     <section class="franchise-shell">
         <div class="franchise-top-toolbar border-b border-slate-200 bg-white">
-            <div class="grid gap-2 px-4 py-2.5 sm:px-6">
-                <form method="get" class="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_auto]">
+            <div class="grid min-w-0 gap-2 px-4 py-2.5 sm:px-6">
+                <form method="get" class="compact-filter-form min-w-0 gap-2">
                     <div class="relative">
                         <label for="franchise-search" class="sr-only">Szukaj franczyzy</label>
                         <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
@@ -36,12 +36,12 @@
                     <button type="submit" class="inline-flex min-h-10 items-center justify-center rounded-lg bg-slate-950 px-5 py-2 text-xs font-extrabold text-white hover:bg-slate-800">Szukaj</button>
                 </form>
 
-                <div class="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(220px,300px)] xl:items-end">
-                    <div>
+                <div class="grid min-w-0 gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(220px,300px)] xl:items-end">
+                    <div class="min-w-0">
                         {% include "franchises/partials/category_filters.html" %}
                     </div>
 
-                    <form method="get" class="grid gap-2 sm:grid-cols-[1fr_auto] xl:grid-cols-1">
+                    <form method="get" class="compact-filter-form gap-2 xl:grid-cols-1">
                         {% if q %}
                             <input type="hidden" name="q" value="{{ q }}">
                         {% endif %}

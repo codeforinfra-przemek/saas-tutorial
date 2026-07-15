@@ -100,7 +100,21 @@
                     <div class="border-b border-slate-200 px-5 py-4">
                         <h2 class="text-lg font-black text-slate-950">My franchises</h2>
                     </div>
-                    <div class="overflow-x-auto">
+                    <div class="mobile-records p-4">
+                        {% for row in franchise_rows %}
+                            <article class="mobile-record">
+                                <p class="font-black text-slate-950">{{ row.franchise.name }}</p>
+                                <dl class="mobile-record-grid">
+                                    <div><dt>Views 30d</dt><dd>{% if row.can_view_analytics %}{{ row.views_30d }}{% else %}Upgrade{% endif %}</dd></div>
+                                    <div><dt>Leads 30d</dt><dd>{{ row.leads_30d }}</dd></div>
+                                    <div><dt>Conversion</dt><dd>{% if row.can_view_analytics %}{{ row.conversion_30d }}%{% else %}Upgrade{% endif %}</dd></div>
+                                </dl>
+                            </article>
+                        {% empty %}
+                            <p class="text-sm text-slate-500">No franchises assigned to your organizations yet.</p>
+                        {% endfor %}
+                    </div>
+                    <div class="desktop-table overflow-x-auto">
                         <table class="w-full min-w-[680px] text-left text-sm">
                             <thead class="bg-slate-50 text-xs uppercase text-slate-500">
                                 <tr>

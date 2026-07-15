@@ -73,7 +73,35 @@
             </div>
         </form>
 
-        <div class="relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div class="mobile-records">
+            {% for franchise in franchises %}
+                <article class="mobile-record">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <a href="{% url 'franchises:manage_detail' franchise.pk %}" class="font-black text-slate-950">{{ franchise.name }}</a>
+                            <p class="mt-1 text-xs text-slate-500">{{ franchise.category.name }}</p>
+                        </div>
+                        <div class="flex flex-wrap justify-end gap-1">
+                            {% if franchise.is_active %}<span class="rounded-full bg-brand-50 px-2 py-1 text-[11px] font-black text-brand-700">active</span>{% else %}<span class="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-black text-slate-500">inactive</span>{% endif %}
+                            {% if franchise.is_promoted %}<span class="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-black text-amber-700">promo</span>{% endif %}
+                            {% if franchise.is_verified %}<span class="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-black text-blue-700">verified</span>{% endif %}
+                        </div>
+                    </div>
+                    <p class="mt-3 text-sm leading-5 text-slate-600">{{ franchise.short_description|truncatechars:120 }}</p>
+                    <dl class="mobile-record-grid">
+                        <div><dt>Organizacja</dt><dd>{{ franchise.organization|default:"-" }}</dd></div>
+                        <div><dt>Inwestycja</dt><dd>{{ franchise.min_investment|default:"-" }} - {{ franchise.max_investment|default:"-" }}</dd></div>
+                        <div><dt>Score</dt><dd>{{ franchise.rank_score }}</dd></div>
+                        <div><dt>Leady / wizyty</dt><dd>{{ franchise.lead_count }} / {{ franchise.visit_count }}</dd></div>
+                    </dl>
+                    <a href="{% url 'franchises:manage_edit' franchise.pk %}" class="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white">Edytuj franczyzę</a>
+                </article>
+            {% empty %}
+                <p class="mobile-record text-sm text-slate-500">Brak franczyz dla wybranych filtrów.</p>
+            {% endfor %}
+        </div>
+
+        <div class="desktop-table relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
             <table class="w-full min-w-[1100px] text-left text-sm text-slate-600">
                 <thead class="bg-slate-50 text-xs uppercase text-slate-500">
                     <tr>

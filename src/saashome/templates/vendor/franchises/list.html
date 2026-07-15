@@ -21,7 +21,26 @@
             </div>
         </div>
 
-        <div class="relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div class="mobile-records">
+            {% for row in rows %}
+                <article class="mobile-record">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0"><p class="font-black text-slate-950">{{ row.franchise.name }}</p><p class="mt-1 text-xs text-slate-500">{{ row.franchise.category.name }}</p></div>
+                        {% if row.franchise.is_active %}<span class="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">Active</span>{% else %}<span class="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-500">Inactive</span>{% endif %}
+                    </div>
+                    <p class="mt-3 text-sm leading-5 text-slate-600">{{ row.franchise.short_description|truncatechars:120 }}</p>
+                    <dl class="mobile-record-grid">
+                        <div><dt>Latest update</dt><dd>{% if row.latest_update %}{{ row.latest_update.get_status_display }}{% else %}No draft{% endif %}</dd></div>
+                        <div><dt>Updated</dt><dd>{% if row.latest_update %}{{ row.latest_update.updated_at|date:"Y-m-d H:i" }}{% else %}{{ row.franchise.updated_at|date:"Y-m-d H:i" }}{% endif %}</dd></div>
+                    </dl>
+                    <a href="{% url 'vendor:franchise_edit' row.franchise.slug %}" class="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white">Edit profile</a>
+                </article>
+            {% empty %}
+                <p class="mobile-record text-sm text-slate-500">No franchises assigned to your organizations yet.</p>
+            {% endfor %}
+        </div>
+
+        <div class="desktop-table relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
             <table class="w-full min-w-[860px] text-left text-sm text-slate-600">
                 <thead class="bg-slate-50 text-xs uppercase text-slate-500">
                     <tr>
