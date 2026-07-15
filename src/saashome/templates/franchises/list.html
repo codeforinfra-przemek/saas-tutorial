@@ -60,21 +60,51 @@
                 <div class="franchise-list-scroll">
                     <div class="space-y-3 px-4 py-4 sm:px-6">
                         <div class="flex items-center justify-between gap-3">
-                            <p class="text-xs font-bold text-slate-600">{{ franchises|length }} ofert w wynikach</p>
+                            <p class="text-xs font-bold text-slate-600">{{ total_franchise_count }} ofert · strona {{ page_obj.number }} z {{ page_obj.paginator.num_pages }}</p>
                             <div class="flex items-center gap-3">
                                 <a href="{% url 'franchises:directory' %}" class="text-xs font-bold text-slate-700 hover:text-brand-700">Tabela danych</a>
                                 <a href="{% url 'franchises:list' %}" class="text-xs font-bold text-brand-700 hover:text-brand-600">Wyczyść filtry</a>
                             </div>
                         </div>
 
-                        {% for franchise in franchises %}
-                            {% include "franchises/partials/franchise_card.html" %}
-                        {% empty %}
-                            <div class="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center">
-                                <h2 class="text-xl font-black text-slate-950">Brak wyników</h2>
-                                <p class="mt-2 text-sm leading-6 text-slate-600">Zmień kategorię, budżet lub frazę wyszukiwania.</p>
+                        {% if catalog_locked %}
+                            <div class="rounded-lg border border-brand-200 bg-brand-50 p-6 text-center shadow-sm">
+                                <p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Pełny katalog</p>
+                                <h2 class="mt-2 text-xl font-black text-slate-950">Zaloguj się, aby zobaczyć kolejne oferty</h2>
+                                <p class="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-600">Pierwsze {{ public_page_limit }} strony katalogu są dostępne publicznie. Konto otwiera pełną listę franczyz, zapisywanie ofert i porównywanie danych.</p>
+                                <div class="mt-5 flex flex-wrap justify-center gap-2">
+                                    <a href="{% url 'account_login' %}?next={{ request.get_full_path|urlencode }}" class="inline-flex min-h-10 items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800">Zaloguj się</a>
+                                    <a href="{% url 'account_signup' %}?next={{ request.get_full_path|urlencode }}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-brand-200 bg-white px-4 py-2 text-sm font-bold text-brand-800 hover:bg-brand-100">Załóż konto</a>
+                                </div>
                             </div>
-                        {% endfor %}
+                        {% else %}
+                            {% for franchise in franchises %}
+                                {% include "franchises/partials/franchise_card.html" %}
+                            {% empty %}
+                                <div class="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center">
+                                    <h2 class="text-xl font-black text-slate-950">Brak wyników</h2>
+                                    <p class="mt-2 text-sm leading-6 text-slate-600">Zmień kategorię, budżet lub frazę wyszukiwania.</p>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+
+                        {% if page_obj.paginator.num_pages > 1 %}
+                            <nav class="flex flex-wrap items-center justify-center gap-1 pt-2" aria-label="Strony katalogu franczyz">
+                                {% if page_obj.has_previous %}
+                                    <a href="?{% if page_query_string %}{{ page_query_string }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700 hover:bg-slate-100" aria-label="Poprzednia strona">&lt;</a>
+                                {% endif %}
+                                {% for page_number in page_obj.paginator.page_range %}
+                                    {% if page_number == page_obj.number %}
+                                        <span class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg bg-slate-950 px-2 text-sm font-extrabold text-white" aria-current="page">{{ page_number }}</span>
+                                    {% else %}
+                                        <a href="?{% if page_query_string %}{{ page_query_string }}&amp;{% endif %}page={{ page_number }}" class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700 hover:bg-slate-100">{{ page_number }}</a>
+                                    {% endif %}
+                                {% endfor %}
+                                {% if page_obj.has_next %}
+                                    <a href="?{% if page_query_string %}{{ page_query_string }}&amp;{% endif %}page={{ page_obj.next_page_number }}" class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700 hover:bg-slate-100" aria-label="Następna strona">&gt;</a>
+                                {% endif %}
+                            </nav>
+                        {% endif %}
                     </div>
                 </div>
             </div>

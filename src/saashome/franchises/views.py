@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.forms.utils import ErrorList
 from django.shortcuts import get_object_or_404, redirect, render
@@ -12,6 +13,10 @@ from accounts.permissions import staff_required
 from leads.forms import LeadForm
 from leads.models import Lead
 from shortlists.services import get_saved_franchise_ids_for_user, is_franchise_saved_by_user
+
+
+FRANCHISE_LIST_PAGE_SIZE = 10
+PUBLIC_FRANCHISE_LIST_PAGE_LIMIT = 3
 from visits.models import Visit
 from visits.services import create_visit
 
@@ -152,15 +157,23 @@ def franchise_list_view(request):
             )
 
     franchises = apply_promotion_flags(franchises)
+    paginator = Paginator(franchises, FRANCHISE_LIST_PAGE_SIZE)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    catalog_locked = (
+        not request.user.is_authenticated
+        and page_obj.number > PUBLIC_FRANCHISE_LIST_PAGE_LIMIT
+    )
+    visible_franchises = page_obj.object_list if not catalog_locked else Franchise.objects.none()
 
     active_locations = FranchiseLocation.objects.filter(
-        franchise__in=franchises,
+        franchise__in=visible_franchises,
         is_active=True,
     ).select_related("franchise", "franchise__category")
 
     categories = decorate_categories(FranchiseCategory.objects.filter(is_active=True))
     filter_params = request.GET.copy()
     filter_params.pop("category", None)
+    filter_params.pop("page", None)
     category_filter_reset_url = reverse("franchises:list")
     if filter_params:
         category_filter_reset_url = f"{category_filter_reset_url}?{filter_params.urlencode()}"
@@ -174,11 +187,19 @@ def franchise_list_view(request):
             category_params.appendlist("category", slug)
         category.filter_url = f"{reverse('franchises:list')}?{category_params.urlencode()}"
 
+    page_params = request.GET.copy()
+    page_params.pop("page", None)
+
     context = {
         "site_name": "SaaS Home",
         "page_title": "Franczyzy",
         "active_page": "franchises",
-        "franchises": franchises,
+        "franchises": visible_franchises,
+        "page_obj": page_obj,
+        "total_franchise_count": paginator.count,
+        "catalog_locked": catalog_locked,
+        "public_page_limit": PUBLIC_FRANCHISE_LIST_PAGE_LIMIT,
+        "page_query_string": page_params.urlencode(),
         "categories": categories,
         "selected_categories": selected_categories,
         "category_filter_reset_url": category_filter_reset_url,
