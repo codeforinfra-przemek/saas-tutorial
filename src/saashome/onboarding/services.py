@@ -40,7 +40,11 @@ def get_existing_or_create_organization_for_claim(claim):
 
 @transaction.atomic
 def approve_claim_request(claim, reviewed_by=None, organization=None):
-    claim = ClaimProfileRequest.objects.select_for_update().select_related("franchise", "organization", "user").get(pk=claim.pk)
+    claim = (
+        ClaimProfileRequest.objects.select_for_update(of=("self",))
+        .select_related("franchise", "organization", "user")
+        .get(pk=claim.pk)
+    )
     if claim.status == ClaimProfileRequest.STATUS_APPROVED:
         return claim
     if claim.status not in (ClaimProfileRequest.STATUS_NEW, ClaimProfileRequest.STATUS_IN_REVIEW):
