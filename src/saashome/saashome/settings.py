@@ -89,6 +89,9 @@ INSTALLED_APPS = [
     'django.contrib.sites',
     'django.contrib.sitemaps',
     'django.contrib.staticfiles',
+    'allauth_ui',
+    'widget_tweaks',
+    'slippers',
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
@@ -115,7 +118,7 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'saashome.urls'
 
-LOGIN_URL = "accounts:login"
+LOGIN_URL = "account_login"
 LOGIN_REDIRECT_URL = "accounts:dashboard"
 LOGOUT_REDIRECT_URL = "home"
 
@@ -127,12 +130,15 @@ AUTHENTICATION_BACKENDS = [
 
 SITE_ID = 1
 
-# django-allauth foundation. Our current /accounts/ views remain active for now;
-# allauth is wired in so social providers can be added without an auth rewrite.
+# django-allauth is now the primary login/signup/password-reset surface. The
+# local accounts app keeps product pages such as profile and dashboard.
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_ADAPTER = "accounts.adapters.AccountAdapter"
+ACCOUNT_LOGOUT_REDIRECT_URL = "home"
 SOCIALACCOUNT_LOGIN_ON_GET = False
+ALLAUTH_UI_THEME = "light"
 
 TEMPLATES = [
     {

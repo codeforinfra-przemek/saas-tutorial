@@ -33,13 +33,13 @@
                             <p class="text-xs font-semibold text-slate-500">{{ request.user.profile.get_user_type_display }}</p>
                         </div>
                     </a>
-                    <form method="post" action="{% url 'accounts:logout' %}">
+                    <form method="post" action="{% url 'account_logout' %}">
                         {% csrf_token %}
                         <button type="submit" class="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">Wyloguj</button>
                     </form>
                 {% else %}
-                    <a href="{% url 'accounts:login' %}" class="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">Zaloguj</a>
-                    <a href="{% url 'accounts:signup' %}" class="inline-flex min-h-10 items-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-extrabold text-white hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-100">Załóż konto</a>
+                    <a href="{% url 'account_login' %}" class="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">Zaloguj</a>
+                    <a href="{% url 'account_signup' %}" class="inline-flex min-h-10 items-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-extrabold text-white hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-100">Załóż konto</a>
                 {% endif %}
             </div>
         </header>

@@ -1,5 +1,8 @@
 Django>=6.0,<6.1
 django-allauth[socialaccount]>=65.18,<66
+django-allauth-ui>=1.8,<2
+django-widget-tweaks>=1.5,<2
+slippers>=0.6,<1
 gunicorn
 psycopg[binary]
 dj-database-url

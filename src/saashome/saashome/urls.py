@@ -34,8 +34,8 @@ sitemaps = {
 
 urlpatterns = [
     path('', home_view, name='home'),
+    path('auth/', include('allauth.urls')),
     path('accounts/', include('accounts.urls')),
-    path('allauth/', include('allauth.urls')),
     path('', include('analytics.urls')),
     path('', include('billing.urls')),
     path('', include('content.urls')),

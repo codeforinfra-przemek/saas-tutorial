@@ -100,7 +100,7 @@ def activate_account_view(request, uidb64, token):
             request,
             "Link aktywacyjny jest nieprawidłowy albo wygasł. Zarejestruj się ponownie lub skontaktuj się z nami.",
         )
-        return redirect("accounts:login")
+        return redirect("account_login")
 
     user.is_active = True
     user.save(update_fields=["is_active"])
