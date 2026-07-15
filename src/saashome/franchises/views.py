@@ -17,6 +17,8 @@ from shortlists.services import get_saved_franchise_ids_for_user, is_franchise_s
 
 FRANCHISE_LIST_PAGE_SIZE = 10
 PUBLIC_FRANCHISE_LIST_PAGE_LIMIT = 3
+DIRECTORY_PAGE_SIZE = 15
+PUBLIC_DIRECTORY_PAGE_LIMIT = 2
 from visits.models import Visit
 from visits.services import create_visit
 
@@ -214,11 +216,26 @@ def franchise_list_view(request):
 def franchise_directory_view(request):
     filters = directory_filters_from_request(request)
     franchises = filtered_directory_franchises(filters)
+    paginator = Paginator(franchises, DIRECTORY_PAGE_SIZE)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    catalog_locked = (
+        not request.user.is_authenticated
+        and page_obj.number > PUBLIC_DIRECTORY_PAGE_LIMIT
+    )
+    visible_franchises = page_obj.object_list if not catalog_locked else Franchise.objects.none()
+    page_params = request.GET.copy()
+    page_params.pop("page", None)
+
     context = {
         "site_name": "SaaS Home",
         "page_title": "Porównaj franczyzy",
         "active_page": "franchise_directory",
-        "franchises": franchises,
+        "franchises": visible_franchises,
+        "page_obj": page_obj,
+        "total_franchise_count": paginator.count,
+        "catalog_locked": catalog_locked,
+        "public_page_limit": PUBLIC_DIRECTORY_PAGE_LIMIT,
+        "page_query_string": page_params.urlencode(),
         "categories": FranchiseCategory.objects.filter(is_active=True),
         "business_type_choices": Franchise.BUSINESS_TYPE_CHOICES,
         "filters": filters,

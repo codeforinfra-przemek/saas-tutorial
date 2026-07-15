@@ -71,10 +71,21 @@
         </form>
 
         <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p class="text-sm font-bold text-slate-600">{{ franchises|length }} ofert spełnia wybrane kryteria</p>
+            <p class="text-sm font-bold text-slate-600">{{ total_franchise_count }} ofert spełnia wybrane kryteria · strona {{ page_obj.number }} z {{ page_obj.paginator.num_pages }}</p>
             <p class="text-xs text-slate-500">Kliknij nagłówek kolumny, aby sortować rosnąco lub malejąco.</p>
         </div>
 
+        {% if catalog_locked %}
+            <section class="mt-5 rounded-lg border border-brand-200 bg-brand-50 p-8 text-center shadow-sm">
+                <p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Pełny katalog analityczny</p>
+                <h2 class="mt-2 text-2xl font-black text-slate-950">Zaloguj się, aby zobaczyć kolejne franczyzy</h2>
+                <p class="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-600">Dwie pierwsze strony tabeli są dostępne publicznie. Konto otwiera pełne filtrowanie, sortowanie i porównanie wszystkich ofert.</p>
+                <div class="mt-5 flex flex-wrap justify-center gap-2">
+                    <a href="{% url 'account_login' %}?next={{ request.get_full_path|urlencode }}" class="inline-flex min-h-10 items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800">Zaloguj się</a>
+                    <a href="{% url 'account_signup' %}?next={{ request.get_full_path|urlencode }}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-brand-200 bg-white px-4 py-2 text-sm font-bold text-brand-800 hover:bg-brand-100">Załóż konto</a>
+                </div>
+            </section>
+        {% else %}
         <div class="directory-selection-bar mt-4 hidden items-center justify-between gap-3 rounded-lg border border-brand-200 bg-brand-50 p-3" data-directory-selection-bar aria-live="polite">
             <p class="text-sm font-bold text-brand-900"><span data-directory-selection-count>0</span> z 4 wybranych do porównania</p>
             <div class="flex flex-wrap items-center justify-end gap-2">
@@ -143,5 +154,24 @@
                 </tbody>
             </table>
         </div>
+        {% endif %}
+
+        {% if page_obj.paginator.num_pages > 1 %}
+            <nav class="mt-5 flex flex-wrap items-center justify-center gap-1" aria-label="Strony katalogu analitycznego">
+                {% if page_obj.has_previous %}
+                    <a href="?{% if page_query_string %}{{ page_query_string }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" class="inline-flex h-10 min-w-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700 hover:bg-slate-100" aria-label="Poprzednia strona">&lt;</a>
+                {% endif %}
+                {% for page_number in page_obj.paginator.page_range %}
+                    {% if page_number == page_obj.number %}
+                        <span class="inline-flex h-10 min-w-10 items-center justify-center rounded-lg bg-slate-950 px-2 text-sm font-extrabold text-white" aria-current="page">{{ page_number }}</span>
+                    {% else %}
+                        <a href="?{% if page_query_string %}{{ page_query_string }}&amp;{% endif %}page={{ page_number }}" class="inline-flex h-10 min-w-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700 hover:bg-slate-100">{{ page_number }}</a>
+                    {% endif %}
+                {% endfor %}
+                {% if page_obj.has_next %}
+                    <a href="?{% if page_query_string %}{{ page_query_string }}&amp;{% endif %}page={{ page_obj.next_page_number }}" class="inline-flex h-10 min-w-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700 hover:bg-slate-100" aria-label="Następna strona">&gt;</a>
+                {% endif %}
+            </nav>
+        {% endif %}
     </section>
 {% endblock %}
