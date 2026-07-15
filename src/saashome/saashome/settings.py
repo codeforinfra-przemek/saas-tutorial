@@ -95,6 +95,7 @@ INSTALLED_APPS = [
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
+    'allauth.socialaccount.providers.github',
     'accounts',
     'analytics',
     'billing',
@@ -141,6 +142,28 @@ ACCOUNT_ADAPTER = "accounts.adapters.AccountAdapter"
 ACCOUNT_LOGOUT_REDIRECT_URL = "home"
 SOCIALACCOUNT_LOGIN_ON_GET = False
 ALLAUTH_UI_THEME = "light"
+
+# GitHub OAuth is optional in local development. Credentials stay in the
+# environment, never in the repository or Django's SocialApp database.
+GITHUB_OAUTH_CLIENT_ID = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "")
+GITHUB_OAUTH_CLIENT_SECRET = os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "")
+GITHUB_SOCIAL_LOGIN_ENABLED = bool(GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET)
+SOCIALACCOUNT_PROVIDERS = {
+    "github": {
+        "SCOPE": ["user:email"],
+        "EMAIL_AUTHENTICATION": True,
+        "VERIFIED_EMAIL": True,
+    }
+}
+if GITHUB_SOCIAL_LOGIN_ENABLED:
+    SOCIALACCOUNT_PROVIDERS["github"]["APPS"] = [
+        {
+            "client_id": GITHUB_OAUTH_CLIENT_ID,
+            "secret": GITHUB_OAUTH_CLIENT_SECRET,
+            "key": "",
+        }
+    ]
+SOCIALACCOUNT_ADAPTER = "accounts.social_adapters.SocialAccountAdapter"
 
 TEMPLATES = [
     {

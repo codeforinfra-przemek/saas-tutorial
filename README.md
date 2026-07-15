@@ -54,7 +54,26 @@ Current minimal accounts design:
   - socialaccount support
   - styled allauth UI templates from `django-allauth-ui`
   - allauth URL namespace: `/auth/`
-  - provider credentials can later be added via Django Admin `Social applications`
+  - GitHub OAuth credentials are loaded from environment variables
+
+### GitHub login
+
+GitHub sign-in uses a GitHub **OAuth App**, not a GitHub App installation. Set
+`GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` in local `.env` and
+Railway variables. The allauth callback URL is:
+
+```text
+http://127.0.0.1:8000/auth/github/login/callback/
+```
+
+For Railway, use the deployed domain with the same path, for example:
+
+```text
+https://saas-tutorial-production-e29b.up.railway.app/auth/github/login/callback/
+```
+
+GitHub login is treated as email-verified. A verified GitHub email matching an
+existing account may sign in through GitHub or the existing password.
 
 Important paths:
 

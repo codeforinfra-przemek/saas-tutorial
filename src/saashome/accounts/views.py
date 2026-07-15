@@ -14,6 +14,7 @@ from django.urls import reverse, reverse_lazy
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.views.generic import FormView, TemplateView
+from allauth.socialaccount.models import SocialAccount
 
 from .forms import ProfileForm, SignupForm, UserProfileForm
 from .models import UserProfile
@@ -165,5 +166,7 @@ def profile_view(request):
         "profile_form": profile_form,
         "password_form": password_form,
         "profile": profile,
+        "github_social_login_enabled": settings.GITHUB_SOCIAL_LOGIN_ENABLED,
+        "github_connected": SocialAccount.objects.filter(user=request.user, provider="github").exists(),
     }
     return render(request, "accounts/profile.html", context)
