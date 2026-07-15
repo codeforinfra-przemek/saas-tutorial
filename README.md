@@ -119,6 +119,24 @@ python manage.py migrate
 python manage.py runserver
 ```
 
+### Reference data and sources
+
+Most seed records are intentionally marked as demo data. Do not treat their investment,
+growth, or unit-economics values as an offer from a franchisor.
+
+McDonald's is the first profile with selected public reference data. It records only values
+that can be supported by current official McDonald's Poland pages, keeps unsupported fields
+empty, and removes generated demo map points. It does **not** import an asserted complete list
+of restaurants: the official restaurant locator is dynamic and does not publish a stable public
+export that can be treated as a current source of truth.
+
+Update the existing McDonald's record without resetting other demo data:
+
+```bash
+cd src/saashome
+python manage.py enrich_mcdonalds_reference
+```
+
 ### Franchise data and comparison
 
 The public comparison table is available at `/franchises/directory/`. It has no

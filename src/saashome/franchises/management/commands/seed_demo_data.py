@@ -10,6 +10,7 @@ from accounts.models import Organization, OrganizationMembership, UserProfile
 from billing.models import FranchisePromotion, OrganizationSubscription, Plan
 from content.models import Article, ArticleCategory, LandingPage
 from franchises.models import Franchise, FranchiseCategory, FranchiseLocation
+from franchises.reference_data import mcdonalds_reference_fields
 from leads.models import Lead
 from visits.models import Visit, VisitEvent
 
@@ -452,6 +453,10 @@ class Command(BaseCommand):
         # The financial and network values below are deliberately marked as demo.
         # They make the MVP usable without presenting illustrative figures as a brand disclosure.
         for index, item in enumerate(data):
+            if item["slug"] == "mcdonalds":
+                item.update(mcdonalds_reference_fields())
+                continue
+
             min_investment = Decimal(item["min_investment"])
             max_investment = Decimal(item["max_investment"])
             poland_units = item["poland_units"]
@@ -497,9 +502,9 @@ class Command(BaseCommand):
                 "short_description": item["short_description"],
                 "description": item["description"],
                 "website_url": item["website_url"],
-                "min_investment": Decimal(item["min_investment"]),
-                "max_investment": Decimal(item["max_investment"]),
-                "initial_fee": Decimal(item["initial_fee"]),
+                "min_investment": Decimal(item["min_investment"]) if item["min_investment"] is not None else None,
+                "max_investment": Decimal(item["max_investment"]) if item["max_investment"] is not None else None,
+                "initial_fee": Decimal(item["initial_fee"]) if item["initial_fee"] is not None else None,
                 "royalty_fee_text": item["royalty_fee_text"],
                 "marketing_fee_text": item["marketing_fee_text"],
                 "business_type": item["business_type"],
@@ -557,6 +562,12 @@ class Command(BaseCommand):
             ("Łódź", "Łódzkie", Decimal("51.759200"), Decimal("19.456000")),
         ]
         for index, franchise in enumerate(franchises.values()):
+            if franchise.slug == "mcdonalds" and franchise.data_status == Franchise.DATA_STATUS_EDITOR_VERIFIED:
+                FranchiseLocation.objects.filter(
+                    franchise=franchise,
+                    address__startswith="Demo street",
+                ).delete()
+                continue
             for offset in range(2):
                 city, region, lat, lng = cities[(index + offset) % len(cities)]
                 FranchiseLocation.objects.update_or_create(
