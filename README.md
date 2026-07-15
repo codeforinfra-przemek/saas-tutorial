@@ -188,3 +188,24 @@ Application access is based on server-side checks, not only on hidden menu links
 Vendor access comes from an active `OrganizationMembership` in an active
 `Organization`. The editable profile `user_type` value is not an authorization
 mechanism and users cannot grant themselves vendor access.
+
+## Investor services
+
+`/pricing/` now adapts to the visitor type:
+
+- regular users and guests see investor services: a location report and a
+  request form for expert matching;
+- active vendor members and staff see franchise-provider packages;
+- `/pricing/vendor/` is protected for active vendor members and staff;
+- investor service requests are stored separately from franchise `Lead` records.
+
+The location report currently uses a manual order confirmation. After a request,
+the team confirms the scope and sends a payment link; no payment is processed by
+the application yet.
+
+After pulling these changes, run:
+
+```bash
+cd src/saashome
+python manage.py migrate
+```

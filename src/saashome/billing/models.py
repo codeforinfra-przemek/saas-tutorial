@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -146,3 +147,54 @@ class FranchisePromotion(models.Model):
 
     def __str__(self):
         return f"{self.franchise} - {self.promotion_type} ({self.status})"
+
+
+class InvestorServiceRequest(models.Model):
+    SERVICE_LOCATION_REPORT = "location_report"
+    SERVICE_SPECIALIST_MATCH = "specialist_match"
+    SERVICE_CHOICES = (
+        (SERVICE_LOCATION_REPORT, "Raport lokalizacji"),
+        (SERVICE_SPECIALIST_MATCH, "Dopasowanie specjalisty"),
+    )
+
+    STATUS_NEW = "new"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_COMPLETED = "completed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = (
+        (STATUS_NEW, "Nowe"),
+        (STATUS_IN_PROGRESS, "W realizacji"),
+        (STATUS_COMPLETED, "Zakończone"),
+        (STATUS_CANCELLED, "Anulowane"),
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="investor_service_requests",
+    )
+    service_type = models.CharField(max_length=30, choices=SERVICE_CHOICES)
+    specialist_area = models.CharField(max_length=80, blank=True)
+    name = models.CharField(max_length=160)
+    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=40, blank=True)
+    city = models.CharField(max_length=120, blank=True)
+    message = models.TextField(blank=True)
+    privacy_consent = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
+    admin_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["service_type", "status"]),
+            models.Index(fields=["email"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.get_service_type_display()} - {self.name}"

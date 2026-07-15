@@ -4,6 +4,7 @@ from django.urls import reverse
 
 from accounts.forms import ProfileForm, SignupForm
 from accounts.models import Organization, OrganizationMembership
+from billing.models import InvestorServiceRequest
 from franchises.models import Franchise, FranchiseCategory
 from leads.models import Lead
 
@@ -140,6 +141,48 @@ class AccessControlTests(TestCase):
         ):
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_pricing_shows_investor_services_to_regular_users(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("billing:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Raport lokalizacji")
+        self.assertNotContains(response, "Pakiety dla franczyzodawców")
+        self.assertEqual(self.client.get(reverse("billing:vendor_pricing")).status_code, 403)
+
+    def test_vendor_sees_vendor_pricing(self):
+        self.client.force_login(self.vendor)
+
+        response = self.client.get(reverse("billing:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Pakiety dla franczyzodawców")
+        self.assertEqual(self.client.get(reverse("billing:vendor_pricing")).status_code, 200)
+
+    def test_investor_service_request_is_separate_from_franchise_leads(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("billing:investor_services"),
+            {
+                "service_type": InvestorServiceRequest.SERVICE_LOCATION_REPORT,
+                "specialist_area": "",
+                "name": "Reader User",
+                "email": "reader@example.com",
+                "phone": "",
+                "city": "Warszawa",
+                "message": "Chcę sprawdzić lokal.",
+                "privacy_consent": "on",
+            },
+        )
+
+        self.assertRedirects(response, reverse("billing:investor_services"))
+        request = InvestorServiceRequest.objects.get()
+        self.assertEqual(request.user, self.user)
+        self.assertEqual(request.service_type, InvestorServiceRequest.SERVICE_LOCATION_REPORT)
+        self.assertEqual(Lead.objects.count(), 2)
 
     def test_suspended_organization_does_not_grant_vendor_access(self):
         self.client.force_login(self.suspended_vendor)

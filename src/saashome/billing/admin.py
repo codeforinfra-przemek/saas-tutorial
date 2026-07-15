@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import FranchisePromotion, OrganizationSubscription, Plan
+from .models import FranchisePromotion, InvestorServiceRequest, OrganizationSubscription, Plan
 
 
 @admin.register(Plan)
@@ -24,4 +24,12 @@ class FranchisePromotionAdmin(admin.ModelAdmin):
     list_display = ("franchise", "promotion_type", "status", "priority", "starts_at", "ends_at")
     list_filter = ("promotion_type", "status", "starts_at", "ends_at")
     search_fields = ("franchise__name", "admin_notes")
-    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(InvestorServiceRequest)
+class InvestorServiceRequestAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "service_type", "name", "email", "phone", "city", "status")
+    list_filter = ("service_type", "status", "created_at")
+    search_fields = ("name", "email", "phone", "city", "specialist_area")
+    list_editable = ("status",)
+    readonly_fields = ("user", "created_at", "updated_at")
