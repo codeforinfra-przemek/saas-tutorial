@@ -15,6 +15,7 @@ from leads.forms import LeadStatusForm
 from leads.models import Lead
 from leads.services import change_lead_status, create_lead_activity, get_vendor_leads_for_user
 from leads.models import LeadActivity
+from onboarding.models import ClaimProfileRequest
 from visits.models import Visit
 
 
@@ -127,6 +128,10 @@ def vendor_dashboard_view(request):
         "pending_update_requests_count": FranchiseUpdateRequest.objects.filter(
             franchise_id__in=franchise_ids,
             status=FranchiseUpdateRequest.STATUS_SUBMITTED,
+        ).count(),
+        "pending_claim_requests_count": ClaimProfileRequest.objects.filter(
+            user=request.user,
+            status__in=(ClaimProfileRequest.STATUS_NEW, ClaimProfileRequest.STATUS_IN_REVIEW),
         ).count(),
     }
     return render(request, "vendor/dashboard.html", context)

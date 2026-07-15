@@ -1,0 +1,10 @@
+{% if franchise.organization %}
+    <span class="inline-flex items-center rounded-lg bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-700">
+        {% if franchise.is_verified %}Zweryfikowany profil{% else %}Profil zarządzany{% endif %}
+    </span>
+{% else %}
+    <div class="rounded-lg border border-brand-100 bg-brand-50 p-3">
+        <p class="text-xs font-extrabold text-brand-800">To Twoja franczyza?</p>
+        <a href="{% url 'onboarding:claim_profile' franchise.slug %}" class="mt-1 inline-flex text-xs font-black text-brand-700 hover:text-brand-600">Przejmij ten profil</a>
+    </div>
+{% endif %}

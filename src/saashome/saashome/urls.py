@@ -41,6 +41,7 @@ urlpatterns = [
     path('', include('content.urls')),
     path('franchises/', include('franchises.urls')),
     path('leads/', include('leads.urls')),
+    path('', include('onboarding.urls')),
     path('', include('shortlists.urls')),
     path('vendor/', include('vendor.urls')),
     path('visits/', include('visits.urls')),

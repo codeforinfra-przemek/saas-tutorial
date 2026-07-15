@@ -101,6 +101,7 @@ INSTALLED_APPS = [
     'content',
     'franchises',
     'leads',
+    'onboarding',
     'shortlists',
     'vendor',
     'visits',
@@ -201,6 +202,7 @@ EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", 10))
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 LEADS_NOTIFICATION_EMAIL = os.environ.get("LEADS_NOTIFICATION_EMAIL", "")
+CLAIMS_NOTIFICATION_EMAIL = os.environ.get("CLAIMS_NOTIFICATION_EMAIL", "")
 
 ADMIN_USER_NAME = os.environ.get("ADMIN_USER_NAME", "SaaS Home Admin")
 ADMIN_USER_EMAIL = os.environ.get("ADMIN_USER_EMAIL", EMAIL_HOST_USER)
