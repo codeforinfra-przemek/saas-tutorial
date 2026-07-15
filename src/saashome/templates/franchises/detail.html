@@ -3,7 +3,7 @@
 {% block title %}{{ block.super }} | {{ franchise.name }}{% endblock %}
 
 {% block extra_css %}
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="(min-width: 768px)">
 {% endblock %}
 
 {% block content %}
@@ -115,10 +115,9 @@
 {% endblock %}
 
 {% block extra_body %}
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         document.addEventListener("DOMContentLoaded", function () {
-            window.initFranchiseMap({ mapId: "franchise-map", markerScriptId: "franchise-map-markers" });
+            window.loadFranchiseMap({ mapId: "franchise-map", markerScriptId: "franchise-map-markers" });
         });
     </script>
 {% endblock %}

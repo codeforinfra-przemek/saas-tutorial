@@ -1,4 +1,9 @@
 window.initFranchiseMap = function initFranchiseMap(options) {
+    if (window.matchMedia("(max-width: 767px)").matches) {
+        window.franchiseMapController = null;
+        return;
+    }
+
     const mapId = options && options.mapId ? options.mapId : "franchise-map";
     const markerScriptId = options && options.markerScriptId ? options.markerScriptId : "franchise-map-markers";
     const mapElement = document.getElementById(mapId);
@@ -70,6 +75,32 @@ window.initFranchiseMap = function initFranchiseMap(options) {
     window.addEventListener("resize", function () {
         map.invalidateSize();
     });
+};
+
+window.loadFranchiseMap = function loadFranchiseMap(options) {
+    if (window.matchMedia("(max-width: 767px)").matches) {
+        return;
+    }
+    if (window.L) {
+        window.initFranchiseMap(options);
+        return;
+    }
+
+    const existingScript = document.querySelector('script[data-leaflet-loader="true"]');
+    if (existingScript) {
+        existingScript.addEventListener("load", function () {
+            window.initFranchiseMap(options);
+        }, { once: true });
+        return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.dataset.leafletLoader = "true";
+    script.onload = function () {
+        window.initFranchiseMap(options);
+    };
+    document.head.appendChild(script);
 };
 
 function escapeHtml(value) {

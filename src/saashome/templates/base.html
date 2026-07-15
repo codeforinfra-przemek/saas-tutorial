@@ -9,22 +9,23 @@
 <body class="bg-slate-50 text-slate-950 antialiased" data-sidebar-state="collapsed">
     {% include "includes/sidebar.html" %}
 
-    <main id="app-main" class="min-h-screen transition-[margin] duration-300 ease-in-out lg:ml-20">
-        <header class="border-b border-slate-200 bg-white/90 backdrop-blur">
-            <div class="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-5 py-3 pl-16 sm:px-8 lg:px-10">
-                <div class="min-w-0">
+    <main id="app-main" class="min-h-screen min-w-0 transition-[margin] duration-300 ease-in-out lg:ml-20">
+        <header id="app-header" class="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+            <div class="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-2 px-3 py-2 pl-16 sm:gap-3 sm:px-8 lg:px-10">
+                <div class="topbar-title min-w-0 flex-1">
                     {% block topbar_title %}
                         {% if page_title %}
                             <p class="truncate text-sm font-black text-slate-950">{{ page_title }}</p>
                         {% endif %}
                     {% endblock %}
                 </div>
+                <div class="topbar-actions flex shrink-0 items-center gap-2">
                 {% if request.user.is_authenticated %}
-                    <a href="{% url 'accounts:profile' %}" class="flex items-center gap-3 rounded-full border border-slate-200 bg-slate-50 py-1.5 pl-2 pr-4 transition hover:border-brand-200 hover:bg-brand-50" title="Profil użytkownika">
+                    <a href="{% url 'accounts:profile' %}" class="flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-slate-50 p-1 pr-1 transition hover:border-brand-200 hover:bg-brand-50 sm:pr-3" title="Profil użytkownika">
                         {% if request.user.profile.avatar %}
-                            <img src="{{ request.user.profile.avatar.url }}" alt="{{ request.user.username }}" class="h-9 w-9 rounded-full object-cover">
+                            <img src="{{ request.user.profile.avatar.url }}" alt="{{ request.user.username }}" class="h-8 w-8 rounded-full object-cover">
                         {% else %}
-                            <span class="grid h-9 w-9 place-items-center rounded-full bg-brand-500 text-sm font-black uppercase text-white">
+                            <span class="grid h-8 w-8 place-items-center rounded-full bg-brand-500 text-xs font-black uppercase text-white">
                                 {{ request.user.username|first }}
                             </span>
                         {% endif %}
@@ -35,12 +36,16 @@
                     </a>
                     <form method="post" action="{% url 'account_logout' %}">
                         {% csrf_token %}
-                        <button type="submit" class="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">Wyloguj</button>
+                        <button type="submit" class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100 sm:w-auto sm:px-4" title="Wyloguj">
+                            <svg class="h-4 w-4 sm:hidden" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 17l5-5-5-5m5 5H3m10-8h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/></svg>
+                            <span class="sr-only sm:not-sr-only sm:text-sm sm:font-bold">Wyloguj</span>
+                        </button>
                     </form>
                 {% else %}
-                    <a href="{% url 'account_login' %}" class="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">Zaloguj</a>
-                    <a href="{% url 'account_signup' %}" class="inline-flex min-h-10 items-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-extrabold text-white hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-100">Załóż konto</a>
+                    <a href="{% url 'account_login' %}" class="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100 sm:px-4 sm:text-sm">Zaloguj</a>
+                    <a href="{% url 'account_signup' %}" class="inline-flex h-10 items-center rounded-lg bg-brand-500 px-3 text-xs font-extrabold text-white hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-100 sm:px-4 sm:text-sm"><span class="topbar-signup-label">Załóż konto</span><span class="topbar-signup-short hidden">Rejestracja</span></a>
                 {% endif %}
+                </div>
             </div>
         </header>
 

@@ -3,7 +3,7 @@
     data-drawer-target="app-sidebar"
     data-drawer-toggle="app-sidebar"
     aria-controls="app-sidebar"
-    class="fixed left-4 top-4 z-50 inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500 lg:hidden"
+    class="fixed left-3 top-3 z-50 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500 lg:hidden"
 >
     <span class="sr-only">Otwórz menu</span>
     <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 17 14">
@@ -13,7 +13,7 @@
 
 <aside
     id="app-sidebar"
-    class="fixed left-0 top-0 z-40 h-screen w-72 -translate-x-full overflow-x-hidden border-r border-slate-200 bg-white transition-[transform,width] duration-300 ease-in-out lg:w-20 lg:translate-x-0"
+    class="fixed left-0 top-0 z-40 h-dvh w-[min(86vw,320px)] -translate-x-full overflow-x-hidden border-r border-slate-200 bg-white transition-[transform,width] duration-300 ease-in-out lg:h-screen lg:w-20 lg:translate-x-0"
     aria-label="Główna nawigacja"
 >
     <div id="sidebar-inner" class="flex h-full flex-col overflow-y-auto px-5 py-6 transition-[padding] duration-300 ease-in-out lg:px-3">
@@ -29,7 +29,12 @@
             </svg>
         </button>
 
-        <a href="/" data-drawer-hide="app-sidebar" class="sidebar-link mb-8 flex items-center gap-3 lg:justify-center">
+        <button type="button" data-drawer-hide="app-sidebar" aria-controls="app-sidebar" class="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-950 lg:hidden">
+            <span class="sr-only">Zamknij menu</span>
+            <svg class="h-5 w-5" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+
+        <a href="/" data-drawer-hide="app-sidebar" class="sidebar-link mb-8 flex items-center gap-3 pr-10 lg:justify-center lg:pr-0">
             <span class="grid h-10 w-10 place-items-center rounded-lg bg-brand-500 text-base font-black text-white">S</span>
             <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">
                 <span class="block text-lg font-black tracking-normal text-slate-950">{{ site_name|default:"SaaS Home" }}</span>
@@ -62,7 +67,7 @@
                 </svg>
                 <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Poradnik</span>
             </a>
-            <a href="{% url 'franchises:list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950" title="Mapa">
+            <a href="{% url 'franchises:list' %}" data-drawer-hide="app-sidebar" class="mobile-map-link sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950" title="Mapa">
                 <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
                     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Zm0 0V3m6 18V6"/>
                 </svg>
