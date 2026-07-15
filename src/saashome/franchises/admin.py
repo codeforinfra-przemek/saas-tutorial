@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Franchise, FranchiseCategory, FranchiseLocation
+from .models import Franchise, FranchiseCategory, FranchiseLocation, FranchiseUpdateRequest
 
 
 @admin.register(FranchiseCategory)
@@ -74,3 +74,81 @@ class FranchiseLocationAdmin(admin.ModelAdmin):
     list_filter = ("location_type", "region", "is_active")
     search_fields = ("name", "franchise__name", "city", "region", "address")
     autocomplete_fields = ("franchise",)
+
+
+@admin.register(FranchiseUpdateRequest)
+class FranchiseUpdateRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "franchise",
+        "organization",
+        "submitted_by",
+        "status",
+        "submitted_at",
+        "reviewed_by",
+        "reviewed_at",
+        "updated_at",
+    )
+    list_filter = ("status", "organization", "submitted_at", "reviewed_at")
+    search_fields = (
+        "franchise__name",
+        "organization__name",
+        "submitted_by__email",
+        "submitted_by__username",
+    )
+    readonly_fields = (
+        "franchise",
+        "organization",
+        "submitted_by",
+        "submitted_at",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+        "updated_at",
+    )
+    actions = ("approve_selected_requests", "reject_selected_requests")
+    fieldsets = (
+        ("Request", {"fields": ("franchise", "organization", "submitted_by", "status")}),
+        (
+            "Editable profile data",
+            {
+                "fields": (
+                    "short_description",
+                    "description",
+                    "website_url",
+                    "min_investment",
+                    "max_investment",
+                    "initial_fee",
+                    "royalty_fee_text",
+                    "marketing_fee_text",
+                    "business_type",
+                    "required_premises",
+                    "home_based",
+                    "part_time_possible",
+                    "training_provided",
+                    "financing_available",
+                    "founded_year",
+                    "franchising_since",
+                    "total_units",
+                    "poland_units",
+                )
+            },
+        ),
+        ("Review", {"fields": ("admin_feedback", "reviewed_by", "reviewed_at")}),
+        ("Timestamps", {"fields": ("submitted_at", "created_at", "updated_at")}),
+    )
+
+    @admin.action(description="Approve selected submitted update requests")
+    def approve_selected_requests(self, request, queryset):
+        approved_count = 0
+        for update_request in queryset.filter(status=FranchiseUpdateRequest.STATUS_SUBMITTED):
+            update_request.approve(reviewed_by=request.user)
+            approved_count += 1
+        self.message_user(request, f"Approved {approved_count} update request(s).")
+
+    @admin.action(description="Reject selected submitted update requests")
+    def reject_selected_requests(self, request, queryset):
+        rejected_count = 0
+        for update_request in queryset.filter(status=FranchiseUpdateRequest.STATUS_SUBMITTED):
+            update_request.reject(reviewed_by=request.user, feedback="Rejected by admin.")
+            rejected_count += 1
+        self.message_user(request, f"Rejected {rejected_count} update request(s).")

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | My franchises{% endblock %}
+
+{% block topbar_title %}
+    <div>
+        <p class="text-sm font-black text-slate-950">My franchises</p>
+        <p class="hidden text-xs font-semibold text-slate-500 sm:block">Vendor profile editing</p>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8 lg:px-10">
+        <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+                <a href="{% url 'vendor:dashboard' %}" class="text-sm font-bold text-brand-700 hover:text-brand-900">Wróć do dashboardu</a>
+                <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">My franchises</h1>
+                <p class="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+                    Edytuj dane profilu jako szkic. Zmiany pojawią się publicznie dopiero po zatwierdzeniu przez admina.
+                </p>
+            </div>
+        </div>
+
+        <div class="relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+            <table class="w-full min-w-[860px] text-left text-sm text-slate-600">
+                <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                        <th class="px-4 py-3">Franchise</th>
+                        <th class="px-4 py-3">Category</th>
+                        <th class="px-4 py-3">Public status</th>
+                        <th class="px-4 py-3">Latest update</th>
+                        <th class="px-4 py-3">Updated</th>
+                        <th class="px-4 py-3 text-right">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr class="border-t border-slate-200 hover:bg-slate-50">
+                            <td class="px-4 py-3">
+                                <p class="font-black text-slate-950">{{ row.franchise.name }}</p>
+                                <p class="mt-0.5 max-w-[300px] truncate text-xs text-slate-500">{{ row.franchise.short_description }}</p>
+                            </td>
+                            <td class="px-4 py-3">{{ row.franchise.category.name }}</td>
+                            <td class="px-4 py-3">
+                                {% if row.franchise.is_active %}
+                                    <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">Active</span>
+                                {% else %}
+                                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-500">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-3">
+                                {% if row.latest_update %}
+                                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{{ row.latest_update.get_status_display }}</span>
+                                {% else %}
+                                    <span class="text-slate-400">No draft</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-3">
+                                {% if row.latest_update %}{{ row.latest_update.updated_at|date:"Y-m-d H:i" }}{% else %}{{ row.franchise.updated_at|date:"Y-m-d H:i" }}{% endif %}
+                            </td>
+                            <td class="px-4 py-3 text-right">
+                                <a href="{% url 'vendor:franchise_edit' row.franchise.slug %}" class="font-bold text-brand-700 hover:text-brand-900">Edit profile</a>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr class="border-t border-slate-200">
+                            <td colspan="6" class="px-4 py-8 text-center text-slate-500">No franchises assigned to your organizations yet.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% endblock %}

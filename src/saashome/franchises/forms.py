@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import Franchise, FranchiseCategory, FranchiseLocation
+from .models import Franchise, FranchiseCategory, FranchiseLocation, FranchiseUpdateRequest
 
 
 FIELD_CLASSES = (
@@ -129,3 +129,77 @@ class FranchiseLocationForm(forms.ModelForm):
                 field.widget.attrs["class"] = "h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             else:
                 field.widget.attrs["class"] = FIELD_CLASSES
+
+
+class FranchiseUpdateRequestForm(forms.ModelForm):
+    class Meta:
+        model = FranchiseUpdateRequest
+        fields = (
+            "short_description",
+            "description",
+            "website_url",
+            "min_investment",
+            "max_investment",
+            "initial_fee",
+            "royalty_fee_text",
+            "marketing_fee_text",
+            "business_type",
+            "required_premises",
+            "home_based",
+            "part_time_possible",
+            "training_provided",
+            "financing_available",
+            "founded_year",
+            "franchising_since",
+            "total_units",
+            "poland_units",
+        )
+        labels = {
+            "short_description": "Krótki opis",
+            "description": "Opis szczegółowy",
+            "website_url": "Strona WWW",
+            "min_investment": "Minimalna inwestycja",
+            "max_investment": "Maksymalna inwestycja",
+            "initial_fee": "Opłata wstępna",
+            "royalty_fee_text": "Royalty fee",
+            "marketing_fee_text": "Marketing fee",
+            "business_type": "Typ biznesu",
+            "required_premises": "Wymagany lokal",
+            "home_based": "Możliwa praca z domu",
+            "part_time_possible": "Możliwe part-time",
+            "training_provided": "Szkolenie zapewnione",
+            "financing_available": "Finansowanie dostępne",
+            "founded_year": "Rok założenia",
+            "franchising_since": "Franczyza od",
+            "total_units": "Placówki globalnie",
+            "poland_units": "Placówki w Polsce",
+        }
+        widgets = {
+            "short_description": forms.Textarea(attrs={"rows": 3}),
+            "description": forms.Textarea(attrs={"rows": 8}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        disabled = kwargs.pop("disabled", False)
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.disabled = disabled
+            if isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs["class"] = "h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            else:
+                field.widget.attrs["class"] = FIELD_CLASSES
+
+    def clean(self):
+        cleaned_data = super().clean()
+        min_investment = cleaned_data.get("min_investment")
+        max_investment = cleaned_data.get("max_investment")
+        founded_year = cleaned_data.get("founded_year")
+        franchising_since = cleaned_data.get("franchising_since")
+
+        if min_investment is not None and max_investment is not None and min_investment > max_investment:
+            self.add_error("max_investment", "Maksymalna inwestycja nie może być mniejsza niż minimalna.")
+
+        if founded_year and franchising_since and franchising_since < founded_year:
+            self.add_error("franchising_since", "Rok rozpoczęcia franczyzy nie może być wcześniejszy niż rok założenia.")
+
+        return cleaned_data
