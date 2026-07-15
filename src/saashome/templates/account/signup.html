@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% load socialaccount %}
+
+{% block title %}{{ block.super }} | Załóż konto{% endblock %}
+
+{% block content %}
+    <section class="mx-auto grid min-h-[calc(100vh-72px)] w-full max-w-7xl place-items-center px-5 py-10 sm:px-8 lg:px-10">
+        <div class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-soft sm:p-8">
+            <span class="inline-flex rounded-full border border-brand-100 bg-brand-50 px-3 py-1.5 text-xs font-extrabold uppercase tracking-wide text-brand-700">Nowe konto</span>
+            <h1 class="mt-5 text-3xl font-black tracking-normal text-slate-950">Załóż konto</h1>
+            <p class="mt-2 text-sm leading-6 text-slate-600">Zapisuj interesujące franczyzy, porównuj oferty i wracaj do swoich analiz.</p>
+
+            {% if form.non_field_errors %}
+                <div class="mt-5 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{{ form.non_field_errors|first }}</div>
+            {% endif %}
+
+            <form method="post" action="{% url 'account_signup' %}" class="mt-6 space-y-4">
+                {% csrf_token %}
+                {{ redirect_field }}
+                {% for field in form %}
+                    <div>
+                        <label for="{{ field.id_for_label }}" class="mb-2 block text-sm font-bold text-slate-950">{{ field.label }}</label>
+                        {{ field }}
+                        {% for error in field.errors %}<p class="mt-2 text-sm font-semibold text-red-600">{{ error }}</p>{% endfor %}
+                        {% if field.help_text %}<p class="mt-2 text-xs leading-5 text-slate-500">{{ field.help_text }}</p>{% endif %}
+                    </div>
+                {% endfor %}
+                <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100">Załóż konto przez email</button>
+            </form>
+
+            {% get_providers as socialaccount_providers %}
+            {% if socialaccount_providers %}
+                <div class="my-6 flex items-center gap-3 text-xs font-bold uppercase tracking-wide text-slate-400">
+                    <span class="h-px flex-1 bg-slate-200"></span>
+                    <span>lub</span>
+                    <span class="h-px flex-1 bg-slate-200"></span>
+                </div>
+                {% include "socialaccount/snippets/provider_list.html" with process="login" %}
+            {% endif %}
+
+            <p class="mt-6 text-center text-sm text-slate-600">Masz już konto? <a href="{% url 'account_login' %}" class="font-bold text-brand-700 hover:text-brand-600">Zaloguj się</a></p>
+        </div>
+    </section>
+{% endblock %}
