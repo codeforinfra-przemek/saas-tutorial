@@ -7,11 +7,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from accounts.services import get_user_franchises, get_user_organizations
-from billing.services import get_active_subscription, get_organization_plan
+from billing.services import get_active_subscription, get_organization_plan, organization_has_feature
 from franchises.forms import FranchiseUpdateRequestForm
 from franchises.models import FranchiseUpdateRequest
 from franchises.services import create_update_request_from_franchise
+from leads.forms import LeadStatusForm
 from leads.models import Lead
+from leads.services import change_lead_status, create_lead_activity, get_vendor_leads_for_user
+from leads.models import LeadActivity
 from visits.models import Visit
 
 
@@ -240,3 +243,72 @@ def vendor_franchise_update_submit_view(request, pk):
         update_request.submit()
         messages.success(request, "Zmiany zostały wysłane do weryfikacji.")
     return redirect("vendor:franchise_edit", slug=update_request.franchise.slug)
+
+
+@login_required
+def vendor_lead_list_view(request):
+    leads = get_vendor_leads_for_user(request.user)
+    status = request.GET.get("status", "").strip()
+    franchise_id = request.GET.get("franchise", "").strip()
+    franchises = get_user_franchises(request.user)
+
+    if status:
+        leads = leads.filter(status=status)
+    if franchise_id:
+        leads = leads.filter(franchise_id=franchise_id)
+
+    base_leads = get_vendor_leads_for_user(request.user)
+    rows = []
+    for lead in leads[:200]:
+        can_view_contact = organization_has_feature(lead.franchise.organization, "can_view_leads")
+        lead.can_view_contact = can_view_contact
+        rows.append({"lead": lead, "can_view_contact": can_view_contact})
+
+    context = {
+        "site_name": "SaaS Home",
+        "page_title": "Lead Inbox",
+        "active_page": "vendor",
+        "rows": rows,
+        "franchises": franchises,
+        "status_choices": LeadStatusForm.VENDOR_STATUS_CHOICES,
+        "filters": {"status": status, "franchise": franchise_id},
+        "stats": {
+            "total": base_leads.count(),
+            "new": base_leads.filter(status=Lead.STATUS_NEW).count(),
+            "contacted": base_leads.filter(status=Lead.STATUS_CONTACTED).count(),
+            "qualified": base_leads.filter(status=Lead.STATUS_QUALIFIED).count(),
+        },
+    }
+    return render(request, "vendor/leads/list.html", context)
+
+
+@login_required
+def vendor_lead_detail_view(request, pk):
+    lead = get_object_or_404(get_vendor_leads_for_user(request.user), pk=pk)
+    can_view_contact = organization_has_feature(lead.franchise.organization, "can_view_leads")
+
+    if request.method == "GET":
+        create_lead_activity(lead, LeadActivity.TYPE_VENDOR_VIEWED, user=request.user)
+
+    form = LeadStatusForm(request.POST or None, current_status=lead.status)
+    if request.method == "POST" and form.is_valid():
+        change_lead_status(
+            lead,
+            form.cleaned_data["status"],
+            user=request.user,
+            note=form.cleaned_data.get("note", ""),
+            rejected_reason=form.cleaned_data.get("rejected_reason", ""),
+        )
+        messages.success(request, "Lead status has been updated.")
+        return redirect("vendor:lead_detail", pk=lead.pk)
+
+    context = {
+        "site_name": "SaaS Home",
+        "page_title": "Lead details",
+        "active_page": "vendor",
+        "lead": lead,
+        "can_view_contact": can_view_contact,
+        "form": form,
+        "activities": lead.activities.select_related("created_by").order_by("-created_at")[:50],
+    }
+    return render(request, "vendor/leads/detail.html", context)

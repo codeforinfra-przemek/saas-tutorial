@@ -1,12 +1,8 @@
-import logging
-from smtplib import SMTPException
 from functools import wraps
 from datetime import timedelta
 
-from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.mail import BadHeaderError, send_mail
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -17,10 +13,8 @@ from visits.models import Visit, VisitEvent
 from visits.services import ensure_session_key, get_client_ip, hash_ip
 
 from .forms import LeadForm, LeadManagementForm
-from .models import Lead
-
-
-logger = logging.getLogger(__name__)
+from .models import Lead, LeadActivity
+from .services import create_lead_activity, notify_new_lead
 
 
 def lead_management_context(**kwargs):
@@ -41,30 +35,6 @@ def staff_required(view_func):
         return view_func(request, *args, **kwargs)
 
     return wrapper
-
-
-def send_lead_notification(lead):
-    recipient = getattr(settings, "LEADS_NOTIFICATION_EMAIL", "")
-    if not recipient:
-        return
-
-    subject = f"New franchise lead: {lead.franchise.name}"
-    body = (
-        f"Franchise: {lead.franchise.name}\n"
-        f"Name: {lead.name}\n"
-        f"Email: {lead.email}\n"
-        f"Phone: {lead.phone}\n"
-        f"City: {lead.city}\n"
-        f"Investment budget: {lead.investment_budget or 'not provided'}\n\n"
-        f"Message:\n{lead.message or '-'}\n"
-    )
-    send_mail(
-        subject,
-        body,
-        settings.DEFAULT_FROM_EMAIL,
-        [recipient],
-        fail_silently=False,
-    )
 
 
 def get_related_visit(request, franchise):
@@ -127,6 +97,17 @@ def create_lead_view(request, slug):
     lead.utm_term = request.GET.get("utm_term", request.POST.get("utm_term", ""))
     lead.save()
 
+    create_lead_activity(
+        lead,
+        LeadActivity.TYPE_LEAD_CREATED,
+        user=request.user if request.user.is_authenticated else None,
+        metadata={
+            "source_path": lead.source_path,
+            "utm_source": lead.utm_source,
+            "utm_campaign": lead.utm_campaign,
+        },
+    )
+
     if related_visit:
         VisitEvent.objects.create(
             visit=related_visit,
@@ -135,10 +116,7 @@ def create_lead_view(request, slug):
             metadata={"lead_id": lead.id},
         )
 
-    try:
-        send_lead_notification(lead)
-    except (BadHeaderError, OSError, SMTPException):
-        logger.exception("Could not send lead notification email.")
+    notify_new_lead(lead, request=request)
 
     messages.success(
         request,

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | Lead {{ lead.name }}{% endblock %}
+
+{% block topbar_title %}
+    <div>
+        <p class="text-sm font-black text-slate-950">Lead details</p>
+        <p class="hidden text-xs font-semibold text-slate-500 sm:block">{{ lead.franchise.name }}</p>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8 lg:px-10">
+        <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+                <a href="{% url 'vendor:leads' %}" class="text-sm font-bold text-brand-700 hover:text-brand-900">Back to Lead Inbox</a>
+                <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">{{ lead.name }}</h1>
+                <p class="mt-1 text-sm text-slate-600">{{ lead.franchise.name }} · {{ lead.created_at|date:"Y-m-d H:i" }}</p>
+            </div>
+            <span class="w-fit rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-700">{{ lead.get_status_display }}</span>
+        </div>
+
+        {% if not can_view_contact %}
+            <div class="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+                Contact details and full message are locked by your current plan. Upgrade to a plan with lead access to view them.
+            </div>
+        {% endif %}
+
+        <div class="grid gap-5 lg:grid-cols-[1fr_380px]">
+            <div class="space-y-5">
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 class="text-lg font-black text-slate-950">Lead</h2>
+                    <dl class="mt-4 grid gap-4 sm:grid-cols-2">
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Name</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.name }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">City</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.city|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Budget</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.investment_budget|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Created</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.created_at|date:"Y-m-d H:i" }}</dd></div>
+                        {% if can_view_contact %}
+                            <div><dt class="text-xs font-bold uppercase text-slate-500">Email</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.email }}</dd></div>
+                            <div><dt class="text-xs font-bold uppercase text-slate-500">Phone</dt><dd class="mt-1 text-sm font-semibold text-slate-950">{{ lead.phone }}</dd></div>
+                        {% endif %}
+                    </dl>
+                    <div class="mt-5">
+                        <h3 class="text-sm font-black text-slate-950">Message</h3>
+                        {% if can_view_contact %}
+                            <p class="mt-2 whitespace-pre-line rounded-lg bg-slate-50 p-4 text-sm leading-6 text-slate-700">{{ lead.message|default:"No message." }}</p>
+                        {% else %}
+                            <p class="mt-2 rounded-lg bg-slate-50 p-4 text-sm leading-6 text-slate-500">Message hidden by plan.</p>
+                        {% endif %}
+                    </div>
+                </section>
+
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 class="text-lg font-black text-slate-950">Attribution</h2>
+                    <dl class="mt-4 grid gap-4 sm:grid-cols-2">
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Source path</dt><dd class="mt-1 break-all text-sm text-slate-700">{{ lead.source_path|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Referrer</dt><dd class="mt-1 break-all text-sm text-slate-700">{{ lead.referrer|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">UTM source</dt><dd class="mt-1 text-sm text-slate-700">{{ lead.utm_source|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">UTM medium</dt><dd class="mt-1 text-sm text-slate-700">{{ lead.utm_medium|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">UTM campaign</dt><dd class="mt-1 text-sm text-slate-700">{{ lead.utm_campaign|default:"-" }}</dd></div>
+                        <div><dt class="text-xs font-bold uppercase text-slate-500">Visit ID</dt><dd class="mt-1 text-sm text-slate-700">{{ lead.visit_id|default:"-" }}</dd></div>
+                    </dl>
+                </section>
+            </div>
+
+            <aside class="space-y-5">
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 class="text-lg font-black text-slate-950">Update status</h2>
+                    <form method="post" class="mt-4 space-y-4">
+                        {% csrf_token %}
+                        {% for field in form %}
+                            <div>
+                                <label for="{{ field.id_for_label }}" class="mb-1 block text-xs font-bold uppercase text-slate-500">{{ field.label }}</label>
+                                {{ field }}
+                                {% for error in field.errors %}
+                                    <p class="mt-1 text-xs font-semibold text-red-600">{{ error }}</p>
+                                {% endfor %}
+                            </div>
+                        {% endfor %}
+                        <button type="submit" class="inline-flex min-h-10 w-full items-center justify-center rounded-lg bg-emerald-600 px-5 py-2 text-sm font-extrabold text-white hover:bg-emerald-700">Save status</button>
+                    </form>
+                </section>
+
+                <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 class="text-lg font-black text-slate-950">Activity</h2>
+                    <div class="mt-4 space-y-3">
+                        {% for activity in activities %}
+                            <div class="border-b border-slate-100 pb-3 last:border-b-0 last:pb-0">
+                                <p class="text-sm font-black text-slate-950">{{ activity.get_activity_type_display }}</p>
+                                <p class="mt-1 text-xs text-slate-500">{{ activity.created_at|date:"Y-m-d H:i:s" }}{% if activity.created_by %} · {{ activity.created_by }}{% endif %}</p>
+                                {% if activity.old_status or activity.new_status %}
+                                    <p class="mt-1 text-xs font-semibold text-slate-600">{{ activity.old_status|default:"-" }} → {{ activity.new_status|default:"-" }}</p>
+                                {% endif %}
+                                {% if activity.note %}
+                                    <p class="mt-2 whitespace-pre-line rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-700">{{ activity.note }}</p>
+                                {% endif %}
+                            </div>
+                        {% empty %}
+                            <p class="text-sm text-slate-500">No activity yet.</p>
+                        {% endfor %}
+                    </div>
+                </section>
+            </aside>
+        </div>
+    </section>
+{% endblock %}

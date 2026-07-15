@@ -59,7 +59,12 @@ class Lead(models.Model):
     privacy_consent = models.BooleanField(default=False)
     marketing_consent = models.BooleanField(default=False)
     admin_notes = models.TextField(blank=True)
+    vendor_notes = models.TextField(blank=True)
+    last_activity_at = models.DateTimeField(null=True, blank=True)
     contacted_at = models.DateTimeField(null=True, blank=True)
+    qualified_at = models.DateTimeField(null=True, blank=True)
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejected_reason = models.CharField(max_length=255, blank=True)
     sent_to_vendor_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -76,3 +81,46 @@ class Lead(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.franchise}"
+
+
+class LeadActivity(models.Model):
+    TYPE_LEAD_CREATED = "lead_created"
+    TYPE_STATUS_CHANGED = "status_changed"
+    TYPE_NOTE_ADDED = "note_added"
+    TYPE_EMAIL_NOTIFICATION_SENT = "email_notification_sent"
+    TYPE_EMAIL_NOTIFICATION_FAILED = "email_notification_failed"
+    TYPE_VENDOR_VIEWED = "vendor_viewed"
+    ACTIVITY_TYPE_CHOICES = (
+        (TYPE_LEAD_CREATED, "Lead created"),
+        (TYPE_STATUS_CHANGED, "Status changed"),
+        (TYPE_NOTE_ADDED, "Note added"),
+        (TYPE_EMAIL_NOTIFICATION_SENT, "Email notification sent"),
+        (TYPE_EMAIL_NOTIFICATION_FAILED, "Email notification failed"),
+        (TYPE_VENDOR_VIEWED, "Vendor viewed"),
+    )
+
+    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name="activities")
+    activity_type = models.CharField(max_length=40, choices=ACTIVITY_TYPE_CHOICES)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lead_activities",
+    )
+    old_status = models.CharField(max_length=30, blank=True)
+    new_status = models.CharField(max_length=30, blank=True)
+    note = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["lead", "created_at"]),
+            models.Index(fields=["activity_type", "created_at"]),
+            models.Index(fields=["created_by", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.activity_type} for {self.lead}"
