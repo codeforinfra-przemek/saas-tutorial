@@ -6,7 +6,7 @@
 {% elif request %}
     <link rel="canonical" href="{{ request.build_absolute_uri }}">
 {% endif %}
-<meta property="og:title" content="{{ seo_title|default:page_title|default:site_name|default:"SaaS Home" }}">
+<meta property="og:title" content="{% firstof seo_title page_title site_name "SaaS Home" %}">
 <meta property="og:description" content="{{ seo_description|default:"Ranking franczyz, porównywarka ofert i mapa lokalizacji." }}">
 {% if canonical_url %}
     <meta property="og:url" content="{{ canonical_url }}">

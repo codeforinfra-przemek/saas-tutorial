@@ -1,6 +1,7 @@
 {% extends "base.html" %}
+{% load socialaccount %}
 
-{% block title %}{{ block.super }} | Logowanie{% endblock %}
+{% block title %}{{ block.super|default:"SaaS Home" }} | Logowanie{% endblock %}
 
 {% block content %}
     <section class="mx-auto grid min-h-[calc(100vh-72px)] w-full max-w-7xl place-items-center px-5 py-10 sm:px-8 lg:px-10">
@@ -27,6 +28,8 @@
                 </div>
                 <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100">Zaloguj</button>
             </form>
+
+            {% include "socialaccount/snippets/provider_list.html" with process="login" %}
 
             <p class="mt-4 text-center text-sm">
                 <a href="{% url 'account_reset_password' %}" class="font-bold text-brand-700 hover:text-brand-600">Nie pamiętasz hasła?</a>
