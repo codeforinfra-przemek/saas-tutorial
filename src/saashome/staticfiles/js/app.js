@@ -31,6 +31,172 @@ window.initFranchiseMap = function initFranchiseMap(options) {
 
     const markerLayer = L.layerGroup().addTo(map);
     const markerIcons = {};
+    let userMarker = null;
+    let lastReverseGeocodeAt = 0;
+
+    const locationStatusControl = L.control({ position: "topright" });
+    let locationStatusElement = null;
+    locationStatusControl.onAdd = function () {
+        const container = L.DomUtil.create("div", "map-location-status");
+        container.hidden = true;
+        container.setAttribute("role", "status");
+        container.setAttribute("aria-live", "polite");
+        L.DomEvent.disableClickPropagation(container);
+        locationStatusElement = container;
+        return container;
+    };
+    locationStatusControl.addTo(map);
+
+    function setLocationStatus(message, isError) {
+        if (!locationStatusElement) {
+            return;
+        }
+        locationStatusElement.textContent = message;
+        locationStatusElement.hidden = !message;
+        locationStatusElement.classList.toggle("is-error", Boolean(isError));
+    }
+
+    function cachedAdministrativeArea(latitude, longitude) {
+        const cacheKey = "saashome-map-administrative-area-v1";
+        const latitudeKey = latitude.toFixed(3);
+        const longitudeKey = longitude.toFixed(3);
+
+        try {
+            const stored = JSON.parse(window.sessionStorage.getItem(cacheKey) || "null");
+            if (stored && stored.latitude === latitudeKey && stored.longitude === longitudeKey && stored.label) {
+                return stored.label;
+            }
+        } catch (error) {
+            // Location still works when browser storage is unavailable.
+        }
+        return "";
+    }
+
+    function cacheAdministrativeArea(latitude, longitude, label) {
+        try {
+            window.sessionStorage.setItem("saashome-map-administrative-area-v1", JSON.stringify({
+                latitude: latitude.toFixed(3),
+                longitude: longitude.toFixed(3),
+                label: label,
+            }));
+        } catch (error) {
+            // Caching is an optimisation only.
+        }
+    }
+
+    function administrativeAreaLabel(address) {
+        const county = address.county || address.municipality || address.city_district || "";
+        const voivodeship = address.state || address.region || "";
+        const parts = [];
+
+        if (county) {
+            parts.push(county);
+        }
+        if (voivodeship && voivodeship !== county) {
+            parts.push(voivodeship);
+        }
+        return parts.join(" · ");
+    }
+
+    async function reverseGeocodeAdministrativeArea(latitude, longitude) {
+        const cachedLabel = cachedAdministrativeArea(latitude, longitude);
+        if (cachedLabel) {
+            return cachedLabel;
+        }
+
+        const endpoint = mapElement.dataset.reverseGeocodeUrl;
+        if (!endpoint) {
+            return "";
+        }
+
+        const waitTime = Math.max(0, 1100 - (Date.now() - lastReverseGeocodeAt));
+        if (waitTime) {
+            await new Promise(function (resolve) { window.setTimeout(resolve, waitTime); });
+        }
+        lastReverseGeocodeAt = Date.now();
+
+        const url = new URL(endpoint);
+        url.searchParams.set("format", "jsonv2");
+        url.searchParams.set("lat", String(latitude));
+        url.searchParams.set("lon", String(longitude));
+        url.searchParams.set("zoom", "10");
+        url.searchParams.set("addressdetails", "1");
+        url.searchParams.set("accept-language", "pl");
+
+        const response = await window.fetch(url.toString(), { headers: { Accept: "application/json" } });
+        if (!response.ok) {
+            throw new Error("Reverse geocoding request failed");
+        }
+        const data = await response.json();
+        const label = administrativeAreaLabel(data.address || "");
+        if (label) {
+            cacheAdministrativeArea(latitude, longitude, label);
+        }
+        return label;
+    }
+
+    function showUserLocation() {
+        if (!navigator.geolocation) {
+            setLocationStatus("Ta przeglądarka nie obsługuje lokalizacji.", true);
+            return;
+        }
+
+        setLocationStatus("Ustalanie Twojej okolicy...", false);
+        navigator.geolocation.getCurrentPosition(async function (position) {
+            const latitude = position.coords.latitude;
+            const longitude = position.coords.longitude;
+            const coordinates = [latitude, longitude];
+
+            map.setView(coordinates, 10, { animate: true });
+            if (userMarker) {
+                userMarker.remove();
+            }
+            userMarker = L.circleMarker(coordinates, {
+                color: "#0f704f",
+                fillColor: "#19a974",
+                fillOpacity: 0.9,
+                radius: 9,
+                weight: 3,
+            }).addTo(map);
+
+            try {
+                const area = await reverseGeocodeAdministrativeArea(latitude, longitude);
+                const locationLabel = area ? "Twoja okolica: " + area : "Twoja lokalizacja";
+                userMarker.bindPopup("<strong>" + escapeHtml(locationLabel) + "</strong>").openPopup();
+                setLocationStatus(locationLabel, false);
+            } catch (error) {
+                userMarker.bindPopup("<strong>Twoja lokalizacja</strong>").openPopup();
+                setLocationStatus("Mapa pokazuje Twoją lokalizację. Nie udało się odczytać powiatu i województwa.", true);
+            }
+        }, function (error) {
+            const messages = {
+                1: "Nie udzielono zgody na dostęp do lokalizacji.",
+                2: "Nie udało się ustalić lokalizacji urządzenia.",
+                3: "Przekroczono czas ustalania lokalizacji.",
+            };
+            setLocationStatus(messages[error.code] || "Nie udało się ustalić lokalizacji.", true);
+        }, {
+            enableHighAccuracy: false,
+            maximumAge: 300000,
+            timeout: 10000,
+        });
+    }
+
+    const locationControl = L.control({ position: "topleft" });
+    locationControl.onAdd = function () {
+        const container = L.DomUtil.create("div", "leaflet-bar map-location-control");
+        const button = L.DomUtil.create("button", "", container);
+        button.type = "button";
+        button.title = "Pokaż moją okolicę";
+        button.setAttribute("aria-label", "Pokaż moją okolicę");
+        button.innerHTML = '<svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 22s7-5.2 7-12A7 7 0 1 0 5 10c0 6.8 7 12 7 12Zm0-9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg>';
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.on(button, "click", function () {
+            showUserLocation();
+        });
+        return container;
+    };
+    locationControl.addTo(map);
 
     function markerIcon(color) {
         const markerColor = /^#[0-9a-f]{6}$/i.test(color || "") ? color : "#475569";

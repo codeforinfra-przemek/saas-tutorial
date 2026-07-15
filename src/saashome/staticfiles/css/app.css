@@ -164,6 +164,50 @@ button {
     z-index: 1;
 }
 
+.map-location-control button {
+    align-items: center;
+    background: #ffffff;
+    border: 0;
+    color: #0f704f;
+    cursor: pointer;
+    display: flex;
+    height: 34px;
+    justify-content: center;
+    padding: 0;
+    width: 34px;
+}
+
+.map-location-control button:hover {
+    background: #effdf6;
+}
+
+.map-location-control button:focus-visible {
+    outline: 2px solid #19a974;
+    outline-offset: -2px;
+}
+
+.map-location-control svg {
+    height: 18px;
+    width: 18px;
+}
+
+.map-location-status {
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+    color: #0f704f;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.35;
+    max-width: 260px;
+    padding: 0.55rem 0.7rem;
+}
+
+.map-location-status.is-error {
+    color: #b91c1c;
+}
+
 .franchise-card {
     border: 1px solid #e2e8f0;
     background: #ffffff;
