@@ -174,7 +174,7 @@ def franchise_directory_view(request):
     context = {
         "site_name": "SaaS Home",
         "page_title": "Porównaj franczyzy",
-        "active_page": "franchises",
+        "active_page": "franchise_directory",
         "franchises": franchises,
         "categories": FranchiseCategory.objects.filter(is_active=True),
         "business_type_choices": Franchise.BUSINESS_TYPE_CHOICES,
@@ -182,6 +182,32 @@ def franchise_directory_view(request):
         "saved_franchise_ids": get_saved_franchise_ids_for_user(request.user),
     }
     return render(request, "franchises/directory.html", context)
+
+
+def franchise_compare_view(request):
+    selected_ids = []
+    for value in request.GET.get("ids", "").split(","):
+        try:
+            franchise_id = int(value.strip())
+        except (TypeError, ValueError):
+            continue
+        if franchise_id not in selected_ids:
+            selected_ids.append(franchise_id)
+
+    selected_ids = selected_ids[:4]
+    franchises_by_id = {
+        franchise.id: franchise
+        for franchise in Franchise.objects.filter(id__in=selected_ids, is_active=True).select_related("category")
+    }
+    franchises = [franchises_by_id[franchise_id] for franchise_id in selected_ids if franchise_id in franchises_by_id]
+
+    context = {
+        "site_name": "SaaS Home",
+        "page_title": "Porównanie franczyz",
+        "active_page": "franchise_directory",
+        "franchises": franchises,
+    }
+    return render(request, "franchises/compare.html", context)
 
 
 def franchise_detail_view(request, slug):

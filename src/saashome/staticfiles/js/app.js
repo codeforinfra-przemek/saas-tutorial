@@ -111,3 +111,179 @@ function escapeHtml(value) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
 }
+
+function initDirectorySelection() {
+    const directory = document.querySelector("[data-directory-selection]");
+    if (!directory) {
+        return;
+    }
+
+    const storageKey = "saashome-directory-comparison";
+    const maximumSelections = 4;
+    const selectionBar = directory.querySelector("[data-directory-selection-bar]");
+    const selectionCount = directory.querySelector("[data-directory-selection-count]");
+    const compareButton = directory.querySelector("[data-directory-compare]");
+    let selectedIds = [];
+
+    try {
+        const storedIds = JSON.parse(window.localStorage.getItem(storageKey) || "[]");
+        if (Array.isArray(storedIds)) {
+            selectedIds = storedIds.map(String).filter(function (value, index, values) {
+                return /^\d+$/.test(value) && values.indexOf(value) === index;
+            }).slice(0, maximumSelections);
+        }
+    } catch (error) {
+        selectedIds = [];
+    }
+
+    function persistSelection() {
+        try {
+            window.localStorage.setItem(storageKey, JSON.stringify(selectedIds));
+        } catch (error) {
+            // The directory remains usable when browser storage is unavailable.
+        }
+    }
+
+    function reorderSelectedRecords() {
+        const containers = [
+            directory.querySelector(".mobile-records"),
+            directory.querySelector(".desktop-table tbody"),
+        ];
+
+        containers.forEach(function (container) {
+            if (!container) {
+                return;
+            }
+            selectedIds.slice().reverse().forEach(function (id) {
+                const record = container.querySelector('[data-directory-franchise-id="' + id + '"]');
+                if (record) {
+                    container.prepend(record);
+                }
+            });
+        });
+    }
+
+    function updateSelectionUI() {
+        directory.querySelectorAll("[data-directory-select]").forEach(function (checkbox) {
+            checkbox.checked = selectedIds.indexOf(checkbox.value) !== -1;
+        });
+
+        if (selectionBar) {
+            selectionBar.classList.toggle("hidden", selectedIds.length === 0);
+            selectionBar.classList.toggle("flex", selectedIds.length > 0);
+        }
+        if (selectionCount) {
+            selectionCount.textContent = String(selectedIds.length);
+        }
+        if (compareButton) {
+            compareButton.disabled = selectedIds.length < 2;
+        }
+        reorderSelectedRecords();
+    }
+
+    directory.querySelectorAll("[data-directory-select]").forEach(function (checkbox) {
+        checkbox.addEventListener("change", function () {
+            const id = checkbox.value;
+            if (checkbox.checked) {
+                if (selectedIds.indexOf(id) === -1 && selectedIds.length < maximumSelections) {
+                    selectedIds.push(id);
+                } else if (selectedIds.length >= maximumSelections) {
+                    window.alert("Możesz porównać maksymalnie 4 franczyzy jednocześnie.");
+                }
+            } else {
+                selectedIds = selectedIds.filter(function (selectedId) {
+                    return selectedId !== id;
+                });
+            }
+            persistSelection();
+            updateSelectionUI();
+        });
+    });
+
+    if (compareButton) {
+        compareButton.addEventListener("click", function () {
+            if (selectedIds.length < 2) {
+                return;
+            }
+            window.location.href = directory.dataset.compareUrl + "?ids=" + encodeURIComponent(selectedIds.join(","));
+        });
+    }
+
+    let currentSort = "";
+    let currentDirection = "asc";
+
+    function valueForSort(record, field) {
+        const value = record.dataset["sort" + field.charAt(0).toUpperCase() + field.slice(1)] || "";
+        if (field === "name" || field === "data") {
+            return value.toLocaleLowerCase();
+        }
+        const numericValue = Number(value);
+        return Number.isFinite(numericValue) ? numericValue : null;
+    }
+
+    function compareRecords(left, right, field, direction) {
+        const leftValue = valueForSort(left, field);
+        const rightValue = valueForSort(right, field);
+        const multiplier = direction === "asc" ? 1 : -1;
+
+        if (leftValue === null || leftValue === "") {
+            return rightValue === null || rightValue === "" ? 0 : 1;
+        }
+        if (rightValue === null || rightValue === "") {
+            return -1;
+        }
+        if (leftValue < rightValue) {
+            return -1 * multiplier;
+        }
+        if (leftValue > rightValue) {
+            return 1 * multiplier;
+        }
+        if (field === "network") {
+            const leftGrowth = Number(left.dataset.sortGrowth || "0");
+            const rightGrowth = Number(right.dataset.sortGrowth || "0");
+            return (leftGrowth - rightGrowth) * multiplier;
+        }
+        return 0;
+    }
+
+    function sortRecords(field, direction) {
+        [
+            directory.querySelector(".mobile-records"),
+            directory.querySelector(".desktop-table tbody"),
+        ].forEach(function (container) {
+            if (!container) {
+                return;
+            }
+            const records = Array.from(container.querySelectorAll("[data-directory-franchise-id]"));
+            records.sort(function (left, right) {
+                return compareRecords(left, right, field, direction);
+            });
+            records.forEach(function (record) {
+                container.appendChild(record);
+            });
+        });
+
+        directory.querySelectorAll("[data-directory-sort]").forEach(function (button) {
+            const isCurrent = button.dataset.directorySort === field;
+            button.setAttribute("aria-sort", isCurrent ? (direction === "asc" ? "ascending" : "descending") : "none");
+            const indicator = button.querySelector("span");
+            if (indicator) {
+                indicator.textContent = isCurrent ? (direction === "asc" ? "↑" : "↓") : "↕";
+            }
+        });
+        reorderSelectedRecords();
+    }
+
+    directory.querySelectorAll("[data-directory-sort]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            const field = button.dataset.directorySort;
+            currentDirection = currentSort === field && currentDirection === "asc" ? "desc" : "asc";
+            currentSort = field;
+            sortRecords(field, currentDirection);
+        });
+    });
+
+    updateSelectionUI();
+}
+
+document.addEventListener("DOMContentLoaded", initDirectorySelection);

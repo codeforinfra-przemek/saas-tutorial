@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     franchise_detail_view,
+    franchise_compare_view,
     franchise_directory_view,
     franchise_list_view,
     franchise_location_create_view,
@@ -21,6 +22,7 @@ app_name = "franchises"
 urlpatterns = [
     path("", franchise_list_view, name="list"),
     path("directory/", franchise_directory_view, name="directory"),
+    path("compare/", franchise_compare_view, name="compare"),
     path("manage/", franchise_manage_list_view, name="manage_list"),
     path("manage/new/", franchise_manage_create_view, name="manage_create"),
     path("manage/<int:pk>/", franchise_manage_detail_view, name="manage_detail"),

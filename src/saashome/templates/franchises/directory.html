@@ -10,20 +10,20 @@
 {% endblock %}
 
 {% block content %}
-    <section class="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8 lg:px-10">
+    <section class="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8 lg:px-10" data-directory-selection data-compare-url="{% url 'franchises:compare' %}">
         <div class="mb-5 flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
                 <p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Katalog analityczny</p>
                 <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">Porównaj franczyzy bez mapy</h1>
-                <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">Filtruj oferty po parametrach inwestycyjnych, skali sieci i danych operacyjnych.</p>
+                <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">Wyszukaj ofertę, uporządkuj dane i wybierz maksymalnie cztery franczyzy do porównania.</p>
             </div>
             <a href="{% url 'franchises:list' %}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Widok mapy</a>
         </div>
 
         <form method="get" class="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-4">
             <div class="xl:col-span-2">
-                <label for="directory-q" class="mb-1 block text-xs font-bold uppercase text-slate-500">Szukaj</label>
-                <input id="directory-q" name="q" value="{{ filters.q }}" type="search" class="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950" placeholder="Nazwa, opis lub segment">
+                <label for="directory-q" class="mb-1 block text-xs font-bold uppercase text-slate-500">Nazwa franczyzy</label>
+                <input id="directory-q" name="q" value="{{ filters.q }}" type="search" class="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950" placeholder="Wpisz fragment nazwy, np. żab">
             </div>
             <div>
                 <label for="directory-category" class="mb-1 block text-xs font-bold uppercase text-slate-500">Kategoria</label>
@@ -69,17 +69,22 @@
             </div>
         </form>
 
-        <div class="mt-5 flex items-center justify-between gap-3">
+        <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p class="text-sm font-bold text-slate-600">{{ franchises|length }} ofert spełnia wybrane kryteria</p>
-            <p class="text-xs text-slate-500">Kwoty są prezentowane w PLN.</p>
+            <p class="text-xs text-slate-500">Kliknij nagłówek kolumny, aby sortować rosnąco lub malejąco.</p>
+        </div>
+
+        <div class="directory-selection-bar mt-4 hidden items-center justify-between gap-3 rounded-lg border border-brand-200 bg-brand-50 p-3" data-directory-selection-bar aria-live="polite">
+            <p class="text-sm font-bold text-brand-900"><span data-directory-selection-count>0</span> z 4 wybranych do porównania</p>
+            <button type="button" data-directory-compare class="inline-flex min-h-10 items-center justify-center rounded-lg bg-brand-700 px-4 py-2 text-sm font-extrabold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-slate-300">Porównaj wybrane</button>
         </div>
 
         <div class="mobile-records mt-4">
             {% for franchise in franchises %}
-                <article class="mobile-record">
+                <article class="mobile-record" data-directory-franchise-id="{{ franchise.id }}" data-sort-name="{{ franchise.name|lower }}" data-sort-investment="{{ franchise.min_investment|default_if_none:'' }}" data-sort-liquid="{{ franchise.liquid_capital_required|default_if_none:'' }}" data-sort-network="{{ franchise.poland_units|default_if_none:'' }}" data-sort-growth="{{ franchise.unit_growth_percent_1y|default_if_none:'' }}" data-sort-revenue="{{ franchise.mature_unit_revenue_annual|default_if_none:'' }}" data-sort-payback="{{ franchise.estimated_payback_months|default_if_none:'' }}" data-sort-term="{{ franchise.franchise_term_years|default_if_none:'' }}" data-sort-data="{{ franchise.get_data_status_display|lower }}">
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0"><a href="{{ franchise.get_absolute_url }}" class="font-black text-slate-950">{{ franchise.name }}</a><p class="mt-1 text-xs text-slate-500">{{ franchise.category.name }}</p></div>
-                        <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-black text-slate-700">{{ franchise.get_data_status_display }}</span>
+                        <label class="flex shrink-0 items-center gap-2 text-xs font-bold text-slate-700"><input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" data-directory-select value="{{ franchise.id }}"> Porównaj</label>
                     </div>
                     <dl class="mobile-record-grid">
                         <div><dt>Inwestycja</dt><dd>{% if franchise.min_investment %}od {{ franchise.min_investment|floatformat:0 }} zł{% else %}b/d{% endif %}</dd></div>
@@ -96,11 +101,24 @@
         </div>
 
         <div class="desktop-table table-scroll mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-            <table class="w-full min-w-[1180px] text-left text-sm text-slate-600">
-                <thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Franczyza</th><th class="px-4 py-3">Inwestycja</th><th class="px-4 py-3">Kapitał płynny</th><th class="px-4 py-3">PL / wzrost</th><th class="px-4 py-3">Dojrzała placówka</th><th class="px-4 py-3">Zwrot</th><th class="px-4 py-3">Umowa</th><th class="px-4 py-3">Dane</th></tr></thead>
+            <table class="w-full min-w-[1240px] text-left text-sm text-slate-600">
+                <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                        <th class="w-12 px-4 py-3"><span class="sr-only">Wybierz</span></th>
+                        <th class="px-4 py-3"><button type="button" class="directory-sort-button" data-directory-sort="name">Franczyza <span aria-hidden="true">↕</span></button></th>
+                        <th class="px-4 py-3"><button type="button" class="directory-sort-button" data-directory-sort="investment">Inwestycja <span aria-hidden="true">↕</span></button></th>
+                        <th class="px-4 py-3"><button type="button" class="directory-sort-button" data-directory-sort="liquid">Kapitał płynny <span aria-hidden="true">↕</span></button></th>
+                        <th class="px-4 py-3"><button type="button" class="directory-sort-button" data-directory-sort="network">PL / wzrost <span aria-hidden="true">↕</span></button></th>
+                        <th class="px-4 py-3"><button type="button" class="directory-sort-button" data-directory-sort="revenue">Dojrzała placówka <span aria-hidden="true">↕</span></button></th>
+                        <th class="px-4 py-3"><button type="button" class="directory-sort-button" data-directory-sort="payback">Zwrot <span aria-hidden="true">↕</span></button></th>
+                        <th class="px-4 py-3"><button type="button" class="directory-sort-button" data-directory-sort="term">Umowa <span aria-hidden="true">↕</span></button></th>
+                        <th class="px-4 py-3"><button type="button" class="directory-sort-button" data-directory-sort="data">Dane <span aria-hidden="true">↕</span></button></th>
+                    </tr>
+                </thead>
                 <tbody>
                     {% for franchise in franchises %}
-                        <tr class="border-t border-slate-200 hover:bg-slate-50">
+                        <tr class="border-t border-slate-200 hover:bg-slate-50" data-directory-franchise-id="{{ franchise.id }}" data-sort-name="{{ franchise.name|lower }}" data-sort-investment="{{ franchise.min_investment|default_if_none:'' }}" data-sort-liquid="{{ franchise.liquid_capital_required|default_if_none:'' }}" data-sort-network="{{ franchise.poland_units|default_if_none:'' }}" data-sort-growth="{{ franchise.unit_growth_percent_1y|default_if_none:'' }}" data-sort-revenue="{{ franchise.mature_unit_revenue_annual|default_if_none:'' }}" data-sort-payback="{{ franchise.estimated_payback_months|default_if_none:'' }}" data-sort-term="{{ franchise.franchise_term_years|default_if_none:'' }}" data-sort-data="{{ franchise.get_data_status_display|lower }}">
+                            <td class="px-4 py-3"><label class="inline-flex items-center"><input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" data-directory-select value="{{ franchise.id }}"><span class="sr-only">Wybierz {{ franchise.name }} do porównania</span></label></td>
                             <td class="px-4 py-3"><a href="{{ franchise.get_absolute_url }}" class="font-black text-slate-950 hover:text-brand-700">{{ franchise.name }}</a><p class="mt-1 text-xs text-slate-500">{{ franchise.category.name }} · {{ franchise.get_business_type_display }}</p></td>
                             <td class="px-4 py-3">{% if franchise.min_investment %}{{ franchise.min_investment|floatformat:0 }} - {{ franchise.max_investment|floatformat:0 }} zł{% else %}b/d{% endif %}</td>
                             <td class="px-4 py-3">{% if franchise.liquid_capital_required %}{{ franchise.liquid_capital_required|floatformat:0 }} zł{% else %}b/d{% endif %}</td>
@@ -111,7 +129,7 @@
                             <td class="px-4 py-3"><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">{{ franchise.get_data_status_display }}</span></td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="8" class="px-4 py-8 text-center text-slate-500">Brak ofert dla tych filtrów.</td></tr>
+                        <tr><td colspan="9" class="px-4 py-8 text-center text-slate-500">Brak ofert dla tych filtrów.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

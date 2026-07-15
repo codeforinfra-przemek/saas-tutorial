@@ -61,6 +61,12 @@
                 </svg>
                 <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Lista franczyz</span>
             </a>
+            <a href="{% url 'franchises:directory' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'franchise_directory' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Porównaj dane">
+                <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6"/>
+                </svg>
+                <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Porównaj dane</span>
+            </a>
             <a href="{% url 'content:article_list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'content' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Poradnik">
                 <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
                     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 4h10a4 4 0 0 1 4 4v12H9a4 4 0 0 0-4-4V4Zm0 0v12m4-8h6m-6 4h6"/>

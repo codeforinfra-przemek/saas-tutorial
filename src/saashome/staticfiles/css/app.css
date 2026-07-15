@@ -54,6 +54,31 @@ button {
     scrollbar-width: thin;
 }
 
+.directory-sort-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 800;
+    text-align: left;
+}
+
+.directory-sort-button:hover,
+.directory-sort-button:focus-visible {
+    color: #0f704f;
+    outline: none;
+}
+
+.directory-sort-button span {
+    color: #64748b;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
 .compact-filter-form {
     display: flex;
     width: 100%;
