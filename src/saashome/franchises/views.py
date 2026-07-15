@@ -61,6 +61,7 @@ def build_map_markers(locations):
                 "lat": float(location.latitude),
                 "lng": float(location.longitude),
                 "franchiseName": franchise.name,
+                "franchiseSlug": franchise.slug,
                 "city": location.city,
                 "category": franchise.category.name,
                 "url": franchise.get_absolute_url(),

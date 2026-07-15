@@ -2,9 +2,10 @@ from decimal import Decimal
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from accounts.models import Organization
+from accounts.models import Organization, OrganizationMembership, UserProfile
 from billing.models import FranchisePromotion, OrganizationSubscription, Plan
 from content.models import Article, ArticleCategory, LandingPage
 from franchises.models import Franchise, FranchiseCategory, FranchiseLocation
@@ -14,6 +15,13 @@ from visits.models import Visit, VisitEvent
 
 class Command(BaseCommand):
     help = "Seed richer demo data for the franchise SaaS MVP."
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--vendor-username",
+            default="",
+            help="Assign this existing user as owner of the demo vendor organizations.",
+        )
 
     def handle(self, *args, **options):
         call_command("seed_plans")
@@ -26,7 +34,39 @@ class Command(BaseCommand):
         self.seed_leads(franchises)
         self.seed_visits(franchises)
         self.seed_content(categories, franchises)
+        self.seed_vendor_memberships(organizations, options["vendor_username"])
         self.stdout.write(self.style.SUCCESS("Demo data seeded."))
+
+    def seed_vendor_memberships(self, organizations, username):
+        if not username:
+            self.stdout.write(
+                self.style.WARNING(
+                    "No vendor membership created. Run with --vendor-username YOUR_USERNAME to populate Vendor Dashboard."
+                )
+            )
+            return
+
+        user = get_user_model().objects.filter(username=username).first()
+        if not user:
+            self.stdout.write(self.style.WARNING(f'User "{username}" was not found; vendor memberships were skipped.'))
+            return
+
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        if profile.user_type != UserProfile.USER_TYPE_VENDOR:
+            profile.user_type = UserProfile.USER_TYPE_VENDOR
+            profile.save(update_fields=["user_type", "updated_at"])
+
+        for organization in organizations.values():
+            OrganizationMembership.objects.update_or_create(
+                organization=organization,
+                user=user,
+                defaults={"role": OrganizationMembership.ROLE_OWNER, "is_active": True},
+            )
+        self.stdout.write(
+            self.style.SUCCESS(
+                f'Assigned {user.username} as owner of {len(organizations)} demo vendor organizations.'
+            )
+        )
 
     def seed_categories(self):
         data = [

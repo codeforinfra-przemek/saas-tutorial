@@ -24,27 +24,40 @@ window.initFranchiseMap = function initFranchiseMap(options) {
         attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
     }).addTo(map);
 
-    const bounds = [];
+    const markerLayer = L.layerGroup().addTo(map);
 
-    markers.forEach(function (marker) {
-        if (typeof marker.lat !== "number" || typeof marker.lng !== "number") {
-            return;
+    function renderMarkers(franchiseSlug) {
+        const visibleMarkers = franchiseSlug
+            ? markers.filter(function (marker) { return marker.franchiseSlug === franchiseSlug; })
+            : markers;
+        const bounds = [];
+
+        markerLayer.clearLayers();
+        visibleMarkers.forEach(function (marker) {
+            if (typeof marker.lat !== "number" || typeof marker.lng !== "number") {
+                return;
+            }
+
+            const popup = [
+                "<strong>" + escapeHtml(marker.franchiseName || "") + "</strong>",
+                "<span>" + escapeHtml(marker.city || "") + "</span>",
+                "<small>" + escapeHtml(marker.category || "") + "</small>",
+                '<a href="' + encodeURI(marker.url || "#") + '">Zobacz szczegóły</a>',
+            ].join("<br>");
+
+            L.marker([marker.lat, marker.lng]).addTo(markerLayer).bindPopup(popup);
+            bounds.push([marker.lat, marker.lng]);
+        });
+
+        if (bounds.length) {
+            map.fitBounds(bounds, { padding: [36, 36], maxZoom: 12 });
         }
-
-        const popup = [
-            "<strong>" + escapeHtml(marker.franchiseName || "") + "</strong>",
-            "<span>" + escapeHtml(marker.city || "") + "</span>",
-            "<small>" + escapeHtml(marker.category || "") + "</small>",
-            '<a href="' + encodeURI(marker.url || "#") + '">Zobacz szczegóły</a>',
-        ].join("<br>");
-
-        L.marker([marker.lat, marker.lng]).addTo(map).bindPopup(popup);
-        bounds.push([marker.lat, marker.lng]);
-    });
-
-    if (bounds.length) {
-        map.fitBounds(bounds, { padding: [36, 36], maxZoom: 12 });
     }
+
+    renderMarkers();
+    window.franchiseMapController = {
+        filterByFranchise: renderMarkers,
+    };
 
     setTimeout(function () {
         map.invalidateSize();

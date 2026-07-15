@@ -53,6 +53,15 @@
     transform: translateY(-1px);
 }
 
+.franchise-card.is-expanded {
+    border-color: #14b8a6;
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
+}
+
+.franchise-card-details[hidden] {
+    display: none;
+}
+
 .franchise-filter-pill {
     white-space: nowrap;
 }
