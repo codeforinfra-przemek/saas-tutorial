@@ -1,0 +1,10 @@
+Witaj,
+
+otrzymujesz tę wiadomość, ponieważ ten adres email został użyty do założenia lub aktualizacji konta w Rankingu Franczyzn.
+
+Potwierdź adres email, klikając poniższy link:
+{{ activate_url }}
+
+Jeśli to nie Ty inicjowałeś tę akcję, możesz bezpiecznie zignorować tę wiadomość.
+
+Zespół Rankingu Franczyzn
