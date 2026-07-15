@@ -1,0 +1,21 @@
+{% if request.user.is_authenticated %}
+    {% if is_saved or franchise.id in saved_franchise_ids %}
+        <form method="post" action="{% url 'shortlists:unsave' slug=franchise.slug %}">
+            {% csrf_token %}
+            <button type="submit" class="inline-flex min-h-9 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-700 hover:bg-emerald-100">
+                Zapisane
+            </button>
+        </form>
+    {% else %}
+        <form method="post" action="{% url 'shortlists:save' slug=franchise.slug %}">
+            {% csrf_token %}
+            <button type="submit" class="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-100">
+                Zapisz
+            </button>
+        </form>
+    {% endif %}
+{% else %}
+    <a href="{% url 'account_login' %}?next={{ request.get_full_path|urlencode }}" class="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-100">
+        Log in to save
+    </a>
+{% endif %}

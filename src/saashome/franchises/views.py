@@ -11,6 +11,7 @@ from django.utils.text import slugify
 from billing.services import apply_promotion_flags, get_organization_plan
 from leads.forms import LeadForm
 from leads.models import Lead
+from shortlists.services import get_saved_franchise_ids_for_user, is_franchise_saved_by_user
 from visits.models import Visit
 from visits.services import create_visit
 
@@ -117,6 +118,7 @@ def franchise_list_view(request):
         "q": q,
         "investment_max": investment_max,
         "map_markers": build_map_markers(active_locations),
+        "saved_franchise_ids": get_saved_franchise_ids_for_user(request.user),
     }
     return render(request, "franchises/list.html", context)
 
@@ -155,6 +157,7 @@ def franchise_detail_view(request, slug):
         "lead_form": lead_form,
         "map_markers": build_map_markers(locations),
         "organization_plan": get_organization_plan(franchise.organization),
+        "is_saved": is_franchise_saved_by_user(request.user, franchise),
     }
     return render(request, "franchises/detail.html", context)
 

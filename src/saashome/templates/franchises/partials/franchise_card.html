@@ -1,4 +1,4 @@
-<a href="{{ franchise.get_absolute_url }}" class="franchise-card block rounded-lg p-3.5">
+<article class="franchise-card rounded-lg p-3.5">
     <div class="flex items-start gap-3">
         <div class="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
             {% if franchise.logo %}
@@ -9,7 +9,9 @@
         </div>
         <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-1.5">
-                <h2 class="truncate text-base font-black text-slate-950">{{ franchise.name }}</h2>
+                <a href="{{ franchise.get_absolute_url }}" class="min-w-0">
+                    <h2 class="truncate text-base font-black text-slate-950 hover:text-brand-700">{{ franchise.name }}</h2>
+                </a>
                 {% if franchise.display_promoted %}
                     <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700">Promowane</span>
                 {% endif %}
@@ -42,4 +44,11 @@
             <p class="mt-0.5 font-black text-slate-950">{{ franchise.poland_units|default:"b/d" }}</p>
         </div>
     </div>
-</a>
+
+    <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <a href="{{ franchise.get_absolute_url }}" class="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-950 px-3 py-2 text-xs font-extrabold text-white hover:bg-slate-800">
+            Szczegóły
+        </a>
+        {% include "shortlists/partials/save_button.html" %}
+    </div>
+</article>

@@ -58,6 +58,7 @@ class Lead(models.Model):
 
     privacy_consent = models.BooleanField(default=False)
     marketing_consent = models.BooleanField(default=False)
+    multi_request_id = models.UUIDField(null=True, blank=True, db_index=True)
     admin_notes = models.TextField(blank=True)
     vendor_notes = models.TextField(blank=True)
     last_activity_at = models.DateTimeField(null=True, blank=True)

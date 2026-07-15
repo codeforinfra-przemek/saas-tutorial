@@ -74,6 +74,14 @@
                 </svg>
                 <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Pakiety</span>
             </a>
+            {% if request.user.is_authenticated %}
+                <a href="{% url 'shortlists:saved_list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'saved' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Zapisane">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                        <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m12 17-6 3 1.5-6.5L2.5 9l6.7-.6L12 2l2.8 6.4 6.7.6-5 4.5L18 20l-6-3Z"/>
+                    </svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Zapisane</span>
+                </a>
+            {% endif %}
             {% if request.user.is_staff %}
                 <a href="{% url 'franchises:manage_list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'franchise_management' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Zarządzaj franczyzami">
                     <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24">

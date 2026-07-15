@@ -127,3 +127,26 @@ Optional notification email:
 ```bash
 LEADS_NOTIFICATION_EMAIL=admin@example.com
 ```
+
+## Saved Franchises / Comparison MVP
+
+The `shortlists` app lets logged-in users save franchises and submit one request
+to multiple saved franchises.
+
+- saved list: `/saved/`
+- comparison: `/saved/compare/`
+- multi-request form: `/saved/request-info/`
+- save/unsave actions use POST only:
+  - `/franchises/<slug>/save/`
+  - `/franchises/<slug>/unsave/`
+- multi-request creates one normal `Lead` per selected franchise
+- duplicate leads for the same email + franchise are skipped for 24 hours
+- `Lead.multi_request_id` groups leads created from the same multi-request
+
+After pulling shortlist changes:
+
+```bash
+cd src/saashome
+python manage.py migrate
+python manage.py runserver
+```

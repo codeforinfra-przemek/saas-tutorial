@@ -101,6 +101,7 @@ INSTALLED_APPS = [
     'content',
     'franchises',
     'leads',
+    'shortlists',
     'vendor',
     'visits',
 ]

@@ -33,6 +33,7 @@ class LeadAdmin(admin.ModelAdmin):
         "visit",
         "investment_budget",
         "status",
+        "multi_request_id",
         "last_activity_at",
         "created_at",
     )
@@ -58,6 +59,7 @@ class LeadAdmin(admin.ModelAdmin):
         "utm_term",
         "user_agent",
         "ip_hash",
+        "multi_request_id",
         "contacted_at",
         "qualified_at",
         "rejected_at",
@@ -82,6 +84,7 @@ class LeadAdmin(admin.ModelAdmin):
                     "investment_budget",
                     "message",
                     "status",
+                    "multi_request_id",
                 )
             },
         ),

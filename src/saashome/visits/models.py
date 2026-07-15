@@ -67,6 +67,10 @@ class VisitEvent(models.Model):
     EVENT_SUBMIT_LEAD_FORM = "submit_lead_form"
     EVENT_CLICK_WEBSITE = "click_website"
     EVENT_DOWNLOAD_PDF = "download_pdf"
+    EVENT_SAVE_FRANCHISE = "save_franchise"
+    EVENT_UNSAVE_FRANCHISE = "unsave_franchise"
+    EVENT_COMPARE_FRANCHISES = "compare_franchises"
+    EVENT_MULTI_REQUEST_SUBMIT = "multi_request_submit"
     EVENT_TYPE_CHOICES = [
         (EVENT_PAGE_VIEW, "Page view"),
         (EVENT_CLICK_CTA, "Click CTA"),
@@ -74,6 +78,10 @@ class VisitEvent(models.Model):
         (EVENT_SUBMIT_LEAD_FORM, "Submit lead form"),
         (EVENT_CLICK_WEBSITE, "Click website"),
         (EVENT_DOWNLOAD_PDF, "Download PDF"),
+        (EVENT_SAVE_FRANCHISE, "Save franchise"),
+        (EVENT_UNSAVE_FRANCHISE, "Unsave franchise"),
+        (EVENT_COMPARE_FRANCHISES, "Compare franchises"),
+        (EVENT_MULTI_REQUEST_SUBMIT, "Multi-request submit"),
     ]
 
     visit = models.ForeignKey(Visit, on_delete=models.CASCADE, related_name="events")

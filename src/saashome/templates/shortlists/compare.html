@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | Compare franchises{% endblock %}
+
+{% block content %}
+    <section class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
+        <div class="flex flex-col gap-4 border-b border-slate-200 pb-6 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+                <p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Comparison</p>
+                <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">Compare franchises</h1>
+                <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Porównaj zapisane franczyzy po najważniejszych parametrach inwestycyjnych i operacyjnych.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a href="{% url 'shortlists:multi_request' %}" class="inline-flex min-h-10 items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-emerald-700">Request info</a>
+                <a href="{% url 'shortlists:saved_list' %}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Back to saved</a>
+            </div>
+        </div>
+
+        {% if franchises %}
+            <div class="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead class="bg-slate-50">
+                        <tr>
+                            <th class="w-52 px-4 py-3 text-left text-xs font-extrabold uppercase tracking-wide text-slate-500">Parametr</th>
+                            {% for franchise in franchises %}
+                                <th class="min-w-56 px-4 py-3 text-left">
+                                    <a href="{{ franchise.get_absolute_url }}" class="text-sm font-black text-slate-950 hover:text-brand-700">{{ franchise.name }}</a>
+                                    <p class="mt-1 text-xs font-semibold text-slate-500">{{ franchise.category.name }}</p>
+                                </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Category</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.category.name }}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Min investment</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.min_investment %}{{ franchise.min_investment|floatformat:0 }} zł{% else %}b/d{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Max investment</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.max_investment %}{{ franchise.max_investment|floatformat:0 }} zł{% else %}b/d{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Initial fee</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.initial_fee %}{{ franchise.initial_fee|floatformat:0 }} zł{% else %}b/d{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Royalty fee</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.royalty_fee_text|default:"b/d" }}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Marketing fee</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.marketing_fee_text|default:"b/d" }}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Business type</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.get_business_type_display }}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Requires premises</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.required_premises|default:"b/d" }}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Home-based</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.home_based %}Tak{% else %}Nie{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Part-time possible</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.part_time_possible %}Tak{% else %}Nie{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Training provided</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.training_provided %}Tak{% else %}Nie{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Financing available</th>{% for franchise in franchises %}<td class="px-4 py-3">{% if franchise.financing_available %}Tak{% else %}Nie{% endif %}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Founded year</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.founded_year|default:"b/d" }}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Franchising since</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.franchising_since|default:"b/d" }}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Total units</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.total_units|default:"b/d" }}</td>{% endfor %}</tr>
+                        <tr><th class="px-4 py-3 text-left font-bold text-slate-600">Poland units</th>{% for franchise in franchises %}<td class="px-4 py-3">{{ franchise.poland_units|default:"b/d" }}</td>{% endfor %}</tr>
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="mt-8 rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
+                <h2 class="text-2xl font-black text-slate-950">Brak franczyz do porównania</h2>
+                <a href="{% url 'shortlists:saved_list' %}" class="mt-6 inline-flex min-h-11 items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-extrabold text-white hover:bg-emerald-700">Wróć do zapisanych</a>
+            </div>
+        {% endif %}
+    </section>
+{% endblock %}
