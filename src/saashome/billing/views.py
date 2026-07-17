@@ -1,8 +1,15 @@
+import json
+
+import stripe
 from django.conf import settings
 from django.contrib import messages
-from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import OperationalError, ProgrammingError
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
+from django.db import OperationalError, ProgrammingError, transaction
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from accounts.permissions import (
@@ -11,15 +18,24 @@ from accounts.permissions import (
     staff_required,
     vendor_required,
 )
-from accounts.services import get_user_franchises
+from accounts.services import get_user_franchises, get_user_organizations
 
 from .forms import FranchiseSubscriptionActionForm, InvestorServiceRequestForm, SubscriptionReviewForm
-from .models import FranchiseSubscription, FranchiseSubscriptionRequest, InvestorServiceRequest, Plan
+from .models import (
+    FranchiseSubscription,
+    FranchiseSubscriptionRequest,
+    InvestorServiceRequest,
+    Plan,
+    StripeWebhookEvent,
+)
 from .services import (
     approve_subscription_request,
+    create_checkout_session,
+    create_customer_portal_session,
     create_subscription_request,
     get_active_franchise_subscription,
     get_active_franchise_subscription_map,
+    process_stripe_event,
     reject_subscription_request,
 )
 
@@ -89,17 +105,23 @@ def pricing_view(request):
 def vendor_pricing_view(request):
     try:
         plans = list(
-            Plan.objects.filter(is_active=True, slug__in=PAID_PLAN_SLUGS)
+            Plan.objects.filter(is_active=True, is_public=True, slug__in=PAID_PLAN_SLUGS)
             .order_by("sort_order", "price_monthly", "name")
         )
     except (OperationalError, ProgrammingError):
         plans = []
+    franchises = list(get_user_franchises(request.user))
     context = {
         "site_name": "Porównaj Franczyzę",
         "page_title": "Pricing",
         "active_page": "pricing",
         "plans": plans,
-        "franchises": get_user_franchises(request.user),
+        "franchises": franchises,
+        "manageable_franchises": [
+            franchise
+            for franchise in franchises
+            if can_manage_franchise_billing(request.user, franchise)
+        ],
         "contact_email": settings.DEFAULT_FROM_EMAIL,
     }
     return render(request, "billing/pricing.html", context)
@@ -157,7 +179,11 @@ def franchise_subscription_detail_view(request, slug):
         "requested_by",
         "reviewed_by",
     )[:20]
-    plans = Plan.objects.filter(is_active=True, slug__in=PAID_PLAN_SLUGS).order_by("sort_order")
+    plans = Plan.objects.filter(
+        is_active=True,
+        is_public=True,
+        slug__in=PAID_PLAN_SLUGS,
+    ).order_by("sort_order")
     return render(
         request,
         "billing/subscriptions/detail.html",
@@ -292,3 +318,174 @@ def subscription_request_review_view(request, pk, decision):
     except ValidationError as exc:
         messages.error(request, exc.messages[0])
     return redirect("billing:manage_requests")
+
+
+@vendor_required
+@require_POST
+def checkout_view(request, plan_slug):
+    plan = get_object_or_404(
+        Plan,
+        slug=plan_slug,
+        is_active=True,
+        is_public=True,
+    )
+    franchise = get_object_or_404(
+        get_user_franchises(request.user),
+        pk=request.POST.get("franchise_id"),
+    )
+    if not can_manage_franchise_billing(request.user, franchise):
+        raise PermissionDenied
+
+    billing_interval = request.POST.get(
+        "billing_interval",
+        FranchiseSubscription.INTERVAL_MONTHLY,
+    )
+    try:
+        checkout_url = create_checkout_session(
+            franchise=franchise,
+            plan=plan,
+            user=request.user,
+            billing_interval=billing_interval,
+            request=request,
+        )
+    except (ImproperlyConfigured, ValidationError, stripe.StripeError) as exc:
+        message = exc.messages[0] if isinstance(exc, ValidationError) else "Stripe nie mógł rozpocząć płatności. Spróbuj ponownie."
+        messages.error(request, message)
+        return redirect("billing:vendor_pricing")
+    return redirect(checkout_url)
+
+
+@login_required
+def billing_success_view(request):
+    return render(
+        request,
+        "billing/success.html",
+        {
+            "site_name": "Porównaj Franczyzę",
+            "page_title": "Płatność przyjęta",
+            "active_page": "subscriptions",
+        },
+    )
+
+
+@vendor_required
+def vendor_billing_view(request):
+    organizations = list(get_user_organizations(request.user).prefetch_related("franchises"))
+    franchises = list(get_user_franchises(request.user))
+    subscriptions = {
+        subscription.franchise_id: subscription
+        for subscription in FranchiseSubscription.objects.filter(
+            franchise__in=franchises
+        ).select_related("plan", "franchise__organization")
+    }
+    rows = [
+        {
+            "franchise": franchise,
+            "subscription": subscriptions.get(franchise.pk),
+            "can_manage": can_manage_franchise_billing(request.user, franchise),
+        }
+        for franchise in franchises
+    ]
+    customer_organization_ids = {
+        organization.pk
+        for organization in organizations
+        if hasattr(organization, "billing_customer")
+    }
+    return render(
+        request,
+        "billing/vendor_billing.html",
+        {
+            "site_name": "Porównaj Franczyzę",
+            "page_title": "Rozliczenia",
+            "active_page": "subscriptions",
+            "organizations": organizations,
+            "customer_organization_ids": customer_organization_ids,
+            "rows": rows,
+        },
+    )
+
+
+@vendor_required
+@require_POST
+def customer_portal_view(request):
+    franchise = get_object_or_404(
+        get_user_franchises(request.user),
+        pk=request.POST.get("franchise_id"),
+    )
+    if not can_manage_franchise_billing(request.user, franchise):
+        raise PermissionDenied
+    try:
+        portal_url = create_customer_portal_session(franchise.organization, request)
+    except (ImproperlyConfigured, ValidationError, stripe.StripeError) as exc:
+        message = exc.messages[0] if isinstance(exc, ValidationError) else "Nie udało się otworzyć panelu Stripe. Spróbuj ponownie."
+        messages.error(request, message)
+        return redirect("billing:vendor_billing")
+    return redirect(portal_url)
+
+
+@csrf_exempt
+@require_POST
+def stripe_webhook_view(request):
+    if not settings.STRIPE_WEBHOOK_SECRET:
+        return HttpResponse(status=503)
+
+    signature = request.headers.get("Stripe-Signature", "")
+    try:
+        event = stripe.Webhook.construct_event(
+            request.body,
+            signature,
+            settings.STRIPE_WEBHOOK_SECRET,
+        )
+    except (ValueError, stripe.SignatureVerificationError):
+        return HttpResponse(status=400)
+
+    if hasattr(event, "to_dict_recursive"):
+        event_payload = event.to_dict_recursive()
+    elif isinstance(event, dict):
+        event_payload = event
+    else:
+        event_payload = json.loads(request.body.decode("utf-8"))
+    event_id = event_payload.get("id", "")
+    event_type = event_payload.get("type", "")
+    if not event_id or not event_type:
+        return HttpResponse(status=400)
+
+    try:
+        with transaction.atomic():
+            webhook_event, _ = StripeWebhookEvent.objects.select_for_update().get_or_create(
+                stripe_event_id=event_id,
+                defaults={
+                    "event_type": event_type,
+                    "payload": event_payload,
+                },
+            )
+            if webhook_event.processed:
+                return HttpResponse(status=200)
+            webhook_event.event_type = event_type
+            webhook_event.payload = event_payload
+            webhook_event.processing_error = ""
+            process_stripe_event(event_payload)
+            webhook_event.processed = True
+            webhook_event.processed_at = timezone.now()
+            webhook_event.save(
+                update_fields=[
+                    "event_type",
+                    "payload",
+                    "processing_error",
+                    "processed",
+                    "processed_at",
+                ]
+            )
+    except Exception as exc:
+        StripeWebhookEvent.objects.update_or_create(
+            stripe_event_id=event_id,
+            defaults={
+                "event_type": event_type,
+                "payload": event_payload,
+                "processed": False,
+                "processing_error": str(exc)[:2000],
+                "processed_at": None,
+            },
+        )
+        return HttpResponse(status=500)
+    return HttpResponse(status=200)

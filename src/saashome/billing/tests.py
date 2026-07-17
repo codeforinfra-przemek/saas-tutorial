@@ -1,13 +1,24 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Organization, OrganizationMembership
-from billing.models import FranchiseSubscription, FranchiseSubscriptionRequest, Plan
-from billing.services import approve_subscription_request, franchise_has_feature
+from billing.models import (
+    BillingCustomer,
+    FranchiseSubscription,
+    FranchiseSubscriptionRequest,
+    Plan,
+    StripeWebhookEvent,
+)
+from billing.services import (
+    approve_subscription_request,
+    franchise_has_feature,
+    sync_subscription_from_stripe,
+)
 from franchises.models import Franchise, FranchiseCategory
 
 
@@ -90,6 +101,15 @@ class FranchiseSubscriptionTests(TestCase):
         self.assertEqual(request.requested_plan, self.basic)
         self.assertEqual(request.duration_months, 3)
 
+    def test_vendor_billing_renders_franchise_without_subscription(self):
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse("billing:vendor_billing"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.franchise.name)
+        self.assertContains(response, "Free")
+
     def test_approval_activates_features_and_extension_preserves_period(self):
         request = FranchiseSubscriptionRequest.objects.create(
             franchise=self.franchise,
@@ -133,3 +153,161 @@ class FranchiseSubscriptionTests(TestCase):
         subscription.refresh_from_db()
         self.assertTrue(subscription.cancel_at_period_end)
         self.assertTrue(franchise_has_feature(self.franchise, "can_view_leads"))
+
+
+class StripeBillingTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            username="stripe-owner",
+            email="stripe-owner@example.com",
+            password="test-password",
+        )
+        self.member = user_model.objects.create_user(
+            username="stripe-member",
+            email="stripe-member@example.com",
+            password="test-password",
+        )
+        self.organization = Organization.objects.create(
+            name="Stripe Vendor",
+            slug="stripe-vendor",
+            billing_email=self.owner.email,
+        )
+        OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=self.organization,
+            role=OrganizationMembership.ROLE_OWNER,
+        )
+        OrganizationMembership.objects.create(
+            user=self.member,
+            organization=self.organization,
+            role=OrganizationMembership.ROLE_MEMBER,
+        )
+        category = FranchiseCategory.objects.create(name="Stripe Food", slug="stripe-food")
+        self.franchise = Franchise.objects.create(
+            name="Stripe Franchise",
+            slug="stripe-franchise",
+            category=category,
+            organization=self.organization,
+            short_description="Stripe test profile",
+        )
+        self.plan, _ = Plan.objects.update_or_create(
+            slug="stripe-growth",
+            defaults={
+                "name": "Stripe Growth",
+                "is_active": True,
+                "is_public": True,
+                "can_view_leads": True,
+                "stripe_price_monthly_id": "price_monthly_test",
+                "stripe_price_yearly_id": "price_yearly_test",
+            },
+        )
+        self.customer = BillingCustomer.objects.create(
+            organization=self.organization,
+            stripe_customer_id="cus_test",
+            email=self.owner.email,
+        )
+
+    @patch("billing.views.create_checkout_session", return_value="https://checkout.stripe.test/session")
+    def test_only_owner_or_admin_can_start_checkout(self, create_checkout):
+        url = reverse("billing:checkout", args=[self.plan.slug])
+        payload = {"franchise_id": self.franchise.pk, "billing_interval": "monthly"}
+
+        self.client.force_login(self.member)
+        self.assertEqual(self.client.post(url, payload).status_code, 403)
+        create_checkout.assert_not_called()
+
+        self.client.force_login(self.owner)
+        response = self.client.post(url, payload)
+        self.assertRedirects(response, "https://checkout.stripe.test/session", fetch_redirect_response=False)
+        create_checkout.assert_called_once()
+
+    def test_subscription_sync_updates_only_metadata_franchise(self):
+        now = int(timezone.now().timestamp())
+        stripe_subscription = {
+            "id": "sub_test",
+            "customer": self.customer.stripe_customer_id,
+            "status": "active",
+            "current_period_start": now,
+            "current_period_end": now + 30 * 24 * 60 * 60,
+            "cancel_at_period_end": False,
+            "metadata": {
+                "franchise_id": str(self.franchise.pk),
+                "organization_id": str(self.organization.pk),
+                "billing_interval": "monthly",
+            },
+            "items": {"data": [{"price": {"id": self.plan.stripe_price_monthly_id}}]},
+        }
+
+        subscription = sync_subscription_from_stripe(stripe_subscription)
+
+        self.assertEqual(subscription.franchise, self.franchise)
+        self.assertEqual(subscription.plan, self.plan)
+        self.assertEqual(subscription.status, FranchiseSubscription.STATUS_ACTIVE)
+        self.assertEqual(subscription.stripe_subscription_id, "sub_test")
+        self.assertTrue(franchise_has_feature(self.franchise, "can_view_leads"))
+
+    @override_settings(STRIPE_WEBHOOK_SECRET="whsec_test")
+    @patch("billing.views.process_stripe_event")
+    @patch("billing.views.stripe.Webhook.construct_event")
+    def test_webhook_is_idempotent(self, construct_event, process_event):
+        event = {
+            "id": "evt_test",
+            "type": "customer.subscription.updated",
+            "data": {"object": {}},
+        }
+        construct_event.return_value = event
+        url = reverse("billing:stripe_webhook")
+
+        first = self.client.post(
+            url,
+            data="{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="test-signature",
+        )
+        second = self.client.post(
+            url,
+            data="{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="test-signature",
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        process_event.assert_called_once()
+        webhook_event = StripeWebhookEvent.objects.get(stripe_event_id="evt_test")
+        self.assertTrue(webhook_event.processed)
+
+    @override_settings(STRIPE_WEBHOOK_SECRET="whsec_test")
+    @patch("billing.views.process_stripe_event")
+    @patch("billing.views.stripe.Webhook.construct_event")
+    def test_failed_webhook_is_saved_and_can_be_retried(self, construct_event, process_event):
+        construct_event.return_value = {
+            "id": "evt_retry",
+            "type": "customer.subscription.updated",
+            "data": {"object": {}},
+        }
+        process_event.side_effect = [RuntimeError("temporary failure"), None]
+        url = reverse("billing:stripe_webhook")
+
+        first = self.client.post(
+            url,
+            data="{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="test-signature",
+        )
+        failed_event = StripeWebhookEvent.objects.get(stripe_event_id="evt_retry")
+        self.assertEqual(first.status_code, 500)
+        self.assertFalse(failed_event.processed)
+        self.assertIn("temporary failure", failed_event.processing_error)
+
+        second = self.client.post(
+            url,
+            data="{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="test-signature",
+        )
+        failed_event.refresh_from_db()
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(failed_event.processed)
+        self.assertEqual(failed_event.processing_error, "")

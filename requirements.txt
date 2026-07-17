@@ -6,3 +6,4 @@ slippers>=0.6,<1
 gunicorn
 psycopg[binary]
 dj-database-url
+stripe>=13,<15

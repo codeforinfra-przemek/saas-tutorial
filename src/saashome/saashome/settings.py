@@ -230,6 +230,14 @@ ADMIN_USER_EMAIL = os.environ.get("ADMIN_USER_EMAIL", EMAIL_HOST_USER)
 LEADS_NOTIFICATION_EMAIL = os.environ.get("LEADS_NOTIFICATION_EMAIL", "")
 CLAIMS_NOTIFICATION_EMAIL = os.environ.get("CLAIMS_NOTIFICATION_EMAIL", ADMIN_USER_EMAIL)
 
+# Stripe Checkout and Customer Portal. Secret values are read only from the
+# environment and are never exposed to templates.
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+BILLING_SUCCESS_URL = os.environ.get("BILLING_SUCCESS_URL", "")
+BILLING_CANCEL_URL = os.environ.get("BILLING_CANCEL_URL", "")
+
 ADMINS = []
 MANAGERS = []
 

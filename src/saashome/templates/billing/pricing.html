@@ -5,8 +5,8 @@
 {% block content %}
 <section class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div class="max-w-3xl"><p class="text-xs font-extrabold uppercase text-brand-700">Widoczność per franczyza</p><h1 class="mt-2 text-3xl font-black text-slate-950 sm:text-4xl">Wybierz zakres dla każdego profilu</h1><p class="mt-3 text-sm leading-6 text-slate-600">Plan działa dla jednej franczyzy. Możesz niezależnie przedłużać, zmieniać lub kończyć każdą subskrypcję.</p></div>
-        <a href="{% url 'billing:subscriptions' %}" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-5 text-sm font-extrabold text-white hover:bg-slate-800">Moje subskrypcje</a>
+        <div class="max-w-3xl"><p class="text-xs font-extrabold uppercase text-brand-700">Widoczność per franczyza</p><h1 class="mt-2 text-3xl font-black text-slate-950 sm:text-4xl">Pakiety dla franczyzodawców</h1><p class="mt-3 text-sm leading-6 text-slate-600">Plan działa dla jednej franczyzy. Możesz niezależnie przedłużać, zmieniać lub kończyć każdą subskrypcję.</p></div>
+        <a href="{% url 'billing:vendor_billing' %}" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-5 text-sm font-extrabold text-white hover:bg-slate-800">Moje rozliczenia</a>
     </div>
     <div class="mt-8 grid gap-5 lg:grid-cols-3">
     {% for plan in plans %}
@@ -18,10 +18,28 @@
                 <li>✓ Opis do {{ plan.max_description_length }} znaków</li><li>✓ {{ plan.max_gallery_images }} zdjęć i {{ plan.max_documents_per_franchise }} dokumentów</li><li>✓ Dostęp do leadów</li>
                 <li>{% if plan.can_view_analytics %}✓{% else %}–{% endif %} Analityka profilu</li><li>{% if plan.can_be_promoted %}✓{% else %}–{% endif %} Wyższa pozycja i etykieta Promowane</li><li>{% if plan.can_feature_on_homepage %}✓{% else %}–{% endif %} Wyróżnienie na stronie i w kategorii</li><li>{% if plan.can_receive_priority_leads %}✓{% else %}–{% endif %} Priorytetowa obsługa leadów</li><li>{% if plan.has_priority_support %}✓{% else %}–{% endif %} Priorytetowe wsparcie</li>
             </ul>
-            <a href="{% url 'billing:subscriptions' %}" class="mt-auto inline-flex min-h-11 w-full items-center justify-center rounded-lg {% if plan.slug == 'growth' %}bg-emerald-600 hover:bg-emerald-700{% else %}bg-slate-950 hover:bg-slate-800{% endif %} px-4 py-2 text-sm font-extrabold text-white">Wybierz franczyzę</a>
+            <div class="mt-auto pt-6">
+                {% if manageable_franchises and plan.stripe_price_monthly_id or manageable_franchises and plan.stripe_price_yearly_id %}
+                    <form method="post" action="{% url 'billing:checkout' plan.slug %}" class="space-y-3">
+                        {% csrf_token %}
+                        <label for="franchise-{{ plan.pk }}" class="block text-xs font-extrabold uppercase text-slate-500">Franczyza</label>
+                        <select id="franchise-{{ plan.pk }}" name="franchise_id" required class="block min-h-11 w-full rounded-lg border-slate-300 bg-white text-sm font-semibold text-slate-800 focus:border-emerald-500 focus:ring-emerald-500">
+                            {% for franchise in manageable_franchises %}<option value="{{ franchise.pk }}">{{ franchise.name }}</option>{% endfor %}
+                        </select>
+                        <div class="grid grid-cols-2 gap-2">
+                            {% if plan.stripe_price_monthly_id %}<button name="billing_interval" value="monthly" class="min-h-11 rounded-lg bg-slate-950 px-3 text-sm font-extrabold text-white hover:bg-slate-800">Kup miesięcznie</button>{% endif %}
+                            {% if plan.stripe_price_yearly_id %}<button name="billing_interval" value="yearly" class="min-h-11 rounded-lg bg-emerald-600 px-3 text-sm font-extrabold text-white hover:bg-emerald-700">Kup rocznie</button>{% endif %}
+                        </div>
+                    </form>
+                {% elif not manageable_franchises %}
+                    <p class="rounded-lg bg-slate-50 p-3 text-sm font-semibold text-slate-600">Zakup może rozpocząć właściciel lub administrator organizacji.</p>
+                {% else %}
+                    <a href="{% url 'billing:subscriptions' %}" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-slate-300 px-4 text-sm font-extrabold text-slate-800 hover:bg-slate-50">Zamów manualnie</a>
+                {% endif %}
+            </div>
         </article>
     {% empty %}<p class="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">Brak planów. Uruchom <code>python manage.py seed_plans</code>.</p>{% endfor %}
     </div>
-    <p class="mt-6 text-xs leading-5 text-slate-500">MVP korzysta z zatwierdzania manualnego. Złożenie dyspozycji nie pobiera płatności; administrator aktywuje plan po potwierdzeniu rozliczenia.</p>
+    <p class="mt-6 text-xs leading-5 text-slate-500">Płatność obsługuje bezpieczna strona Stripe Checkout. Dane karty nie trafiają do SaaS Home. Aktywacja następuje po potwierdzeniu płatności przez Stripe.</p>
 </section>
 {% endblock %}

@@ -270,8 +270,8 @@ organization. Vendor pages:
 
 Owners and organization admins can start, extend, change or cancel a plan.
 Members have read-only access. Cancellation takes effect at the end of the paid
-period. This MVP does not charge a card: staff confirms payment and approves the
-request in the application view.
+period. Plans with Stripe Price IDs use hosted Stripe Checkout and Customer
+Portal. Plans without those IDs keep the manual staff-approved fallback.
 
 Plan capabilities are enforced server-side. They control description and file
 limits, lead contact access, analytics, website/documents visibility, list
@@ -282,3 +282,61 @@ cd src/saashome
 python manage.py migrate
 python manage.py seed_plans  # optional; migrations already create default plans
 ```
+
+## Stripe billing MVP
+
+Stripe billing is scoped per franchise. A single organization has one Stripe
+Customer and can have separate subscriptions for its franchise profiles. The
+application never stores card details. A signed webhook is the source of truth;
+returning from Checkout does not activate access by itself.
+
+Required environment variables:
+
+```bash
+STRIPE_PUBLISHABLE_KEY=pk_test_...
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+BILLING_SUCCESS_URL=http://127.0.0.1:8000/billing/success/?session_id={CHECKOUT_SESSION_ID}
+BILLING_CANCEL_URL=http://127.0.0.1:8000/pricing/vendor/
+```
+
+Create/reuse test-mode Stripe products and recurring prices, then save their IDs
+on the plans automatically:
+
+```bash
+cd src/saashome
+python manage.py seed_plans
+python manage.py setup_stripe_test_catalog --confirm-test-mode
+```
+
+For local webhooks, install the Stripe CLI and run:
+
+```bash
+stripe listen --forward-to http://127.0.0.1:8000/billing/webhooks/stripe/
+```
+
+Put the displayed `whsec_...` value in `STRIPE_WEBHOOK_SECRET` and restart
+Django. Configure Customer Portal in the Stripe test dashboard before testing
+the "Zarządzaj w Stripe" button. Useful pages:
+
+- `/pricing/vendor/` - start Checkout for a selected franchise;
+- `/vendor/billing/` - current plans, status and period end;
+- `/billing/webhooks/stripe/` - signed Stripe webhook endpoint.
+
+In Stripe test mode use card `4242 4242 4242 4242`, any future expiry date and
+any CVC. For Railway, create a public webhook pointing to
+`https://YOUR-DOMAIN/billing/webhooks/stripe/`, subscribe to Checkout Session
+Completed and Customer Subscription created/updated/deleted events, and set the
+production-domain success/cancel URLs in Railway variables.
+
+Create a repeatable local permission/billing dataset:
+
+```bash
+python manage.py seed_billing_demo
+```
+
+The command creates `demo.viewer@example.com`, `demo.owner@example.com`,
+`demo.admin@example.com`, `demo.member@example.com`,
+`demo.other.owner@example.com` and `demo.staff@example.com`. The development
+password defaults to `DemoTest123!` and can be changed with
+`DEMO_USER_PASSWORD`. These accounts are development-only.

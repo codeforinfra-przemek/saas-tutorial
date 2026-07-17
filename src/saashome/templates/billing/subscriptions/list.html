@@ -10,12 +10,12 @@
             <h1 class="mt-1 text-3xl font-black text-slate-950">Subskrypcje franczyz</h1>
             <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Każdy profil ma własny plan, okres ważności i niezależne limity.</p>
         </div>
-        <a href="{% url 'billing:vendor_pricing' %}" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-5 py-2 text-sm font-extrabold text-white hover:bg-slate-800">Porównaj plany</a>
+        <div class="flex flex-wrap gap-2"><a href="{% url 'billing:vendor_billing' %}" class="inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-5 py-2 text-sm font-extrabold text-slate-800 hover:bg-slate-50">Panel rozliczeń</a><a href="{% url 'billing:vendor_pricing' %}" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-5 py-2 text-sm font-extrabold text-white hover:bg-slate-800">Porównaj plany</a></div>
     </div>
 
     <div class="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
         <table class="w-full min-w-[820px] text-left text-sm">
-            <thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Franczyza</th><th class="px-4 py-3">Plan</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Ważna do</th><th class="px-4 py-3">Dyspozycja</th><th class="px-4 py-3 text-right">Akcja</th></tr></thead>
+            <thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Franczyza</th><th class="px-4 py-3">Plan</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Ważna do</th><th class="px-4 py-3">Rozliczenie</th><th class="px-4 py-3 text-right">Akcja</th></tr></thead>
             <tbody>
             {% for row in rows %}
                 <tr class="border-t border-slate-200">
@@ -23,7 +23,7 @@
                     <td class="px-4 py-4 font-bold text-slate-800">{% if row.active_subscription %}{{ row.active_subscription.plan.name }}{% else %}Free{% endif %}</td>
                     <td class="px-4 py-4">{% if row.active_subscription %}<span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">{{ row.active_subscription.get_status_display }}</span>{% else %}<span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">Brak aktywnej</span>{% endif %}</td>
                     <td class="px-4 py-4 text-slate-600">{% if row.active_subscription.ends_at %}{{ row.active_subscription.ends_at|date:"d.m.Y" }}{% else %}-{% endif %}{% if row.active_subscription.cancel_at_period_end %}<p class="mt-1 text-xs font-bold text-amber-700">Wygaśnie z końcem okresu</p>{% endif %}</td>
-                    <td class="px-4 py-4">{% if row.pending_request %}<span class="font-bold text-amber-700">{{ row.pending_request.get_request_type_display }}</span>{% else %}<span class="text-slate-400">Brak</span>{% endif %}</td>
+                    <td class="px-4 py-4">{% if row.subscription.stripe_subscription_id %}<span class="font-bold text-indigo-700">Stripe · {{ row.subscription.get_billing_interval_display }}</span>{% elif row.pending_request %}<span class="font-bold text-amber-700">{{ row.pending_request.get_request_type_display }}</span>{% elif row.subscription %}<span class="font-bold text-slate-600">Manualne</span>{% else %}<span class="text-slate-400">Brak</span>{% endif %}</td>
                     <td class="px-4 py-4 text-right"><a href="{% url 'billing:subscription_detail' row.franchise.slug %}" class="inline-flex min-h-10 items-center rounded-lg border border-slate-200 px-4 py-2 font-extrabold text-slate-800 hover:bg-slate-50">Zarządzaj</a></td>
                 </tr>
             {% empty %}<tr><td colspan="6" class="px-5 py-10 text-center text-slate-500">Nie masz jeszcze przypisanych profili franczyz.</td></tr>{% endfor %}

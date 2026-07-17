@@ -1,11 +1,18 @@
 import calendar
+from datetime import datetime, timezone as datetime_timezone
 
-from django.core.exceptions import ValidationError
+import stripe
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import OperationalError, ProgrammingError, transaction
 from django.db.models import Q
+from django.urls import reverse
 from django.utils import timezone
 
+from franchises.models import Franchise
+
 from .models import (
+    BillingCustomer,
     FranchisePromotion,
     FranchiseSubscription,
     FranchiseSubscriptionRequest,
@@ -18,6 +25,247 @@ ACTIVE_SUBSCRIPTION_STATUSES = (
     OrganizationSubscription.STATUS_ACTIVE,
     OrganizationSubscription.STATUS_TRIAL,
 )
+
+
+def configure_stripe():
+    if not settings.STRIPE_SECRET_KEY:
+        raise ImproperlyConfigured("Brak STRIPE_SECRET_KEY w konfiguracji środowiska.")
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    return stripe
+
+
+def _stripe_value(value, key, default=None):
+    if value is None:
+        return default
+    if isinstance(value, dict):
+        return value.get(key, default)
+    return getattr(value, key, default)
+
+
+def _stripe_metadata(value):
+    metadata = _stripe_value(value, "metadata", {}) or {}
+    return dict(metadata)
+
+
+def timestamp_to_datetime(value):
+    if not value:
+        return None
+    return datetime.fromtimestamp(int(value), tz=datetime_timezone.utc)
+
+
+def map_stripe_status_to_internal_status(stripe_status):
+    status_map = {
+        "trialing": FranchiseSubscription.STATUS_ACTIVE,
+        "active": FranchiseSubscription.STATUS_ACTIVE,
+        "past_due": FranchiseSubscription.STATUS_PAST_DUE,
+        "unpaid": FranchiseSubscription.STATUS_PAST_DUE,
+        "incomplete": FranchiseSubscription.STATUS_PAST_DUE,
+        "paused": FranchiseSubscription.STATUS_PAST_DUE,
+        "canceled": FranchiseSubscription.STATUS_CANCELLED,
+        "incomplete_expired": FranchiseSubscription.STATUS_EXPIRED,
+    }
+    return status_map.get(stripe_status, FranchiseSubscription.STATUS_PENDING)
+
+
+def get_plan_by_stripe_price_id(price_id):
+    if not price_id:
+        return None
+    return Plan.objects.filter(
+        Q(stripe_price_monthly_id=price_id) | Q(stripe_price_yearly_id=price_id),
+    ).first()
+
+
+def get_or_create_billing_customer(organization, user=None):
+    try:
+        return organization.billing_customer
+    except BillingCustomer.DoesNotExist:
+        pass
+
+    stripe_client = configure_stripe()
+    email = organization.billing_email or organization.contact_email or getattr(user, "email", "")
+    customer = stripe_client.Customer.create(
+        email=email or None,
+        name=organization.name,
+        metadata={
+            "organization_id": str(organization.pk),
+            "organization_name": organization.name,
+        },
+        idempotency_key=f"saashome-organization-{organization.pk}",
+    )
+    return BillingCustomer.objects.create(
+        organization=organization,
+        stripe_customer_id=customer.id,
+        email=email,
+    )
+
+
+def create_checkout_session(franchise, plan, user, billing_interval, request):
+    if billing_interval not in {
+        FranchiseSubscription.INTERVAL_MONTHLY,
+        FranchiseSubscription.INTERVAL_YEARLY,
+    }:
+        raise ValidationError("Nieprawidłowy okres rozliczeniowy.")
+    if not franchise.organization_id:
+        raise ValidationError("Franczyza nie jest przypisana do organizacji.")
+
+    price_id = (
+        plan.stripe_price_monthly_id
+        if billing_interval == FranchiseSubscription.INTERVAL_MONTHLY
+        else plan.stripe_price_yearly_id
+    )
+    if not price_id:
+        raise ValidationError("Ten wariant planu nie ma jeszcze skonfigurowanej ceny Stripe.")
+
+    existing = FranchiseSubscription.objects.filter(franchise=franchise).first()
+    if existing and existing.stripe_subscription_id and existing.status in {
+        FranchiseSubscription.STATUS_ACTIVE,
+        FranchiseSubscription.STATUS_PAST_DUE,
+        FranchiseSubscription.STATUS_PENDING,
+    }:
+        raise ValidationError("Ta franczyza ma już subskrypcję Stripe. Zmień ją w panelu rozliczeń.")
+
+    stripe_client = configure_stripe()
+    billing_customer = get_or_create_billing_customer(franchise.organization, user)
+    success_url = settings.BILLING_SUCCESS_URL or request.build_absolute_uri(
+        f"{reverse('billing:success')}?session_id={{CHECKOUT_SESSION_ID}}"
+    )
+    cancel_url = settings.BILLING_CANCEL_URL or request.build_absolute_uri(
+        reverse("billing:vendor_pricing")
+    )
+    metadata = {
+        "organization_id": str(franchise.organization_id),
+        "franchise_id": str(franchise.pk),
+        "plan_id": str(plan.pk),
+        "billing_interval": billing_interval,
+        "user_id": str(user.pk),
+    }
+    session = stripe_client.checkout.Session.create(
+        mode="subscription",
+        customer=billing_customer.stripe_customer_id,
+        client_reference_id=str(franchise.pk),
+        line_items=[{"price": price_id, "quantity": 1}],
+        metadata=metadata,
+        subscription_data={"metadata": metadata},
+        success_url=success_url,
+        cancel_url=cancel_url,
+    )
+    return session.url
+
+
+def create_customer_portal_session(organization, request):
+    try:
+        billing_customer = organization.billing_customer
+    except BillingCustomer.DoesNotExist as exc:
+        raise ValidationError("Ta organizacja nie ma jeszcze profilu rozliczeniowego Stripe.") from exc
+
+    stripe_client = configure_stripe()
+    return_url = request.build_absolute_uri(reverse("billing:vendor_billing"))
+    session = stripe_client.billing_portal.Session.create(
+        customer=billing_customer.stripe_customer_id,
+        return_url=return_url,
+    )
+    return session.url
+
+
+@transaction.atomic
+def sync_subscription_from_stripe(stripe_subscription):
+    stripe_customer = _stripe_value(stripe_subscription, "customer", "")
+    if not isinstance(stripe_customer, str):
+        stripe_customer = _stripe_value(stripe_customer, "id", "")
+    billing_customer = BillingCustomer.objects.select_related("organization").get(
+        stripe_customer_id=stripe_customer
+    )
+
+    items = _stripe_value(_stripe_value(stripe_subscription, "items", {}), "data", []) or []
+    if not items:
+        raise ValidationError("Subskrypcja Stripe nie zawiera pozycji planu.")
+    first_item = items[0]
+    price = _stripe_value(first_item, "price", {})
+    price_id = price if isinstance(price, str) else _stripe_value(price, "id", "")
+    plan = get_plan_by_stripe_price_id(price_id)
+    if not plan:
+        raise ValidationError(f"Nie znaleziono planu dla ceny Stripe {price_id}.")
+
+    metadata = _stripe_metadata(stripe_subscription)
+    franchise_id = metadata.get("franchise_id")
+    if not franchise_id:
+        raise ValidationError("Subskrypcja Stripe nie zawiera franchise_id.")
+    franchise = Franchise.objects.select_related("organization").get(pk=franchise_id)
+    if franchise.organization_id != billing_customer.organization_id:
+        raise ValidationError("Franczyza i klient Stripe należą do różnych organizacji.")
+
+    subscription_id = _stripe_value(stripe_subscription, "id", "")
+    duplicate = FranchiseSubscription.objects.exclude(franchise=franchise).filter(
+        stripe_subscription_id=subscription_id
+    )
+    if duplicate.exists():
+        raise ValidationError("Identyfikator subskrypcji Stripe jest już przypisany do innej franczyzy.")
+
+    stripe_status = _stripe_value(stripe_subscription, "status", "")
+    internal_status = map_stripe_status_to_internal_status(stripe_status)
+    period_start = _stripe_value(stripe_subscription, "current_period_start") or _stripe_value(
+        first_item, "current_period_start"
+    )
+    period_end = _stripe_value(stripe_subscription, "current_period_end") or _stripe_value(
+        first_item, "current_period_end"
+    )
+    current_period_start = timestamp_to_datetime(period_start)
+    current_period_end = timestamp_to_datetime(period_end)
+    billing_interval = metadata.get("billing_interval", "")
+    if not billing_interval:
+        recurring = _stripe_value(price, "recurring", {})
+        interval = _stripe_value(recurring, "interval", "")
+        billing_interval = "yearly" if interval == "year" else "monthly" if interval == "month" else ""
+
+    if internal_status == FranchiseSubscription.STATUS_ACTIVE:
+        payment_status = FranchiseSubscription.PAYMENT_PAID
+    elif internal_status == FranchiseSubscription.STATUS_PAST_DUE:
+        payment_status = FranchiseSubscription.PAYMENT_OVERDUE
+    else:
+        payment_status = FranchiseSubscription.PAYMENT_NOT_REQUIRED
+
+    defaults = {
+        "plan": plan,
+        "status": internal_status,
+        "starts_at": current_period_start or timestamp_to_datetime(
+            _stripe_value(stripe_subscription, "created")
+        ),
+        "ends_at": current_period_end,
+        "cancel_at_period_end": bool(_stripe_value(stripe_subscription, "cancel_at_period_end", False)),
+        "billing_interval": billing_interval,
+        "stripe_customer_id": stripe_customer,
+        "stripe_subscription_id": subscription_id,
+        "stripe_price_id": price_id,
+        "stripe_status": stripe_status,
+        "current_period_start": current_period_start,
+        "current_period_end": current_period_end,
+        "manual_payment_status": payment_status,
+    }
+    subscription, _ = FranchiseSubscription.objects.update_or_create(
+        franchise=franchise,
+        defaults=defaults,
+    )
+    return subscription
+
+
+def process_stripe_event(event):
+    event_type = _stripe_value(event, "type", "")
+    event_data = _stripe_value(_stripe_value(event, "data", {}), "object", {})
+    if event_type == "checkout.session.completed":
+        subscription_id = _stripe_value(event_data, "subscription")
+        if subscription_id:
+            if not isinstance(subscription_id, str):
+                subscription_id = _stripe_value(subscription_id, "id")
+            stripe_subscription = configure_stripe().Subscription.retrieve(subscription_id)
+            return sync_subscription_from_stripe(stripe_subscription)
+        return None
+    if event_type in {
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    }:
+        return sync_subscription_from_stripe(event_data)
+    return None
 
 
 def get_active_subscription(organization):
@@ -294,10 +542,11 @@ def create_subscription_request(franchise, user, request_type, requested_plan=No
 
 @transaction.atomic
 def approve_subscription_request(change_request, reviewer):
-    change_request = FranchiseSubscriptionRequest.objects.select_for_update().select_related(
-        "franchise",
-        "requested_plan",
-    ).get(pk=change_request.pk)
+    change_request = (
+        FranchiseSubscriptionRequest.objects.select_for_update(of=("self",))
+        .select_related("franchise", "requested_plan")
+        .get(pk=change_request.pk)
+    )
     if change_request.status != FranchiseSubscriptionRequest.STATUS_PENDING:
         raise ValidationError("To żądanie zostało już rozpatrzone.")
 

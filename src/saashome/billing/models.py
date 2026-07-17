@@ -19,7 +19,11 @@ class Plan(models.Model):
     price_yearly = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default=CURRENCY_PLN)
     is_active = models.BooleanField(default=True)
+    is_public = models.BooleanField(default=True)
     sort_order = models.PositiveIntegerField(default=0)
+    stripe_product_id = models.CharField(max_length=255, blank=True)
+    stripe_price_monthly_id = models.CharField(max_length=255, blank=True)
+    stripe_price_yearly_id = models.CharField(max_length=255, blank=True)
 
     can_view_leads = models.BooleanField(default=False)
     can_view_analytics = models.BooleanField(default=False)
@@ -75,6 +79,13 @@ class FranchiseSubscription(models.Model):
         (PAYMENT_NOT_REQUIRED, "Nie jest wymagana"),
     )
 
+    INTERVAL_MONTHLY = "monthly"
+    INTERVAL_YEARLY = "yearly"
+    BILLING_INTERVAL_CHOICES = (
+        (INTERVAL_MONTHLY, "Miesięcznie"),
+        (INTERVAL_YEARLY, "Rocznie"),
+    )
+
     franchise = models.OneToOneField(
         "franchises.Franchise",
         on_delete=models.CASCADE,
@@ -85,6 +96,17 @@ class FranchiseSubscription(models.Model):
     starts_at = models.DateTimeField(null=True, blank=True)
     ends_at = models.DateTimeField(null=True, blank=True)
     cancel_at_period_end = models.BooleanField(default=False)
+    billing_interval = models.CharField(
+        max_length=20,
+        choices=BILLING_INTERVAL_CHOICES,
+        blank=True,
+    )
+    stripe_customer_id = models.CharField(max_length=255, blank=True)
+    stripe_subscription_id = models.CharField(max_length=255, blank=True, db_index=True)
+    stripe_price_id = models.CharField(max_length=255, blank=True)
+    stripe_status = models.CharField(max_length=100, blank=True)
+    current_period_start = models.DateTimeField(null=True, blank=True)
+    current_period_end = models.DateTimeField(null=True, blank=True)
     manual_payment_status = models.CharField(
         max_length=20,
         choices=PAYMENT_STATUS_CHOICES,
@@ -111,6 +133,45 @@ class FranchiseSubscription(models.Model):
 
     def __str__(self):
         return f"{self.franchise} - {self.plan} ({self.status})"
+
+
+class BillingCustomer(models.Model):
+    organization = models.OneToOneField(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="billing_customer",
+    )
+    stripe_customer_id = models.CharField(max_length=255, unique=True)
+    email = models.EmailField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["stripe_customer_id"])]
+
+    def __str__(self):
+        return f"{self.organization} ({self.stripe_customer_id})"
+
+
+class StripeWebhookEvent(models.Model):
+    stripe_event_id = models.CharField(max_length=255, unique=True)
+    event_type = models.CharField(max_length=255)
+    processed = models.BooleanField(default=False)
+    processing_error = models.TextField(blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["stripe_event_id"]),
+            models.Index(fields=["event_type"]),
+            models.Index(fields=["processed"]),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type}: {self.stripe_event_id}"
 
 
 class FranchiseSubscriptionRequest(models.Model):

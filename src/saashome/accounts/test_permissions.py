@@ -53,7 +53,7 @@ class AccessControlTests(TestCase):
         OrganizationMembership.objects.create(
             user=cls.vendor,
             organization=cls.organization,
-            role=OrganizationMembership.ROLE_MEMBER,
+            role=OrganizationMembership.ROLE_ADMIN,
             is_active=True,
         )
         OrganizationMembership.objects.create(
