@@ -270,7 +270,7 @@ def franchise_compare_view(request):
     return render(request, "franchises/compare.html", context)
 
 
-def franchise_detail_view(request, slug):
+def franchise_detail_view(request, slug, data_only=False):
     franchise = get_object_or_404(
         Franchise.objects.select_related("category", "organization").prefetch_related("locations", "assets"),
         slug=slug,
@@ -301,6 +301,7 @@ def franchise_detail_view(request, slug):
         "site_name": "SaaS Home",
         "page_title": franchise.name,
         "active_page": "franchises",
+        "data_only": data_only,
         "franchise": franchise,
         "locations": locations,
         "lead_form": lead_form,

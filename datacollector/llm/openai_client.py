@@ -10,13 +10,11 @@ from openai import OpenAI
 
 from ..config import OpenAISettings
 from ..schemas import (
-    AgentIterationUsage,
     CatalogQuestion,
     PlannerDraft,
     PlannerInput,
-    TokenUsage,
 )
-from .pricing import estimate_standard_token_cost
+from .openai_usage import build_agent_usage
 from .protocol import PlannerGeneration
 
 
@@ -118,44 +116,15 @@ class OpenAIPlannerClient:
                 "OpenAI Planner response did not contain parsed structured output."
             )
 
-        provider_usage = response.usage
-        if provider_usage is None:
-            raise PlannerProviderError(
-                "OpenAI Planner response did not contain token usage."
+        try:
+            usage = build_agent_usage(
+                response,
+                self.settings,
+                agent="planner",
+                iteration=iteration,
             )
-        input_details = provider_usage.input_tokens_details
-        output_details = provider_usage.output_tokens_details
-        token_usage = TokenUsage(
-            input_tokens=provider_usage.input_tokens,
-            cached_input_tokens=(
-                input_details.cached_tokens if input_details is not None else 0
-            ),
-            cache_write_input_tokens=(
-                getattr(input_details, "cache_write_tokens", 0)
-                if input_details is not None
-                else 0
-            ),
-            output_tokens=provider_usage.output_tokens,
-            reasoning_tokens=(
-                output_details.reasoning_tokens if output_details is not None else 0
-            ),
-            total_tokens=provider_usage.total_tokens,
-        )
-        resolved_model = response.model or self.settings.model
-        service_tier = getattr(response, "service_tier", None)
-        usage = AgentIterationUsage(
-            agent="planner",
-            iteration=iteration,
-            requested_model=self.settings.model,
-            resolved_model=resolved_model,
-            response_id=getattr(response, "id", None),
-            request_id=getattr(response, "_request_id", None),
-            service_tier=service_tier,
-            tokens=token_usage,
-            cost_estimate=estimate_standard_token_cost(
-                resolved_model,
-                token_usage,
-                service_tier=service_tier,
-            ),
-        )
+        except ValueError:
+            raise PlannerProviderError(
+                "OpenAI Planner response did not contain valid token usage."
+            ) from None
         return PlannerGeneration(draft=draft, usage=usage)

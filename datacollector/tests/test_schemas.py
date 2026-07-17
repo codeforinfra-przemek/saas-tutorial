@@ -4,7 +4,12 @@ from pydantic import ValidationError
 
 from datacollector.agents.planner import PlannerAgent
 from datacollector.catalog import load_question_catalog
-from datacollector.schemas import PlannerInput, ResearchPlan
+from datacollector.schemas import (
+    AgentIterationUsage,
+    PlannerInput,
+    ResearchPlan,
+    TokenUsage,
+)
 
 
 class PlannerInputTests(TestCase):
@@ -55,10 +60,54 @@ class ResearchPlanContractTests(TestCase):
                 lambda payload: payload.update(critical_fields=[])
             )
 
-    def test_old_schema_plan_without_usage_remains_readable(self):
-        legacy_payload = self.plan.model_dump(mode="json")
-        legacy_payload["schema_version"] = "1.0.0"
+    def test_older_schema_plans_remain_readable(self):
+        for version in ("1.0.0", "1.1.0"):
+            with self.subTest(version=version):
+                legacy_payload = self.plan.model_dump(mode="json")
+                legacy_payload["schema_version"] = version
 
-        legacy_plan = ResearchPlan.model_validate(legacy_payload)
+                legacy_plan = ResearchPlan.model_validate(legacy_payload)
 
-        self.assertEqual(legacy_plan.schema_version, "1.0.0")
+                self.assertEqual(legacy_plan.schema_version, version)
+
+    def test_multiple_provider_calls_in_one_agent_iteration_use_call_index(self):
+        payload = self.plan.model_dump(mode="json")
+        payload.update(generated_by="openai", model="test-model")
+        base_usage = AgentIterationUsage(
+            agent="planner",
+            iteration=1,
+            requested_model="test-model",
+            resolved_model="test-model",
+            tokens=TokenUsage(
+                input_tokens=10,
+                output_tokens=5,
+                total_tokens=15,
+            ),
+        )
+        payload["agent_usage"] = [
+            base_usage.model_dump(mode="json"),
+            base_usage.model_copy(update={"call_index": 2}).model_dump(mode="json"),
+        ]
+
+        plan = ResearchPlan.model_validate(payload)
+
+        self.assertEqual([item.call_index for item in plan.agent_usage], [1, 2])
+
+    def test_duplicate_agent_iteration_call_index_is_rejected(self):
+        payload = self.plan.model_dump(mode="json")
+        payload.update(generated_by="openai", model="test-model")
+        usage = AgentIterationUsage(
+            agent="planner",
+            iteration=1,
+            requested_model="test-model",
+            resolved_model="test-model",
+            tokens=TokenUsage(
+                input_tokens=10,
+                output_tokens=5,
+                total_tokens=15,
+            ),
+        ).model_dump(mode="json")
+        payload["agent_usage"] = [usage, usage]
+
+        with self.assertRaisesRegex(ValidationError, "unique"):
+            ResearchPlan.model_validate(payload)

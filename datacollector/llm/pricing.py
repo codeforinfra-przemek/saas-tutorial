@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from ..schemas import CostEstimate, TokenUsage
+from ..schemas import CostEstimate, TokenUsage, ToolUsage
 
 
 PRICING_SOURCE = "https://developers.openai.com/api/docs/pricing"
@@ -14,6 +14,7 @@ PRICING_AS_OF = date(2026, 7, 17)
 RATE_CARD_ID = "openai-standard-2026-07-17"
 MILLION = Decimal("1000000")
 MONEY_QUANTUM = Decimal("0.00000001")
+WEB_SEARCH_CALL_USD = Decimal("0.01")
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ def estimate_standard_token_cost(
     usage: TokenUsage,
     *,
     service_tier: str | None,
+    tool_usage: list[ToolUsage] | None = None,
 ) -> CostEstimate | None:
     """Estimate a standard-tier cost; return None for unknown pricing contexts."""
 
@@ -80,6 +82,11 @@ def estimate_standard_token_cost(
     output_cost = (
         Decimal(usage.output_tokens) * rates.output_usd_per_million / MILLION
     ).quantize(MONEY_QUANTUM)
+    recorded_tool_usage = tool_usage or []
+    tool_cost = sum(
+        (item.estimated_cost_usd for item in recorded_tool_usage),
+        start=Decimal("0"),
+    ).quantize(MONEY_QUANTUM)
 
     return CostEstimate(
         rate_card_id=RATE_CARD_ID,
@@ -93,13 +100,44 @@ def estimate_standard_token_cost(
         cached_input_cost_usd=cached_cost,
         cache_write_input_cost_usd=cache_write_cost,
         output_cost_usd=output_cost,
+        tool_cost_usd=tool_cost,
         total_estimated_cost_usd=(
-            uncached_cost + cached_cost + cache_write_cost + output_cost
+            uncached_cost
+            + cached_cost
+            + cache_write_cost
+            + output_cost
+            + tool_cost
         ),
         assumptions=[
             "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
-            "No regional-processing uplift or tool fee.",
+            "No regional-processing uplift.",
             "Any provider-reported cache-write tokens are priced separately.",
             "Reasoning tokens are included in output_tokens and are not charged twice.",
+            (
+                "Separately billed tool calls are included from observed response "
+                "output items."
+                if recorded_tool_usage
+                else "No separately billed tool calls were recorded."
+            ),
         ],
+    )
+
+
+def build_web_search_tool_usage(action_counts: dict[str, int]) -> ToolUsage:
+    """Price provider-reported search actions; open/find actions remain in trace."""
+
+    billed_action_counts = (
+        {"search": action_counts["search"]}
+        if action_counts.get("search", 0)
+        else {}
+    )
+    calls = sum(billed_action_counts.values())
+    return ToolUsage(
+        tool="web_search",
+        calls=calls,
+        action_counts=billed_action_counts,
+        unit_cost_usd=WEB_SEARCH_CALL_USD,
+        estimated_cost_usd=WEB_SEARCH_CALL_USD * calls,
+        pricing_source=PRICING_SOURCE,
+        pricing_as_of=PRICING_AS_OF,
     )

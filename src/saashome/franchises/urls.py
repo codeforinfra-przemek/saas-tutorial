@@ -32,5 +32,6 @@ urlpatterns = [
     path("manage/locations/<int:pk>/edit/", franchise_location_edit_view, name="location_edit"),
     path("manage/locations/<int:pk>/delete/", franchise_location_delete_view, name="location_delete"),
     path("<slug:slug>/request-info/", create_lead_view, name="lead_create"),
+    path("<slug:slug>/profile/", franchise_detail_view, {"data_only": True}, name="profile"),
     path("<slug:slug>/", franchise_detail_view, name="detail"),
 ]

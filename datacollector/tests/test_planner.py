@@ -303,8 +303,8 @@ class PlannerAgentTests(TestCase):
             plan_path = save_research_plan(plan, temporary_directory)
             payload = json.loads(plan_path.read_text(encoding="utf-8"))
 
-            self.assertEqual(plan_path.name, "plan.json")
+            self.assertEqual(plan_path.name, "plan-free.json")
             self.assertIn("zabka", str(plan_path.parent.parent))
             self.assertEqual(payload["run_id"], plan.run_id)
-            self.assertEqual(payload["schema_version"], "1.1.0")
+            self.assertEqual(payload["schema_version"], "1.2.0")
             self.assertTrue(payload["tasks"])

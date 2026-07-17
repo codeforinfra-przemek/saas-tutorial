@@ -1,7 +1,10 @@
 from decimal import Decimal
 from unittest import TestCase
 
-from datacollector.llm.pricing import estimate_standard_token_cost
+from datacollector.llm.pricing import (
+    build_web_search_tool_usage,
+    estimate_standard_token_cost,
+)
 from datacollector.schemas import TokenUsage
 
 
@@ -46,3 +49,29 @@ class TokenCostTests(TestCase):
                 service_tier="default",
             )
         )
+
+    def test_web_search_tool_calls_are_added_to_total_cost(self):
+        usage = TokenUsage(
+            input_tokens=1500,
+            cached_input_tokens=500,
+            cache_write_input_tokens=200,
+            output_tokens=200,
+            reasoning_tokens=50,
+            total_tokens=1700,
+        )
+        tool_usage = build_web_search_tool_usage(
+            {"search": 1, "open_page": 1}
+        )
+
+        estimate = estimate_standard_token_cost(
+            "gpt-5.6-terra",
+            usage,
+            service_tier="default",
+            tool_usage=[tool_usage],
+        )
+
+        self.assertEqual(tool_usage.calls, 1)
+        self.assertEqual(tool_usage.action_counts, {"search": 1})
+        self.assertEqual(tool_usage.estimated_cost_usd, Decimal("0.01"))
+        self.assertEqual(estimate.tool_cost_usd, Decimal("0.01000000"))
+        self.assertEqual(estimate.total_estimated_cost_usd, Decimal("0.01575000"))

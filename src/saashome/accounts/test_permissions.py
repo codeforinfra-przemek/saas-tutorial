@@ -103,11 +103,19 @@ class AccessControlTests(TestCase):
             reverse("home"),
             reverse("franchises:list"),
             reverse("franchises:detail", args=[self.vendor_franchise.slug]),
+            reverse("franchises:profile", args=[self.vendor_franchise.slug]),
             reverse("content:article_list"),
             reverse("billing:pricing"),
         ):
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_data_profile_excludes_the_map_and_links_back_to_map_view(self):
+        response = self.client.get(reverse("franchises:profile", args=[self.vendor_franchise.slug]))
+
+        self.assertContains(response, "Najważniejsze liczby")
+        self.assertContains(response, "Widok z mapą")
+        self.assertNotContains(response, 'id="franchise-map"')
 
     def test_navigation_is_tailored_to_the_account_role(self):
         anonymous_page = self.client.get(reverse("home"))
