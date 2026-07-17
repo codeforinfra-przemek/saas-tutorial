@@ -32,6 +32,7 @@ class CollectorCliTests(TestCase):
             plan_paths = list(Path(temporary_directory).rglob("plan.json"))
             self.assertEqual(exit_code, 0)
             self.assertEqual(summary["generated_by"], "offline")
+            self.assertEqual(summary["agent_usage"], [])
             self.assertEqual(len(plan_paths), 1)
 
     def test_questions_command_is_read_only(self):

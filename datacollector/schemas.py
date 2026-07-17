@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 from string import Formatter
 from typing import Literal
@@ -11,8 +12,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-SCHEMA_VERSION = "1.0.0"
-PROMPT_VERSION = "planner-system-v1"
+SCHEMA_VERSION = "1.1.0"
+PROMPT_VERSION = "planner-system-v2"
 
 
 class ClosedModel(BaseModel):
@@ -261,8 +262,8 @@ class PlannerTaskGuidance(ClosedModel):
     catalog_question_id: str
     priority: Priority
     rationale: str = Field(min_length=5)
-    search_queries: list[str] = Field(default_factory=list)
-    source_hints: list[str] = Field(default_factory=list)
+    search_queries: list[str] = Field(default_factory=list, max_length=3)
+    source_hints: list[str] = Field(default_factory=list, max_length=3)
 
 
 class PlannerDraft(ClosedModel):
@@ -273,10 +274,12 @@ class PlannerDraft(ClosedModel):
     """
 
     objective: str = Field(min_length=10)
-    planning_notes: list[str] = Field(default_factory=list)
-    assumptions: list[str] = Field(default_factory=list)
-    scope_warnings: list[str] = Field(default_factory=list)
-    task_guidance: list[PlannerTaskGuidance] = Field(default_factory=list)
+    planning_notes: list[str] = Field(default_factory=list, max_length=12)
+    assumptions: list[str] = Field(default_factory=list, max_length=12)
+    scope_warnings: list[str] = Field(default_factory=list, max_length=12)
+    task_guidance: list[PlannerTaskGuidance] = Field(
+        default_factory=list, max_length=25
+    )
 
     @model_validator(mode="after")
     def validate_guidance_ids(self) -> "PlannerDraft":
@@ -349,8 +352,80 @@ class StopConditions(ClosedModel):
     human_review_required: bool = True
 
 
+class TokenUsage(ClosedModel):
+    """Actual token counts reported by one completed provider response."""
+
+    input_tokens: int = Field(ge=0)
+    cached_input_tokens: int = Field(default=0, ge=0)
+    cache_write_input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(ge=0)
+    reasoning_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_token_totals(self) -> "TokenUsage":
+        if (
+            self.cached_input_tokens + self.cache_write_input_tokens
+            > self.input_tokens
+        ):
+            raise ValueError(
+                "cached and cache-write input tokens cannot exceed input_tokens."
+            )
+        if self.reasoning_tokens > self.output_tokens:
+            raise ValueError("reasoning_tokens cannot exceed output_tokens.")
+        if self.total_tokens != self.input_tokens + self.output_tokens:
+            raise ValueError("total_tokens must equal input_tokens plus output_tokens.")
+        return self
+
+
+class CostEstimate(ClosedModel):
+    """Auditable estimate calculated from a dated public rate card."""
+
+    currency: Literal["USD"] = "USD"
+    rate_card_id: str
+    pricing_source: str
+    pricing_as_of: date
+    input_usd_per_million: Decimal = Field(ge=0)
+    cached_input_usd_per_million: Decimal = Field(ge=0)
+    cache_write_usd_per_million: Decimal = Field(ge=0)
+    output_usd_per_million: Decimal = Field(ge=0)
+    uncached_input_cost_usd: Decimal = Field(ge=0)
+    cached_input_cost_usd: Decimal = Field(ge=0)
+    cache_write_input_cost_usd: Decimal = Field(ge=0)
+    output_cost_usd: Decimal = Field(ge=0)
+    total_estimated_cost_usd: Decimal = Field(ge=0)
+    assumptions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_cost_total(self) -> "CostEstimate":
+        expected = (
+            self.uncached_input_cost_usd
+            + self.cached_input_cost_usd
+            + self.cache_write_input_cost_usd
+            + self.output_cost_usd
+        )
+        if self.total_estimated_cost_usd != expected:
+            raise ValueError("total_estimated_cost_usd must equal its components.")
+        return self
+
+
+class AgentIterationUsage(ClosedModel):
+    """Usage and estimated cost for one logical iteration of one agent."""
+
+    agent: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    iteration: int = Field(ge=1)
+    provider: Literal["openai"] = "openai"
+    requested_model: str = Field(min_length=1)
+    resolved_model: str = Field(min_length=1)
+    response_id: str | None = None
+    request_id: str | None = None
+    service_tier: str | None = None
+    tokens: TokenUsage
+    cost_estimate: CostEstimate | None = None
+
+
 class ResearchPlan(ClosedModel):
-    schema_version: Literal["1.0.0"] = SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = SCHEMA_VERSION
     catalog_version: str
     prompt_version: str = PROMPT_VERSION
     run_id: str
@@ -368,6 +443,7 @@ class ResearchPlan(ClosedModel):
     authoritative_sources: list[str]
     source_policy: SourcePolicy
     compliance_rules: list[str]
+    agent_usage: list[AgentIterationUsage] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_plan(self) -> "ResearchPlan":
@@ -384,6 +460,18 @@ class ResearchPlan(ClosedModel):
             self.model is None or not self.model.strip()
         ):
             raise ValueError("OpenAI-generated plans must declare a model.")
+        if self.generated_by == "offline" and self.agent_usage:
+            raise ValueError("Offline plans cannot contain provider usage.")
+        if (
+            self.schema_version == "1.1.0"
+            and self.generated_by == "openai"
+            and not self.agent_usage
+        ):
+            raise ValueError("OpenAI-generated schema 1.1 plans must contain usage.")
+
+        usage_keys = [(item.agent, item.iteration) for item in self.agent_usage]
+        if len(usage_keys) != len(set(usage_keys)):
+            raise ValueError("Agent usage entries must be unique per agent iteration.")
 
         task_ids = [task.task_id for task in self.tasks]
         if len(task_ids) != len(set(task_ids)):

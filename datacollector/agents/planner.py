@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -10,6 +11,7 @@ from ..catalog import select_questions
 from ..llm.protocol import PlannerLLM
 from ..schemas import (
     PRIORITY_ORDER,
+    AgentIterationUsage,
     CatalogQuestion,
     PlannerDraft,
     PlannerInput,
@@ -24,8 +26,9 @@ from ..schemas import (
 
 
 DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "planner_system_v1.md"
+    Path(__file__).resolve().parent.parent / "prompts" / "planner_system_v2.md"
 )
+UNRESOLVED_QUERY_MARKER = re.compile(r"\{[^{}]+\}|\[[^\[\]]+\]|<[^<>]+>")
 
 
 class PlannerValidationError(ValueError):
@@ -58,6 +61,10 @@ def _stronger_priority(first: Priority, second: Priority) -> Priority:
     return first if PRIORITY_ORDER[first] >= PRIORITY_ORDER[second] else second
 
 
+def _is_executable_query(query: str) -> bool:
+    return not UNRESOLVED_QUERY_MARKER.search(query)
+
+
 class PlannerAgent:
     """Build a complete plan; an LLM may enrich but never define its coverage."""
 
@@ -72,7 +79,11 @@ class PlannerAgent:
         self.llm = llm
         self.prompt_path = Path(prompt_path)
 
-    def create_plan(self, planner_input: PlannerInput) -> ResearchPlan:
+    def create_plan(
+        self, planner_input: PlannerInput, *, iteration: int = 1
+    ) -> ResearchPlan:
+        if iteration < 1:
+            raise PlannerValidationError("Planner iteration must be at least 1.")
         selected = select_questions(self.catalog, planner_input)
         if not selected:
             raise PlannerValidationError("No catalog questions match the requested scope.")
@@ -90,7 +101,11 @@ class PlannerAgent:
             )
 
         # Validate deterministic catalog coverage before making a paid API call.
-        draft = self._create_draft(planner_input, [item[1] for item in selected])
+        draft, agent_usage = self._create_draft(
+            planner_input,
+            [item[1] for item in selected],
+            iteration=iteration,
+        )
         unknown_ids = {
             guidance.catalog_question_id
             for guidance in draft.task_guidance
@@ -111,6 +126,7 @@ class PlannerAgent:
         }
         existing_fields = set(planner_input.existing_fields)
         tasks: list[ResearchTask] = []
+        filtered_guidance_query_count = 0
 
         for section_id, question in selected:
             guidance = guidance_by_id.get(question.id)
@@ -121,7 +137,13 @@ class PlannerAgent:
                 else base_priority
             )
             canonical_queries = _render_queries(question, planner_input)
-            guided_queries = guidance.search_queries if guidance else []
+            raw_guided_queries = guidance.search_queries if guidance else []
+            guided_queries = [
+                query for query in raw_guided_queries if _is_executable_query(query)
+            ]
+            filtered_guidance_query_count += len(raw_guided_queries) - len(
+                guided_queries
+            )
             search_queries = _deduplicate(canonical_queries + guided_queries)[
                 : planner_input.max_queries_per_task
             ]
@@ -187,6 +209,13 @@ class PlannerAgent:
         scope_warnings = _deduplicate(
             [self.catalog.legal_note, *draft.scope_warnings]
         )
+        planning_notes = list(draft.planning_notes)
+        if filtered_guidance_query_count:
+            planning_notes.append(
+                "Removed "
+                f"{filtered_guidance_query_count} LLM guidance queries containing "
+                "unresolved placeholders; canonical executable queries remain."
+            )
         compliance_rules = [
             *self.catalog.source_policy.rules,
             *[
@@ -205,7 +234,7 @@ class PlannerAgent:
             model=self.llm.model_name if self.llm else None,
             planner_input=planner_input,
             objective=draft.objective,
-            planning_notes=draft.planning_notes,
+            planning_notes=planning_notes,
             assumptions=draft.assumptions,
             scope_warnings=scope_warnings,
             tasks=tasks,
@@ -217,11 +246,16 @@ class PlannerAgent:
             authoritative_sources=self.catalog.authoritative_sources,
             source_policy=self.catalog.source_policy,
             compliance_rules=_deduplicate(compliance_rules),
+            agent_usage=agent_usage,
         )
 
     def _create_draft(
-        self, planner_input: PlannerInput, questions: list[CatalogQuestion]
-    ) -> PlannerDraft:
+        self,
+        planner_input: PlannerInput,
+        questions: list[CatalogQuestion],
+        *,
+        iteration: int,
+    ) -> tuple[PlannerDraft, list[AgentIterationUsage]]:
         if self.llm:
             try:
                 system_prompt = self.prompt_path.read_text(encoding="utf-8")
@@ -229,7 +263,13 @@ class PlannerAgent:
                 raise PlannerValidationError(
                     f"Cannot load Planner prompt: {self.prompt_path}"
                 ) from exc
-            return self.llm.generate(planner_input, questions, system_prompt)
+            generation = self.llm.generate(
+                planner_input,
+                questions,
+                system_prompt,
+                iteration=iteration,
+            )
+            return generation.draft, [generation.usage]
 
         return PlannerDraft(
             objective=(
@@ -243,4 +283,4 @@ class PlannerAgent:
             assumptions=[],
             scope_warnings=[],
             task_guidance=[],
-        )
+        ), []

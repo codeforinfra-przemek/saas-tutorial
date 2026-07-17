@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
-from ..schemas import CatalogQuestion, PlannerDraft, PlannerInput
+from ..schemas import AgentIterationUsage, CatalogQuestion, PlannerDraft, PlannerInput
+
+
+@dataclass(frozen=True)
+class PlannerGeneration:
+    draft: PlannerDraft
+    usage: AgentIterationUsage
 
 
 class PlannerLLM(Protocol):
@@ -16,4 +23,6 @@ class PlannerLLM(Protocol):
         planner_input: PlannerInput,
         questions: list[CatalogQuestion],
         system_prompt: str,
-    ) -> PlannerDraft: ...
+        *,
+        iteration: int,
+    ) -> PlannerGeneration: ...

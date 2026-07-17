@@ -54,3 +54,11 @@ class ResearchPlanContractTests(TestCase):
             self.validate_mutated_plan(
                 lambda payload: payload.update(critical_fields=[])
             )
+
+    def test_old_schema_plan_without_usage_remains_readable(self):
+        legacy_payload = self.plan.model_dump(mode="json")
+        legacy_payload["schema_version"] = "1.0.0"
+
+        legacy_plan = ResearchPlan.model_validate(legacy_payload)
+
+        self.assertEqual(legacy_plan.schema_version, "1.0.0")

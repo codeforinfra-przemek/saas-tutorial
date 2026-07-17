@@ -18,6 +18,13 @@ from .schemas import PlannerInput, ResearchDepth
 from .storage.json_store import DEFAULT_RUNS_DIR, save_research_plan
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m datacollector",
@@ -57,6 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("--max-queries-per-task", type=int, default=3)
     plan_parser.add_argument("--quality-threshold", type=int, default=80)
     plan_parser.add_argument("--max-rounds", type=int, default=3)
+    plan_parser.add_argument(
+        "--iteration",
+        type=_positive_int,
+        default=1,
+        help="Logical Planner iteration recorded in usage metadata (default: 1).",
+    )
     plan_parser.add_argument(
         "--allow-personal-data",
         action="store_true",
@@ -121,7 +134,10 @@ def _run_plan(args: argparse.Namespace) -> int:
             settings = replace(settings, model=args.model)
         llm = OpenAIPlannerClient(settings)
 
-    plan = PlannerAgent(catalog, llm).create_plan(planner_input)
+    plan = PlannerAgent(catalog, llm).create_plan(
+        planner_input,
+        iteration=args.iteration,
+    )
     plan_path = save_research_plan(plan, args.output_dir)
     summary = {
         "run_id": plan.run_id,
@@ -132,6 +148,24 @@ def _run_plan(args: argparse.Namespace) -> int:
         "model": plan.model,
         "tasks": len(plan.tasks),
         "critical_fields": len(plan.critical_fields),
+        "agent_usage": [
+            {
+                "agent": usage.agent,
+                "iteration": usage.iteration,
+                "input_tokens": usage.tokens.input_tokens,
+                "cached_input_tokens": usage.tokens.cached_input_tokens,
+                "cache_write_input_tokens": usage.tokens.cache_write_input_tokens,
+                "output_tokens": usage.tokens.output_tokens,
+                "reasoning_tokens": usage.tokens.reasoning_tokens,
+                "total_tokens": usage.tokens.total_tokens,
+                "estimated_cost_usd": (
+                    str(usage.cost_estimate.total_estimated_cost_usd)
+                    if usage.cost_estimate
+                    else None
+                ),
+            }
+            for usage in plan.agent_usage
+        ],
         "plan_path": str(plan_path),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))

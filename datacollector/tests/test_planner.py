@@ -5,7 +5,9 @@ from unittest import TestCase
 
 from datacollector.agents.planner import PlannerAgent, PlannerValidationError
 from datacollector.catalog import load_question_catalog, select_questions
+from datacollector.llm.protocol import PlannerGeneration
 from datacollector.schemas import (
+    AgentIterationUsage,
     PlannerDraft,
     PlannerInput,
     PlannerTaskGuidance,
@@ -14,6 +16,7 @@ from datacollector.schemas import (
     Requirement,
     ResearchDepth,
     TaskAction,
+    TokenUsage,
 )
 from datacollector.storage.json_store import save_research_plan
 
@@ -25,9 +28,26 @@ class FakePlannerLLM:
         self.draft = draft
         self.calls = []
 
-    def generate(self, planner_input, questions, system_prompt):
-        self.calls.append((planner_input, questions, system_prompt))
-        return self.draft
+    def generate(self, planner_input, questions, system_prompt, *, iteration):
+        self.calls.append((planner_input, questions, system_prompt, iteration))
+        return PlannerGeneration(
+            draft=self.draft,
+            usage=AgentIterationUsage(
+                agent="planner",
+                iteration=iteration,
+                requested_model=self.model_name,
+                resolved_model=self.model_name,
+                response_id="resp_fake",
+                request_id="req_fake",
+                service_tier="default",
+                tokens=TokenUsage(
+                    input_tokens=100,
+                    output_tokens=20,
+                    reasoning_tokens=5,
+                    total_tokens=120,
+                ),
+            ),
+        )
 
 
 class PlannerAgentTests(TestCase):
@@ -50,6 +70,7 @@ class PlannerAgentTests(TestCase):
         self.assertNotIn("us.state_overlay", question_ids)
         self.assertEqual(plan.generated_by, "offline")
         self.assertIsNone(plan.model)
+        self.assertEqual(plan.agent_usage, [])
         self.assertTrue(plan.stop_conditions.human_review_required)
         self.assertTrue(
             any("ecfr.gov" in source for source in plan.authoritative_sources)
@@ -135,6 +156,45 @@ class PlannerAgentTests(TestCase):
         self.assertIn("Example custom initial fee query", task.search_queries)
         self.assertEqual(task.source_hints, ["Current fee schedule"])
         self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(plan.agent_usage[0].agent, "planner")
+        self.assertEqual(plan.agent_usage[0].iteration, 1)
+
+    def test_llm_queries_with_unresolved_placeholders_are_removed(self):
+        llm = FakePlannerLLM(
+            PlannerDraft(
+                objective="Build a complete and auditable research plan.",
+                planning_notes=[],
+                assumptions=[],
+                scope_warnings=[],
+                task_guidance=[
+                    PlannerTaskGuidance(
+                        catalog_question_id="fdd04.bankruptcy",
+                        priority=Priority.HIGH,
+                        rationale="Identity must be established before registry search.",
+                        search_queries=[
+                            '"[verified legal name]" bankruptcy',
+                            '"Example" bankruptcy registry',
+                        ],
+                        source_hints=[],
+                    )
+                ],
+            )
+        )
+
+        plan = PlannerAgent(self.catalog, llm).create_plan(
+            PlannerInput(brand_name="Example", max_queries_per_task=5)
+        )
+        task = next(
+            task
+            for task in plan.tasks
+            if task.catalog_question_id == "fdd04.bankruptcy"
+        )
+
+        self.assertNotIn('"[verified legal name]" bankruptcy', task.search_queries)
+        self.assertIn('"Example" bankruptcy registry', task.search_queries)
+        self.assertTrue(
+            any("unresolved placeholders" in note for note in plan.planning_notes)
+        )
 
     def test_llm_priority_escalation_adds_task_fields_to_critical_gate(self):
         planner_input = PlannerInput(brand_name="Example")
@@ -246,5 +306,5 @@ class PlannerAgentTests(TestCase):
             self.assertEqual(plan_path.name, "plan.json")
             self.assertIn("zabka", str(plan_path.parent.parent))
             self.assertEqual(payload["run_id"], plan.run_id)
-            self.assertEqual(payload["schema_version"], "1.0.0")
+            self.assertEqual(payload["schema_version"], "1.1.0")
             self.assertTrue(payload["tasks"])
