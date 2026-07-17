@@ -81,10 +81,7 @@
                             {% for franchise in franchises %}
                                 {% include "franchises/partials/franchise_card.html" %}
                             {% empty %}
-                                <div class="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center">
-                                    <h2 class="text-xl font-black text-slate-950">Brak wyników</h2>
-                                    <p class="mt-2 text-sm leading-6 text-slate-600">Zmień kategorię, budżet lub frazę wyszukiwania.</p>
-                                </div>
+                                {% url 'franchises:list' as reset_url %}{% include "components/empty_state.html" with title="Brak wyników" description="Zmień kategorię, budżet lub frazę wyszukiwania." cta_label="Wyczyść filtry" cta_url=reset_url only %}
                             {% endfor %}
                         {% endif %}
 

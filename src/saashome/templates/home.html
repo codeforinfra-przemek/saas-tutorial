@@ -1,98 +1,65 @@
 {% extends "base.html" %}
+{% load franchise_formatters %}
 
-{% block title %}{{ block.super }} | {{ page_title }}{% endblock %}
+{% block title %}{{ block.super }} | Ranking i porównywarka franczyz{% endblock %}
 
 {% block content %}
-    <section class="mx-auto grid w-full max-w-7xl gap-8 px-5 py-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.92fr)] lg:px-10 lg:py-12 xl:gap-14">
-        <div class="flex min-h-[58vh] flex-col justify-center">
-            {% if eyebrow %}
-                <span class="mb-5 inline-flex w-fit items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-extrabold uppercase tracking-wide text-brand-700 shadow-sm">{{ eyebrow }}</span>
-            {% endif %}
-
-            <h1 class="max-w-3xl text-5xl font-black leading-none tracking-normal text-slate-950 sm:text-6xl lg:text-7xl">{{ headline }}</h1>
-            <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-600 sm:text-xl">{{ lead_text }}</p>
-
-            <div class="mt-8 flex flex-wrap gap-3">
-                <a href="/admin/" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand-500 px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-100">Otwórz admin</a>
-                <a href="{{ course_code_url }}" class="inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-5 py-3 text-sm font-extrabold text-slate-900 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">Kod kursu</a>
-
-                {% if my_code_url %}
-                    <a href="{{ my_code_url }}" class="inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-5 py-3 text-sm font-extrabold text-slate-900 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">Mój kod</a>
-                {% endif %}
-            </div>
-
-            <form method="post" class="mt-8 max-w-xl rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                {% csrf_token %}
-                <label for="{{ contact_form.email.id_for_label }}" class="block text-sm font-black text-slate-950">Poproś o kontakt</label>
-                <p class="mt-1 text-sm leading-6 text-slate-600">Zostaw email, a wyślemy krótkie zaproszenie i damy znać, gdy ranking franczyz będzie gotowy do testów.</p>
-
-                <div class="mt-4 flex flex-col gap-3 sm:flex-row">
-                    <div class="flex-1">
-                        {{ contact_form.email }}
-                        {% if contact_form.email.errors %}
-                            <p class="mt-2 text-sm font-semibold text-red-600">{{ contact_form.email.errors|first }}</p>
-                        {% endif %}
-                    </div>
-                    <button type="submit" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-5 py-3 text-sm font-extrabold text-white hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-slate-200">Poproś o kontakt</button>
-                </div>
-            </form>
+<section class="border-b border-slate-200 bg-white">
+    <div class="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:px-10 lg:py-14">
+        <div class="max-w-4xl">
+            <p class="text-xs font-extrabold uppercase text-brand-700">{{ eyebrow }}</p>
+            <h1 class="mt-3 text-4xl font-black leading-tight text-slate-950 sm:text-5xl">{{ headline }}</h1>
+            <p class="mt-4 max-w-3xl text-base leading-7 text-slate-600 sm:text-lg">{{ lead_text }}</p>
         </div>
+        <form action="{% url 'franchises:list' %}" method="get" class="mt-7 flex max-w-3xl flex-col gap-3 sm:flex-row">
+            <label for="home-search" class="sr-only">Nazwa franczyzy</label>
+            <input id="home-search" name="q" type="search" placeholder="Wpisz nazwę franczyzy" class="min-h-12 flex-1 rounded-lg border-slate-200 bg-slate-50 px-4 text-base focus:border-brand-500 focus:ring-brand-500">
+            {% include "components/button.html" with type="submit" label="Szukaj franczyzy" only %}
+            {% url 'franchises:directory' as directory_url %}{% include "components/button.html" with href=directory_url label="Porównaj dane" variant="secondary" only %}
+        </form>
+        <nav aria-label="Szybkie filtry" class="mt-5 flex gap-2 overflow-x-auto pb-1">
+            <a href="{% url 'franchises:directory' %}?investment_max=100000" class="whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:border-brand-300">Niska inwestycja</a>
+            {% for category in categories %}<a href="{% url 'franchises:list' %}?category={{ category.slug }}" class="whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:border-brand-300">{{ category.name }}</a>{% endfor %}
+            <a href="{% url 'franchises:directory' %}?business_type=online" class="whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:border-brand-300">Online</a>
+            <a href="{% url 'franchises:directory' %}?financing=yes" class="whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:border-brand-300">Z finansowaniem</a>
+        </nav>
+    </div>
+</section>
 
-        <div class="self-center overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
-            <div class="flex items-center justify-between border-b border-slate-200 p-4">
-                <div class="h-9 w-2/3 rounded-lg bg-slate-100"></div>
-                <div class="h-9 w-24 rounded-lg bg-slate-950"></div>
+<section class="mx-auto w-full max-w-7xl px-5 py-9 sm:px-8 lg:px-10">
+    {% url 'franchises:list' as franchise_list_url %}{% include "components/section_header.html" with eyebrow="Wybrane profile" title="Franczyzy warte porównania" description="Zacznij od najpełniejszych i promowanych profili, a potem zawęź wyniki filtrami." action_label="Zobacz cały ranking" action_url=franchise_list_url only %}
+    <div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {% for franchise in featured_franchises %}
+        <article class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex items-start gap-3">
+                <div class="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">{% if franchise.logo %}<img src="{{ franchise.logo.url }}" alt="Logo {{ franchise.name }}" class="h-full w-full object-cover">{% else %}<span class="font-black text-brand-700">{{ franchise.name|first }}</span>{% endif %}</div>
+                <div class="min-w-0 flex-1"><p class="text-xs font-bold text-slate-500">{{ franchise.category.name }}</p><h2 class="mt-1 truncate text-lg font-black"><a href="{{ franchise.get_absolute_url }}" class="text-slate-950 hover:text-brand-700">{{ franchise.name }}</a></h2></div>
             </div>
+            <p class="mt-4 line-clamp-2 text-sm leading-6 text-slate-600">{{ franchise.short_description }}</p>
+            <div class="mt-4 flex flex-wrap gap-2">{% if franchise.display_verified %}{% include "components/badge.html" with variant="verified" label="Zweryfikowane" only %}{% endif %}{% if franchise.organization_id %}{% include "components/badge.html" with variant="claimed" label="Zarządzane" only %}{% endif %}{% if franchise.display_promoted %}{% include "components/badge.html" with variant="promoted" label="Promowane" only %}{% endif %}</div>
+            <div class="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4"><p class="text-xs text-slate-500">Inwestycja<br><strong class="text-sm text-slate-950">{% if franchise.min_investment %}od {{ franchise.min_investment|grouped_number }} zł{% else %}Brak danych{% endif %}</strong></p>{% include "components/button.html" with href=franchise.get_absolute_url label="Zobacz profil" size="small" only %}</div>
+        </article>
+        {% empty %}{% include "components/empty_state.html" with title="Brak aktywnych franczyz" description="Profile pojawią się tutaj po ich opublikowaniu." only %}{% endfor %}
+    </div>
+</section>
 
-            <div class="grid min-h-[390px] md:grid-cols-2">
-                <div class="grid content-start gap-3 border-b border-slate-200 p-4 md:border-b-0 md:border-r">
-                    {% for object in featured_objects %}
-                        <article class="rounded-lg border border-slate-200 bg-white p-4 transition hover:border-brand-200 hover:shadow-sm">
-                            <div class="mb-3 flex items-start justify-between gap-3">
-                                <div>
-                                    <h2 class="text-sm font-black text-slate-950">{{ object.name }}</h2>
-                                    <p class="mt-1 text-sm text-slate-500">{{ object.city }} · {{ object.note }}</p>
-                                </div>
-                                <span class="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-700">Top</span>
-                            </div>
-                            <div class="flex items-center gap-2 text-xs font-semibold text-slate-500">
-                                <span class="h-2 w-2 rounded-full bg-signal-500"></span>
-                                rosnące zainteresowanie
-                            </div>
-                        </article>
-                    {% empty %}
-                        <article class="rounded-lg border border-slate-200 bg-white p-4">
-                            <h2 class="text-sm font-black text-slate-950">Brak obiektów</h2>
-                            <p class="mt-1 text-sm text-slate-500">Dodamy je, gdy zaczniemy budować modele.</p>
-                        </article>
-                    {% endfor %}
-                </div>
+<section class="border-y border-slate-200 bg-white">
+    <div class="mx-auto w-full max-w-7xl px-5 py-9 sm:px-8 lg:px-10">
+        <h2 class="text-2xl font-black text-slate-950">Jak to działa</h2>
+        <div class="mt-5 grid gap-4 md:grid-cols-3"><div class="border-l-4 border-brand-500 pl-4"><p class="text-xs font-black text-brand-700">01</p><h3 class="mt-1 font-black text-slate-950">Porównaj franczyzy</h3><p class="mt-2 text-sm leading-6 text-slate-600">Filtruj budżet, model biznesowy i wyniki sieci.</p></div><div class="border-l-4 border-sky-500 pl-4"><p class="text-xs font-black text-sky-700">02</p><h3 class="mt-1 font-black text-slate-950">Zapisz najlepsze opcje</h3><p class="mt-2 text-sm leading-6 text-slate-600">Zbuduj krótką listę i porównaj dane obok siebie.</p></div><div class="border-l-4 border-amber-500 pl-4"><p class="text-xs font-black text-amber-700">03</p><h3 class="mt-1 font-black text-slate-950">Wyślij zapytanie</h3><p class="mt-2 text-sm leading-6 text-slate-600">Przekaż kontakt wybranej marce, gdy oferta pasuje.</p></div></div>
+        <div class="mt-7 grid gap-3 lg:grid-cols-3">{% include "components/trust_note.html" with variant="verified" label="Zweryfikowane." text="Dane profilu zostały potwierdzone." only %}{% include "components/trust_note.html" with label="Zarządzane." text="Profil jest przypisany do organizacji franczyzodawcy." only %}{% include "components/trust_note.html" with variant="promoted" label="Promowane." text="Płatna ekspozycja może wpływać na pozycję profilu." only %}</div>
+    </div>
+</section>
 
-                <div class="relative min-h-[280px] overflow-hidden bg-[#dde8df]">
-                    <div class="absolute inset-0 bg-[linear-gradient(36deg,transparent_0_44%,rgba(255,255,255,.62)_44%_46%,transparent_46%),linear-gradient(132deg,transparent_0_52%,rgba(255,255,255,.58)_52%_54%,transparent_54%)]"></div>
-                    <div class="absolute left-6 top-12 h-32 w-44 rounded-[38%_62%_52%_48%] border-2 border-white/80 bg-brand-500/10"></div>
-                    <div class="absolute bottom-12 right-6 h-40 w-40 rounded-[38%_62%_52%_48%] border-2 border-white/80 bg-brand-500/10"></div>
-                    <span class="absolute left-[35%] top-[26%] h-5 w-5 -rotate-45 rounded-[50%_50%_50%_0] bg-signal-500 shadow-lg shadow-red-500/30 after:absolute after:left-[7px] after:top-[7px] after:h-1.5 after:w-1.5 after:rounded-full after:bg-white"></span>
-                    <span class="absolute left-[64%] top-[44%] h-5 w-5 -rotate-45 rounded-[50%_50%_50%_0] bg-signal-500 shadow-lg shadow-red-500/30 after:absolute after:left-[7px] after:top-[7px] after:h-1.5 after:w-1.5 after:rounded-full after:bg-white"></span>
-                    <span class="absolute left-[49%] top-[67%] h-5 w-5 -rotate-45 rounded-[50%_50%_50%_0] bg-signal-500 shadow-lg shadow-red-500/30 after:absolute after:left-[7px] after:top-[7px] after:h-1.5 after:w-1.5 after:rounded-full after:bg-white"></span>
-                </div>
-            </div>
-        </div>
-    </section>
+{% if latest_articles %}<section class="mx-auto w-full max-w-7xl px-5 py-9 sm:px-8 lg:px-10">{% url 'content:article_list' as articles_url %}{% include "components/section_header.html" with title="Najnowsze z poradnika" description="Praktyczne materiały przed wyborem franczyzy." action_label="Zobacz poradnik" action_url=articles_url only %}<div class="mt-5 grid gap-4 md:grid-cols-3">{% for article in latest_articles %}<article class="rounded-lg border border-slate-200 bg-white p-5"><p class="text-xs font-bold text-brand-700">{{ article.category.name|default:"Poradnik" }}</p><h3 class="mt-2 text-lg font-black"><a href="{{ article.get_absolute_url }}" class="text-slate-950 hover:text-brand-700">{{ article.title }}</a></h3><p class="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{{ article.excerpt }}</p></article>{% endfor %}</div></section>{% endif %}
 
-    {% if featured_franchises %}
-    <section class="mx-auto w-full max-w-7xl px-5 pb-10 sm:px-8 lg:px-10">
-        <div class="mb-4 flex items-end justify-between gap-4"><div><p class="text-xs font-extrabold uppercase text-brand-700">Pro</p><h2 class="mt-1 text-2xl font-black text-slate-950">Wyróżnione franczyzy</h2></div><a href="{% url 'franchises:list' %}" class="text-sm font-bold text-brand-700">Zobacz ranking</a></div>
-        <div class="grid gap-4 md:grid-cols-3">{% for franchise in featured_franchises %}<a href="{{ franchise.get_absolute_url }}" class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:border-brand-300 hover:shadow-md"><div class="flex items-center justify-between gap-3"><span class="text-xs font-extrabold uppercase text-brand-700">{{ franchise.category.name }}</span><span class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">Pro</span></div><h3 class="mt-3 text-xl font-black text-slate-950">{{ franchise.name }}</h3><p class="mt-2 text-sm leading-6 text-slate-600">{{ franchise.short_description|truncatechars:130 }}</p></a>{% endfor %}</div>
-    </section>
-    {% endif %}
-
-    <section class="mx-auto grid w-full max-w-7xl gap-4 px-5 pb-10 sm:px-8 md:grid-cols-3 lg:px-10">
-        {% for item in roadmap %}
-            <div class="rounded-lg border border-slate-200 bg-white p-5">
-                <strong class="block text-3xl font-black text-slate-950">{{ item.step }}</strong>
-                <span class="mt-2 block text-sm font-semibold leading-6 text-slate-600">{{ item.label }}</span>
-            </div>
-        {% endfor %}
-    </section>
+<section class="border-t border-slate-200 bg-white">
+    <div class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
+        <form method="post" class="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-5 lg:grid-cols-[1fr_minmax(320px,0.8fr)] lg:items-end">
+            {% csrf_token %}
+            <div><h2 class="text-lg font-black text-slate-950">Bądź na bieżąco z rozwojem rankingu</h2><p class="mt-1 text-sm leading-6 text-slate-600">Zostaw email, a wyślemy krótkie zaproszenie i informację o nowych możliwościach porównywania.</p></div>
+            <div class="flex flex-col gap-2 sm:flex-row"><label for="{{ contact_form.email.id_for_label }}" class="sr-only">Email kontaktowy</label><div class="flex-1">{{ contact_form.email }}{% if contact_form.email.errors %}<p class="mt-1 text-xs font-semibold text-red-700">{{ contact_form.email.errors|first }}</p>{% endif %}</div>{% include "components/button.html" with type="submit" label="Poproś o kontakt" only %}</div>
+        </form>
+    </div>
+</section>
 {% endblock %}

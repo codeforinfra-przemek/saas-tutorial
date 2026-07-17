@@ -9,7 +9,8 @@ from django.shortcuts import render
 from django.template.loader import render_to_string
 
 from billing.services import apply_promotion_flags
-from franchises.models import Franchise
+from content.models import Article
+from franchises.models import Franchise, FranchiseCategory
 
 from .forms import ContactRequestForm
 
@@ -43,11 +44,12 @@ def home_view(request):
     ranked_franchises = apply_promotion_flags(
         Franchise.objects.filter(is_active=True).select_related("category", "organization")
     )
-    featured_franchises = [
+    premium_featured = [
         franchise
         for franchise in ranked_franchises
         if getattr(getattr(franchise, "subscription_plan", None), "can_feature_on_homepage", False)
-    ][:3]
+    ]
+    featured_franchises = (premium_featured or list(ranked_franchises))[:6]
 
     if request.method == "POST":
         contact_form = ContactRequestForm(request.POST)
@@ -77,47 +79,14 @@ def home_view(request):
         "site_name": "SaaS Home",
         "page_title": "Strona główna",
         "active_page": "home",
-        "eyebrow": "Pierwsza strona projektu Django",
-        "headline": "Lista obiektów z mapą w jednym miejscu.",
-        "lead_text": (
-            "Tymczasowa strona główna dla naszego SaaS-a. Na razie jest "
-            "statyczna, ale daje kierunek: wyszukiwarka, lista obiektów "
-            "i mapa lokalizacji."
-        ),
+        "eyebrow": "Ranking i porównywarka franczyz",
+        "headline": "Porównaj franczyzy przed pierwszą rozmową.",
+        "lead_text": "Sprawdź inwestycję, model biznesowy, skalę sieci i dostępne lokalizacje. Zapisz najlepsze opcje i wyślij zapytanie do wybranej marki.",
         "course_code_url": "https://github.com/codingforentrepreneurs/SaaS-Foundations",
         "my_code_url": "https://github.com/codeforinfra-przemek/saas-tutorial",
         "contact_form": contact_form,
         "featured_franchises": featured_franchises,
-        "featured_objects": [
-            {
-                "name": "Studio coworkingowe",
-                "city": "Warszawa",
-                "note": "dostępne od zaraz",
-            },
-            {
-                "name": "Magazyn miejski",
-                "city": "Kraków",
-                "note": "świetna komunikacja",
-            },
-            {
-                "name": "Lokal usługowy",
-                "city": "Wrocław",
-                "note": "centrum miasta",
-            },
-        ],
-        "roadmap": [
-            {
-                "step": "01",
-                "label": "Django jako fundament aplikacji",
-            },
-            {
-                "step": "02",
-                "label": "Obiekty, filtrowanie i szczegóły",
-            },
-            {
-                "step": "03",
-                "label": "Mapa lokalizacji w kolejnym kroku",
-            },
-        ],
+        "categories": FranchiseCategory.objects.filter(is_active=True)[:6],
+        "latest_articles": Article.objects.published().select_related("category")[:3],
     }
     return render(request, "home.html", context)

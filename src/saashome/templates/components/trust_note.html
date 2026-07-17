@@ -1,0 +1,4 @@
+<div class="flex items-start gap-3 rounded-lg border px-4 py-3 text-sm leading-6 {% if variant == 'verified' %}border-emerald-200 bg-emerald-50 text-emerald-900{% elif variant == 'promoted' %}border-amber-200 bg-amber-50 text-amber-900{% else %}border-slate-200 bg-slate-50 text-slate-700{% endif %}">
+    <span aria-hidden="true" class="mt-2 h-2 w-2 shrink-0 rounded-full {% if variant == 'verified' %}bg-emerald-500{% elif variant == 'promoted' %}bg-amber-500{% else %}bg-slate-400{% endif %}"></span>
+    <p>{% if label %}<strong>{{ label }}</strong> {% endif %}{{ text }}{% if date %} Ostatnia aktualizacja: {{ date }}.{% endif %}</p>
+</div>

@@ -15,7 +15,8 @@
             <div>
                 <a href="{% url 'leads:list' %}" class="text-sm font-bold text-brand-700 hover:text-brand-900">Wróć do leadów</a>
                 <h1 class="mt-2 text-3xl font-black tracking-normal text-slate-950">{{ lead.name }}</h1>
-                <p class="mt-1 text-sm text-slate-600">{{ lead.franchise.name }} · {{ lead.created_at|date:"Y-m-d H:i" }}</p>
+                <p class="mt-1 text-sm text-slate-600"><a href="{{ lead.franchise.get_absolute_url }}" class="font-bold text-brand-700 hover:underline">{{ lead.franchise.name }}</a> · {{ lead.created_at|date:"Y-m-d H:i" }}</p>
+                <a href="{% url 'leads:list' %}?franchise={{ lead.franchise_id }}" class="mt-2 inline-flex text-xs font-bold text-slate-600 hover:text-brand-700">Pokaż wszystkie leady tej franczyzy</a>
             </div>
             <div class="flex flex-wrap gap-2">
                 <a href="{% url 'leads:edit' lead.pk %}" class="inline-flex min-h-10 items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-extrabold text-white hover:bg-brand-600">Edytuj</a>

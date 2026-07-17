@@ -5,7 +5,8 @@
     <div class="mobile-records p-4">
         {% for row in analytics.franchise_rows %}
             <article class="mobile-record">
-                <p class="font-black text-slate-950">{{ row.franchise.name }}</p>
+                <a href="{{ row.franchise.get_absolute_url }}" class="font-black text-slate-950 hover:text-brand-700">{{ row.franchise.name }}</a>
+                <a href="{% url 'vendor:leads' %}?franchise={{ row.franchise.id }}" class="mt-1 block text-xs font-bold text-brand-700">Pokaż leady</a>
                 <dl class="mobile-record-grid">
                     <div><dt>Views</dt><dd>{{ row.views_count }}</dd></div>
                     <div><dt>Leads</dt><dd>{{ row.leads_count }}</dd></div>
@@ -35,7 +36,7 @@
             <tbody>
                 {% for row in analytics.franchise_rows %}
                     <tr class="border-t border-slate-200">
-                        <td class="px-4 py-3 font-bold text-slate-950">{{ row.franchise.name }}</td>
+                        <td class="px-4 py-3"><a href="{{ row.franchise.get_absolute_url }}" class="font-bold text-slate-950 hover:text-brand-700">{{ row.franchise.name }}</a><a href="{% url 'vendor:leads' %}?franchise={{ row.franchise.id }}" class="mt-1 block text-xs font-bold text-brand-700">Pokaż leady</a></td>
                         <td class="px-4 py-3">{{ row.views_count }}</td>
                         <td class="px-4 py-3">{{ row.leads_count }}</td>
                         <td class="px-4 py-3">{{ row.conversion_rate }}%</td>

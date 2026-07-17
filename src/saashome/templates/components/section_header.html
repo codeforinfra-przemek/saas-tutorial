@@ -1,0 +1,8 @@
+<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+        {% if eyebrow %}<p class="text-xs font-extrabold uppercase text-brand-700">{{ eyebrow }}</p>{% endif %}
+        <h2 class="{% if compact %}text-lg{% else %}text-2xl{% endif %} font-black text-slate-950">{{ title }}</h2>
+        {% if description %}<p class="mt-1 max-w-2xl text-sm leading-6 text-slate-600">{{ description }}</p>{% endif %}
+    </div>
+    {% if action_label and action_url %}{% include "components/button.html" with href=action_url label=action_label variant="ghost" size="small" only %}{% endif %}
+</div>

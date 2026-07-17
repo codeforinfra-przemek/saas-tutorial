@@ -15,7 +15,7 @@
         {% for row in rows %}
         <article class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                <div class="min-w-0"><p class="text-xs font-extrabold uppercase text-slate-500">{{ row.franchise.organization.name }}</p><h2 class="mt-1 truncate text-xl font-black text-slate-950">{{ row.franchise.name }}</h2></div>
+                <div class="min-w-0"><p class="text-xs font-extrabold uppercase text-slate-500">{{ row.franchise.organization.name }}</p><h2 class="mt-1 truncate text-xl font-black"><a href="{{ row.franchise.get_absolute_url }}" class="text-slate-950 hover:text-brand-700">{{ row.franchise.name }}</a></h2><a href="{% url 'vendor:leads' %}?franchise={{ row.franchise.id }}" class="mt-1 inline-flex text-xs font-bold text-brand-700">Pokaż leady</a></div>
                 <dl class="grid flex-1 grid-cols-2 gap-3 text-sm sm:grid-cols-4 lg:max-w-3xl">
                     <div class="rounded-lg bg-slate-50 p-3"><dt class="text-xs font-bold uppercase text-slate-400">Plan</dt><dd class="mt-1 font-black text-slate-950">{{ row.subscription.plan.name|default:"Free" }}</dd></div>
                     <div class="rounded-lg bg-slate-50 p-3"><dt class="text-xs font-bold uppercase text-slate-400">Status</dt><dd class="mt-1 font-black {% if row.subscription.status == 'active' %}text-emerald-700{% elif row.subscription.status == 'past_due' %}text-red-700{% else %}text-slate-700{% endif %}">{{ row.subscription.get_status_display|default:"Brak" }}</dd></div>

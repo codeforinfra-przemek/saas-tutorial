@@ -106,7 +106,7 @@ def create_lead_view(request, slug):
 
     messages.success(
         request,
-        "Dziękujemy. Zapisaliśmy Twoje zgłoszenie i wrócimy z informacjami o tej franczyzie.",
+        f"Zapytanie dotyczące {franchise.name} zostało wysłane. Franczyzodawca może skontaktować się z Tobą bezpośrednio.",
     )
     return redirect(franchise.get_absolute_url() + "#request-info")
 
@@ -141,7 +141,7 @@ def lead_list_view(request):
     }
 
     franchise_stats = (
-        base_leads.values("franchise__name")
+        base_leads.values("franchise_id", "franchise__name", "franchise__slug")
         .annotate(total=Count("id"))
         .order_by("-total", "franchise__name")[:8]
     )

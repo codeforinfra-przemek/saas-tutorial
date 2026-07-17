@@ -25,18 +25,21 @@
         </div>
 
         <div class="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <a href="{% url 'leads:list' %}?franchise={{ franchise.pk }}" class="block rounded-lg border border-slate-200 bg-white p-4 shadow-sm hover:border-brand-300">
                 <p class="text-xs font-bold uppercase text-slate-500">Leady</p>
                 <p class="mt-2 text-2xl font-black text-slate-950">{{ metrics.lead_count }}</p>
-            </div>
-            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="mt-1 text-xs font-bold text-brand-700">Pokaż listę</p>
+            </a>
+            <a href="{% url 'leads:list' %}?franchise={{ franchise.pk }}&amp;status=new" class="block rounded-lg border border-slate-200 bg-white p-4 shadow-sm hover:border-brand-300">
                 <p class="text-xs font-bold uppercase text-slate-500">Nowe leady</p>
                 <p class="mt-2 text-2xl font-black text-slate-950">{{ metrics.new_leads }}</p>
-            </div>
-            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="mt-1 text-xs font-bold text-brand-700">Pokaż nowe</p>
+            </a>
+            <a href="{% url 'visits:list' %}?franchise={{ franchise.pk }}" class="block rounded-lg border border-slate-200 bg-white p-4 shadow-sm hover:border-brand-300">
                 <p class="text-xs font-bold uppercase text-slate-500">Wizyty</p>
                 <p class="mt-2 text-2xl font-black text-slate-950">{{ metrics.visit_count }}</p>
-            </div>
+                <p class="mt-1 text-xs font-bold text-brand-700">Pokaż ruch</p>
+            </a>
             <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <p class="text-xs font-bold uppercase text-slate-500">Lokalizacje</p>
                 <p class="mt-2 text-2xl font-black text-slate-950">{{ metrics.location_count }}</p>

@@ -1,7 +1,8 @@
 {% load widget_tweaks %}
 
 <div class="p-5">
-    <p class="text-sm leading-6 text-slate-600">Zostaw kontakt, a przygotujemy informacje o modelu, inwestycji i kolejnych krokach.</p>
+    <h3 class="text-lg font-black text-slate-950">Wyślij zapytanie o franczyzę</h3>
+    <p class="mt-2 text-sm leading-6 text-slate-600">Twoje zapytanie zostanie przekazane do wybranej franczyzy {{ franchise.name }}. Franczyzodawca może skontaktować się z Tobą bezpośrednio w sprawie warunków współpracy.</p>
 
     {% if lead_form.non_field_errors %}
         <div class="mt-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
@@ -51,7 +52,7 @@
         <div class="space-y-3 rounded-lg bg-slate-50 p-4">
             <label class="flex items-start gap-3 text-xs leading-5 text-slate-600">
                 {{ lead_form.privacy_consent|add_class:"mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" }}
-                <span>{{ lead_form.privacy_consent.label }}</span>
+                <span>Wyrażam zgodę na przekazanie moich danych franczyzodawcy {{ franchise.name }} w celu obsługi tego zapytania. *</span>
             </label>
             {% if lead_form.privacy_consent.errors %}<p class="text-xs font-semibold text-red-600">{{ lead_form.privacy_consent.errors|first }}</p>{% endif %}
 
@@ -61,8 +62,6 @@
             </label>
         </div>
 
-        <button type="submit" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100">
-            Request free info
-        </button>
+        {% include "components/button.html" with type="submit" label="Wyślij zapytanie" variant="primary" full_width=True only %}
     </form>
 </div>

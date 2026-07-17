@@ -48,9 +48,7 @@
         {% if messages %}
             <div class="mx-auto w-full max-w-7xl px-5 pt-5 sm:px-8 lg:px-10">
                 {% for message in messages %}
-                    <div class="mb-3 rounded-lg border px-4 py-3 text-sm font-semibold {% if message.tags == 'success' %}border-brand-100 bg-brand-50 text-brand-700{% elif message.tags == 'error' %}border-red-100 bg-red-50 text-red-700{% else %}border-slate-200 bg-white text-slate-700{% endif %}">
-                        {{ message }}
-                    </div>
+                    <div class="mb-3">{% include "components/alert.html" with variant=message.tags text=message only %}</div>
                 {% endfor %}
             </div>
         {% endif %}
