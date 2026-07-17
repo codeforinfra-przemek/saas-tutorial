@@ -54,12 +54,12 @@
         </form>
 
         <nav class="space-y-1 text-sm font-semibold">
-            <div class="mb-3 space-y-1 rounded-lg border border-brand-100 bg-brand-50/60 p-1" aria-label="Odkrywaj franczyzy">
-                <a href="{% url 'franchises:list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-md px-2 py-2.5 lg:justify-center {% if active_page == 'franchises' %}bg-brand-600 text-white shadow-sm{% else %}text-brand-800 hover:bg-white hover:text-brand-950{% endif %}" title="Lista franczyz">
+            <div class="mb-3 space-y-1 border-b border-slate-200 pb-3" aria-label="Odkrywaj franczyzy">
+                <a href="{% url 'franchises:list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 lg:justify-center {% if active_page == 'franchises' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-brand-50 hover:text-brand-700{% endif %}" title="Lista franczyz">
                     <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V10.5Z"/></svg>
                     <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Lista franczyz</span>
                 </a>
-                <a href="{% url 'franchises:directory' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-md px-2 py-2.5 lg:justify-center {% if active_page == 'franchise_directory' %}bg-brand-600 text-white shadow-sm{% else %}text-brand-800 hover:bg-white hover:text-brand-950{% endif %}" title="Porównaj dane">
+                <a href="{% url 'franchises:directory' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 lg:justify-center {% if active_page == 'franchise_directory' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-brand-50 hover:text-brand-700{% endif %}" title="Porównaj dane">
                     <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6"/></svg>
                     <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Porównaj dane</span>
                 </a>

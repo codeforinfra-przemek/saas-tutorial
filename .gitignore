@@ -91,3 +91,7 @@ coverage/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# DatacollectorAI
+datacollector/.env
+datacollector/
