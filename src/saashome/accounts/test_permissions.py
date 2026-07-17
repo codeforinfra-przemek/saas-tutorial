@@ -130,11 +130,13 @@ class AccessControlTests(TestCase):
         staff_page = self.client.get(reverse("home"))
         self.assertContains(staff_page, 'title="Lista franczyz"')
         self.assertContains(staff_page, 'title="Porównaj dane"')
+        self.assertContains(staff_page, 'title="Mapa"')
         self.assertContains(staff_page, 'title="Zarządzaj franczyzami"')
         self.assertContains(staff_page, 'title="Wszystkie leady"')
         self.assertContains(staff_page, 'title="Analityka platformy"')
-        self.assertNotContains(staff_page, 'title="Poradnik"')
-        self.assertNotContains(staff_page, 'title="Vendor dashboard"')
+        self.assertContains(staff_page, 'title="Panel vendora"')
+        self.assertContains(staff_page, 'title="Poradnik"')
+        self.assertContains(staff_page, 'title="Usługi dla inwestora"')
 
     def test_anonymous_viewer_is_redirected_from_private_pages(self):
         for url in (

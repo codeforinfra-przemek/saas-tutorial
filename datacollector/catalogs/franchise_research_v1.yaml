@@ -1,0 +1,1706 @@
+version: "1.0.0"
+title: "Franchise Research Standard: FTC FDD baseline plus independent due diligence"
+legal_note: >-
+  The FTC Franchise Rule applies to covered offers or sales of franchises located
+  in the United States and its territories. For research in Poland or another
+  country, the 23 FDD Items are a comparative data standard, not a statement of
+  local legal compliance. Legal conclusions require current local counsel.
+authoritative_sources:
+  - "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-D/part-436"
+  - "https://www.ftc.gov/legal-library/browse/rules/franchise-rule"
+  - "https://www.ftc.gov/business-guidance/resources/franchise-rule-compliance-guide"
+  - "https://www.ftc.gov/business-guidance/resources/consumers-guide-buying-franchise"
+  - "https://www.sba.gov/business-guide/plan-your-business/buy-existing-business-or-franchise"
+  - "https://www.sba.gov/document/support-sba-franchise-directory"
+source_policy:
+  preferred_order:
+    - government
+    - regulator
+    - court
+    - registry
+    - legal_document
+    - audited_financial
+    - official
+    - reputable_media
+    - industry
+    - franchisee_interview
+    - review_platform
+    - social
+  rules:
+    - "Every factual claim must link to a retrievable source and record collection date."
+    - "Store a short supporting excerpt or precise document location for every fact."
+    - "Separate what a company declares from independently corroborated truth."
+    - "Represent unavailable data as not_applicable, not_disclosed, not_found, or conflicting; never guess."
+    - "Record source publication/effective date, jurisdiction, reliability, and claim confidence separately."
+    - "Treat reviews, interviews, blogs, and social media as attributed opinion unless independently corroborated."
+    - "For changing facts, prefer the newest primary source and preserve superseded values as history."
+  prohibited_methods:
+    - "accessing private, login-protected, or paywalled material without authorization"
+    - "scraping Google Reviews instead of using an authorized API or manual review"
+    - "collecting unnecessary private contact details or sensitive personal data"
+    - "publishing allegations as facts without reliable corroboration and human review"
+
+sections:
+  - id: scope
+    title: "Scope, identity, and applicability"
+    framework: "research foundation"
+    questions:
+      - id: scope.brand_identity
+        title: "Brand and legal entity identity"
+        question: >-
+          What exact brand, legal franchisor, trading names, parent entities, and
+          official franchise website are in scope for the target market?
+        fdd_items: [1]
+        minimum_depth: catalog
+        requirement: critical
+        target_fields:
+          - brand.name
+          - brand.aliases
+          - franchisor.legal_name
+          - franchisor.registration_id
+          - franchisor.parent_entities
+          - websites.official
+          - websites.franchise_offer
+        evidence:
+          min_sources: 2
+          preferred_source_types: [registry, official, government]
+          acceptance_criteria: >-
+            The brand is tied to a specific legal offering entity in the target
+            market, with registry or equivalent primary evidence and official URLs.
+          requires_independent_corroboration: true
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise official {country}'
+          - '"{brand}" "{legal_name}" company registry {country}'
+        dependencies: []
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [identity, critical]
+
+      - id: scope.offer_and_transaction
+        title: "Offer and transaction type"
+        question: >-
+          Is the opportunity a new single-unit franchise, multi-unit or area
+          development deal, master/subfranchise, renewal, transfer, or resale?
+        fdd_items: [1, 17, 20]
+        minimum_depth: catalog
+        requirement: required
+        target_fields:
+          - offer.type
+          - offer.unit_formats
+          - offer.new_or_resale
+          - offer.target_investor
+        evidence:
+          min_sources: 1
+          preferred_source_types: [official, legal_document]
+          acceptance_criteria: >-
+            The transaction and unit format are explicit, with ambiguity recorded
+            rather than silently combining materially different offers.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise offer formats {country}'
+          - '"{brand}" area development master franchise {country}'
+        dependencies: [scope.brand_identity]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [scope]
+
+      - id: scope.jurisdictions
+        title: "Potentially applicable jurisdictions"
+        question: >-
+          Which country, state, province, and local rules may apply based on the
+          parties, outlet, offer, acceptance, payment, and signing locations?
+        fdd_items: [1]
+        minimum_depth: catalog
+        requirement: critical
+        target_fields:
+          - jurisdictions.target_country
+          - jurisdictions.target_regions
+          - jurisdictions.offer_locations
+          - jurisdictions.local_rules_to_verify
+        evidence:
+          min_sources: 1
+          preferred_source_types: [government, regulator, legal_document]
+          acceptance_criteria: >-
+            All plausible jurisdictions and the factual trigger for each are
+            listed; legal applicability is flagged for professional confirmation.
+          requires_independent_corroboration: false
+          max_age_days: 90
+        search_query_templates:
+          - 'franchise law regulator {regions}'
+          - 'franchise disclosure registration requirements {regions}'
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [jurisdiction, critical]
+
+      - id: scope.document_inventory
+        title: "Current document inventory"
+        question: >-
+          What disclosure documents, agreements, addenda, manuals, fee schedules,
+          brochures, financial statements, and dated versions are available?
+        fdd_items: [21, 22, 23]
+        minimum_depth: catalog
+        requirement: critical
+        target_fields:
+          - documents.inventory
+          - documents.versions
+          - documents.issue_dates
+          - documents.effective_dates
+          - documents.missing
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official, regulator]
+          acceptance_criteria: >-
+            Every located document has title, issuer, date, version, URL or file
+            reference, and checksum where downloaded; missing documents are explicit.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise agreement disclosure PDF {country}'
+          - '"{brand}" franchise document agreement {country}'
+        dependencies: [scope.brand_identity]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [documents, provenance, critical]
+
+      - id: scope.local_legal_overlay
+        title: "Target-country franchise and business-law overlay"
+        question: >-
+          In the target country and regions, which current franchise, pre-contract
+          disclosure, commercial agency, competition, unfair-practices, privacy,
+          registration and relationship rules must be researched separately from FDD?
+        fdd_items: []
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - local_law.franchise_definition
+          - local_law.precontract_disclosure
+          - local_law.registration_and_filings
+          - local_law.relationship_rules
+          - local_law.competition_and_unfair_practices
+          - local_law.privacy_and_personal_data
+          - local_law.counsel_questions
+        evidence:
+          min_sources: 2
+          preferred_source_types: [government, regulator, legal_document]
+          acceptance_criteria: >-
+            Current primary authorities are mapped to each target jurisdiction and
+            unresolved interpretation is assigned to qualified local counsel; the
+            U.S. FDD benchmark is never presented as local law.
+          requires_independent_corroboration: true
+          max_age_days: 90
+        search_query_templates:
+          - 'franchise disclosure relationship law {country} {regions}'
+          - 'franchise competition privacy regulator {country}'
+        dependencies: [scope.jurisdictions]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [jurisdiction, local_law, critical]
+
+  - id: fdd_01_04_background_risk
+    title: "FDD Items 1-4: background, management, litigation, bankruptcy"
+    framework: "16 CFR 436.5(a-d)"
+    questions:
+      - id: fdd01.business_background
+        title: "Franchisor and system background"
+        question: >-
+          What is the franchisor's structure, history, predecessors and affiliates,
+          franchise experience, business model, market, seasonality, competition,
+          and industry-specific regulation?
+        fdd_items: [1]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - franchisor.structure
+          - franchisor.principal_address
+          - franchisor.entity_type
+          - franchisor.formation_jurisdiction
+          - franchisor.service_agent
+          - franchisor.predecessors_10y
+          - franchisor.affiliates
+          - franchisor.operating_history
+          - franchisor.franchising_history
+          - business.model
+          - market.summary
+          - market.seasonality
+          - market.competition
+          - market.industry_regulation
+        evidence:
+          min_sources: 2
+          preferred_source_types: [legal_document, registry, official, government]
+          acceptance_criteria: >-
+            The legal and commercial history is dated, market-specific, and
+            distinguishes the franchisor from parents, affiliates, and the brand.
+          requires_independent_corroboration: true
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchisor history affiliates {country}'
+          - '"{legal_name}" annual report business history'
+        dependencies: [scope.brand_identity]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [fdd, background]
+
+      - id: fdd02.management_experience
+        title: "Management experience"
+        question: >-
+          Who are the directors, trustees, general partners, principal officers and
+          other people with management responsibility for franchise sales or
+          operations, and what is each person's current position and complete
+          five-year employment history, including positions, employers, locations
+          and start/end dates?
+        fdd_items: [2]
+        minimum_depth: due_diligence
+        requirement: recommended
+        target_fields:
+          - management.people
+          - management.roles
+          - management.experience
+          - management.tenure
+          - management.covered_people_and_responsibility
+          - management.current_position
+          - management.five_year_employment_history
+          - management.employment_start_end_dates
+          - management.position_and_employer
+          - management.position_location
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official, registry]
+          acceptance_criteria: >-
+            Every covered person has a current role and complete, gap-flagged
+            five-year history with start/end dates, position, employer and location;
+            only professional information needed to evaluate the system is retained.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise management team {country}'
+          - '"{legal_name}" directors officers'
+        dependencies: [scope.brand_identity]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [fdd, management]
+
+      - id: fdd03.litigation
+        title: "Material litigation and enforcement"
+        question: >-
+          For every covered franchisor entity, affiliate and manager, what reportable
+          pending actions, last-fiscal-year franchise-relationship cases, felony
+          convictions or nolo pleas, injunctions or restrictive orders, and historical
+          franchise, fraud, antitrust, securities or deceptive-practices matters exist,
+          including cases brought by the franchisor against franchisees?
+        fdd_items: [3]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - legal.litigation_covered_subjects
+          - legal.pending_actions
+          - legal.franchise_relationship_actions_last_fiscal_year
+          - legal.felony_convictions_and_nolo_pleas_10y
+          - legal.currently_effective_injunctions_and_restrictive_orders
+          - legal.litigation
+          - legal.regulatory_actions
+          - legal.franchisor_vs_franchisee_cases
+          - legal.case_forum_number_parties_dates
+          - legal.claims_relief_damages_and_settlements
+          - legal.case_status
+          - legal.outcomes
+        evidence:
+          min_sources: 2
+          preferred_source_types: [court, regulator, legal_document]
+          acceptance_criteria: >-
+            All required subject classes and applicable lookback periods are tested;
+            currently effective injunctions/restrictive orders are checked regardless
+            of issuance date. Each matter has parties, forum, number, dates, claims,
+            requested relief, status, damages/settlement, outcome and source;
+            no-result findings record scope.
+          requires_independent_corroboration: true
+          max_age_days: 90
+        search_query_templates:
+          - '"{legal_name}" franchise lawsuit court'
+          - '"{brand}" regulator enforcement franchise {country}'
+          - '"{brand}" FDD Item 3 litigation'
+        dependencies: [scope.brand_identity]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, legal, risk]
+
+      - id: fdd04.bankruptcy
+        title: "Bankruptcy and financial distress history"
+        question: >-
+          During the required ten-year period, have the franchisor, parent,
+          predecessors, affiliates, officers, general partners or other people with
+          franchise-management responsibility been involved in a covered bankruptcy;
+          and was any such person a principal officer or general partner of another
+          entity that entered bankruptcy while they held the role or within one year
+          afterward?
+        fdd_items: [4]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - legal.bankruptcies
+          - legal.insolvency_proceedings
+          - legal.distress_period_checked
+          - legal.bankruptcy_covered_entities_and_people
+          - legal.bankruptcy_10y_period_checked
+          - legal.franchisor_parent_predecessor_affiliate_bankruptcies
+          - legal.officer_general_partner_management_person_bankruptcies
+          - legal.principal_officer_or_general_partner_other_entity_bankruptcy
+          - legal.other_entity_role_and_one_year_timing
+          - legal.bankruptcy_case_details_and_outcomes
+        evidence:
+          min_sources: 2
+          preferred_source_types: [court, registry, legal_document]
+          acceptance_criteria: >-
+            The full covered entity/person set and ten-year period are tested,
+            including the other-entity principal-officer/general-partner rule and its
+            one-year timing. Each proceeding has role, court, number, dates, legal
+            basis and outcome; a no-result finding records the exact search scope.
+          requires_independent_corroboration: true
+          max_age_days: 180
+        search_query_templates:
+          - '"{legal_name}" bankruptcy insolvency court'
+          - '"{brand}" FDD Item 4 bankruptcy'
+        dependencies: [scope.brand_identity]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, insolvency, risk]
+
+  - id: fdd_05_10_money_obligations
+    title: "FDD Items 5-10: fees, investment, suppliers, obligations, financing"
+    framework: "16 CFR 436.5(e-j)"
+    questions:
+      - id: fdd05.initial_fees
+        title: "Initial fees"
+        question: >-
+          What payments are due to the franchisor or affiliates before opening,
+          how are they calculated and paid, are they uniform, and when refundable?
+        fdd_items: [5]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - fees.initial
+          - fees.initial_formula
+          - fees.initial_due_date
+          - fees.initial_refundability
+          - fees.initial_variation
+          - fees.initial_currency
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Every pre-opening fee has amount or formula, currency, payee, due date,
+            refund conditions, tax treatment note, and document section reference.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" initial franchise fee {country}'
+          - '"{brand}" FDD Item 5 fee'
+        dependencies: [scope.document_inventory]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, fees, critical]
+
+      - id: fdd06.other_fees
+        title: "Ongoing and event-driven fees"
+        question: >-
+          What royalty, advertising, technology, training, audit, renewal, transfer,
+          remodeling, default, interest, indemnity, and other fees can be charged?
+        fdd_items: [6]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - fees.royalty
+          - fees.marketing
+          - fees.technology
+          - fees.training
+          - fees.audit
+          - fees.renewal
+          - fees.transfer
+          - fees.remodeling
+          - fees.default_and_penalties
+          - fees.other
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Each fee has amount/formula, calculation base, currency, frequency,
+            payee, adjustment rights, trigger, refundability, and contract reference.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" royalty marketing technology fees franchise {country}'
+          - '"{brand}" FDD Item 6 other fees'
+        dependencies: [scope.document_inventory]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, fees, critical]
+
+      - id: fdd07.initial_investment
+        title: "Estimated initial investment"
+        question: >-
+          What low/high investment is required for fees, property, build-out,
+          equipment, IT, inventory, deposits, permits, insurance, opening promotion,
+          training/travel, and initial working capital?
+        fdd_items: [7]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - investment.total_low
+          - investment.total_high
+          - investment.currency
+          - investment.line_items
+          - investment.working_capital_period
+          - investment.estimation_basis
+          - investment.payment_and_refund_terms
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            A non-overlapping line-item range reconciles to the total and records
+            currency, date, payee, payment method, refundability and estimation basis.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" total initial investment franchise {country}'
+          - '"{brand}" FDD Item 7 estimated initial investment'
+        dependencies: [fdd05.initial_fees, scope.offer_and_transaction]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, investment, critical]
+
+      - id: fdd08.required_suppliers
+        title: "Required purchases and supplier economics"
+        question: >-
+          Which goods, services, real estate, equipment, software, and inventory
+          must be bought or leased from designated or approved suppliers, and what
+          financial interests, rebates, approval rules, or purchasing benefits exist?
+        fdd_items: [8]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - suppliers.required_items
+          - suppliers.approved_and_exclusive
+          - suppliers.approval_process
+          - suppliers.affiliated_interests
+          - suppliers.rebates_and_revenue
+          - suppliers.purchase_share
+          - suppliers.cooperatives
+          - suppliers.material_benefits
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Obligations, supplier choice, approval/revocation rules, affiliate
+            interests and franchisor consideration are tied to contract sections.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" required suppliers franchise'
+          - '"{brand}" FDD Item 8 suppliers rebates'
+        dependencies: [scope.document_inventory]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, suppliers, hidden_costs]
+
+      - id: fdd09.franchisee_obligations
+        title: "Franchisee obligation matrix"
+        question: >-
+          What obligations govern site selection, development, training, opening,
+          operations, standards, purchasing, staffing, insurance, records, reports,
+          audits, targets, remodeling, transfer, renewal and post-termination conduct?
+        fdd_items: [9]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - obligations.matrix
+          - obligations.contract_cross_references
+          - obligations.performance_targets
+          - obligations.post_termination
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document]
+          acceptance_criteria: >-
+            Each material obligation has responsible party, timing, condition,
+            consequence of breach, and exact agreement section reference.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchisee obligations agreement'
+          - '"{brand}" FDD Item 9 obligations'
+        dependencies: [scope.document_inventory]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, contract]
+
+      - id: fdd10.financing
+        title: "Financing terms"
+        question: >-
+          Does the franchisor or an affiliate offer or arrange financing, and what
+          are the amount, rate, fees, term, collateral, guarantees, defaults,
+          prepayment rights, assignment and referral compensation?
+        fdd_items: [10]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - financing.available
+          - financing.provider
+          - financing.amount_and_down_payment
+          - financing.rate_fees_term
+          - financing.security_and_guarantees
+          - financing.default_and_prepaid_terms
+          - financing.referral_compensation
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Every financing arrangement and material term is recorded, including
+            affiliations and consequences of default; unavailable terms are explicit.
+          requires_independent_corroboration: false
+          max_age_days: 180
+        search_query_templates:
+          - '"{brand}" franchise financing terms {country}'
+          - '"{brand}" FDD Item 10 financing'
+        dependencies: [fdd07.initial_investment]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, financing]
+
+  - id: fdd_11_16_operations_ip
+    title: "FDD Items 11-16: assistance, territory, IP, participation, sales"
+    framework: "16 CFR 436.5(k-p)"
+    questions:
+      - id: fdd11.assistance_and_opening
+        title: "Pre-opening and ongoing assistance"
+        question: >-
+          What assistance is contractually required for site selection, permits,
+          construction, equipment, hiring, opening and ongoing operations, and how
+          long does opening usually take?
+        fdd_items: [11]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - support.pre_opening
+          - support.site_selection
+          - support.buildout_and_permits
+          - support.hiring_and_opening
+          - support.ongoing
+          - support.estimated_opening_time
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Promised assistance is separated from optional practice and mapped to
+            provider, timing, conditions, costs, limitations and contract sections.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise training support site selection {country}'
+          - '"{brand}" FDD Item 11 assistance'
+        dependencies: [scope.document_inventory]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [fdd, support, critical]
+
+      - id: fdd11.advertising_it_training
+        title: "Advertising, systems, manuals, and training"
+        question: >-
+          How are advertising funds governed and spent; which IT systems and data
+          access are mandatory; what does the operations manual cover; and what are
+          the training subjects, hours, instructors, participants, costs and pass rules?
+        fdd_items: [11]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - support.advertising_program
+          - support.ad_fund_governance
+          - support.it_systems
+          - support.it_data_access
+          - support.manual_outline
+          - support.training_program
+          - support.training_costs
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official, audited_financial]
+          acceptance_criteria: >-
+            Advertising, IT, manual and training obligations have current scope,
+            costs, controls, audit status and agreement or disclosure references.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise advertising fund training IT system'
+          - '"{brand}" FDD Item 11 training program'
+        dependencies: [fdd11.assistance_and_opening]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, training, advertising, technology]
+
+      - id: fdd12.territory
+        title: "Territory and channel conflict"
+        question: >-
+          Is a location or minimum/exclusive territory granted; what performance
+          conditions, relocation and expansion rights apply; and may the franchisor,
+          affiliates, internet channels or competing brands sell into it?
+        fdd_items: [12]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - territory.location_rule
+          - territory.minimum_area
+          - territory.exclusivity
+          - territory.performance_conditions
+          - territory.relocation_and_expansion
+          - territory.other_channels
+          - territory.competing_brands
+          - territory.conflict_resolution
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Rights and exceptions are described from the agreement, including
+            channels, compensation, modification triggers and loss of exclusivity.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" exclusive protected territory franchise {country}'
+          - '"{brand}" FDD Item 12 territory internet sales'
+        dependencies: [scope.document_inventory]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, territory, critical]
+
+      - id: fdd13.trademarks
+        title: "Trademark rights and disputes"
+        question: >-
+          Which principal marks are licensed, who owns them, are they registered or
+          pending, what limitations or disputes exist, and who must defend or pay if
+          the mark is challenged or changed?
+        fdd_items: [13]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - ip.trademarks
+          - ip.trademark_owner
+          - ip.trademark_registrations
+          - ip.trademark_limitations
+          - ip.trademark_disputes
+          - ip.trademark_defense_and_change
+        evidence:
+          min_sources: 2
+          preferred_source_types: [government, registry, legal_document]
+          acceptance_criteria: >-
+            Principal marks are matched to current registry records and agreement
+            rights, with disputes, prior users, defense and change costs recorded.
+          requires_independent_corroboration: true
+          max_age_days: 180
+        search_query_templates:
+          - '"{brand}" trademark registry {country}'
+          - '"{brand}" FDD Item 13 trademark'
+        dependencies: [scope.brand_identity]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, intellectual_property]
+
+      - id: fdd14.other_ip
+        title: "Patents, copyrights, software, and trade secrets"
+        question: >-
+          What material patents, copyrights, software, know-how and trade secrets
+          support the franchise, what license restrictions or disputes apply, and
+          who handles defense and confidentiality?
+        fdd_items: [14]
+        minimum_depth: due_diligence
+        requirement: recommended
+        target_fields:
+          - ip.patents
+          - ip.copyrights
+          - ip.software_and_knowhow
+          - ip.trade_secrets
+          - ip.license_limits
+          - ip.disputes_and_defense
+          - ip.confidentiality_obligations
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, government, official]
+          acceptance_criteria: >-
+            Material IP and proprietary information are categorized with ownership,
+            license, duration, restrictions, disputes and defense obligations.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" FDD Item 14 patents copyright proprietary'
+          - '"{brand}" software license franchise agreement'
+        dependencies: [scope.document_inventory]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, intellectual_property]
+
+      - id: fdd15.owner_participation
+        title: "Owner and manager participation"
+        question: >-
+          Must the owner personally operate or supervise the outlet, and what
+          training, equity, confidentiality and non-compete requirements apply to
+          an on-premises manager?
+        fdd_items: [15]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - operator.owner_participation_required
+          - operator.manager_allowed
+          - operator.manager_qualifications
+          - operator.manager_equity_required
+          - operator.manager_restrictions
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            The required operating model, eligible manager, training and ownership
+            conditions are explicit and tied to current contract provisions.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" owner operator requirement franchise {country}'
+          - '"{brand}" FDD Item 15 participation'
+        dependencies: [scope.offer_and_transaction]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, operator, critical]
+
+      - id: fdd16.sales_restrictions
+        title: "Restrictions on products, services, customers, and channels"
+        question: >-
+          What must or may the franchisee sell, what is prohibited, which customers
+          or channels may be served, and how far may the franchisor change the offer?
+        fdd_items: [16]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - sales.required_products_services
+          - sales.prohibited_products_services
+          - sales.customer_restrictions
+          - sales.channel_restrictions
+          - sales.franchisor_change_rights
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Mandatory, permitted and prohibited sales are separated, with customer,
+            channel and unilateral-change restrictions mapped to contract sections.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise product sales restrictions'
+          - '"{brand}" FDD Item 16 restrictions what franchisee may sell'
+        dependencies: [scope.document_inventory]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, operations, restrictions]
+
+  - id: fdd_17_23_relationship_performance
+    title: "FDD Items 17-23: relationship, performance, outlets, statements, contracts"
+    framework: "16 CFR 436.5(q-w)"
+    questions:
+      - id: fdd17.term_renewal_termination
+        title: "Term, renewal, termination, and post-termination"
+        question: >-
+          What is the agreement term; how can it be renewed or changed; who may
+          terminate with or without cause; what defaults can be cured; and what
+          payments, de-identification, non-compete and other duties follow exit?
+        fdd_items: [17]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - relationship.term
+          - relationship.renewal
+          - relationship.termination_by_franchisee
+          - relationship.termination_by_franchisor
+          - relationship.cure_periods
+          - relationship.post_termination
+          - relationship.non_compete
+          - relationship.exit_costs_and_penalties
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document]
+          acceptance_criteria: >-
+            Every exit path has trigger, notice, cure, cost, survival obligation,
+            time/geographic restriction and exact agreement cross-reference.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise termination renewal penalties agreement'
+          - '"{brand}" FDD Item 17 termination non-compete'
+        dependencies: [scope.document_inventory]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, contract, penalties, critical]
+
+      - id: fdd17.transfer_and_disputes
+        title: "Transfer, purchase rights, and dispute resolution"
+        question: >-
+          How is transfer defined and approved; do first-refusal or purchase options
+          apply; what happens on death or disability; and which mediation, arbitration,
+          forum, governing-law, modification and integration clauses control disputes?
+        fdd_items: [17]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - relationship.transfer
+          - relationship.first_refusal
+          - relationship.purchase_option
+          - relationship.death_disability
+          - relationship.mediation_arbitration
+          - relationship.forum_and_law
+          - relationship.modification_and_integration
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document]
+          acceptance_criteria: >-
+            Transfer and dispute rules are mapped to exact provisions, including
+            approval conditions, fees, timelines, forum, law and waiver language.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise transfer arbitration governing law'
+          - '"{brand}" FDD Item 17 transfer dispute resolution'
+        dependencies: [fdd17.term_renewal_termination]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, contract, dispute_resolution]
+
+      - id: fdd18.public_figures
+        title: "Public figures and endorsements"
+        question: >-
+          Is a public figure used in the brand or franchise offer, and what
+          compensation, investment, role, duties, and management involvement exist?
+        fdd_items: [18]
+        minimum_depth: due_diligence
+        requirement: optional
+        target_fields:
+          - endorsements.public_figures
+          - endorsements.compensation
+          - endorsements.investment
+          - endorsements.management_role
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Any endorsement is distinguished from ownership or management, with
+            compensation, investment and duties recorded; otherwise not_applicable.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" celebrity endorsement franchise'
+          - '"{brand}" FDD Item 18 public figures'
+        dependencies: [scope.brand_identity]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [fdd, endorsement]
+
+      - id: fdd19.fpr_status
+        title: "Financial performance representation status"
+        question: >-
+          Does the franchisor make any claim about sales, revenue, income, profit,
+          break-even, return or future performance, and is it contained in the
+          designated financial-performance disclosure or local equivalent?
+        fdd_items: [19]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - performance.disclosure_status
+          - performance.claims
+          - performance.claim_locations
+          - performance.unapproved_or_conflicting_claims
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Status is explicitly disclosed, not_disclosed, or not_found; every claim
+            is quoted precisely and located in a dated document or communication.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise revenue profit earnings break-even {country}'
+          - '"{brand}" FDD Item 19 financial performance representation'
+        dependencies: [scope.document_inventory]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, performance, critical]
+
+      - id: fdd19.fpr_methodology
+        title: "Financial claim methodology and representativeness"
+        question: >-
+          For every performance claim, what period, population, sample, unit type,
+          geography, inclusion rules, number and percentage achieving the result,
+          assumptions, limitations and written substantiation support it?
+        fdd_items: [19]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - performance.period
+          - performance.population_and_sample
+          - performance.unit_characteristics
+          - performance.geography
+          - performance.attainment_rate
+          - performance.methodology
+          - performance.assumptions
+          - performance.limitations
+          - performance.substantiation
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, audited_financial, official]
+          acceptance_criteria: >-
+            Each claim can be reproduced or bounded from disclosed inputs and its
+            applicability to a new target-market unit is explicitly assessed.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" FDD Item 19 methodology sample outlets'
+          - '"{brand}" franchise financial performance substantiation'
+        dependencies: [fdd19.fpr_status]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, performance, methodology]
+
+      - id: fdd20.systemwide_outlet_history
+        title: "Three-year systemwide outlet history"
+        question: >-
+          For each of the last three fiscal years, how many franchised, company-owned
+          and total outlets existed at the start and end, and what was the net change?
+        fdd_items: [20]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - outlets.systemwide_by_year
+          - outlets.franchised_start_end
+          - outlets.company_owned_start_end
+          - outlets.total_start_end
+          - outlets.net_change
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official, audited_financial]
+          acceptance_criteria: >-
+            A complete three-year series separates outlet ownership types, reconciles
+            totals and records fiscal periods, scope and document table references.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" FDD Item 20 systemwide outlet summary'
+          - '"{brand}" number of franchised company owned outlets {country}'
+        dependencies: [scope.document_inventory]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, outlets, critical]
+
+      - id: fdd20.outlet_changes
+        title: "Outlet openings, transfers, terminations, and closures"
+        question: >-
+          By year and geography, how many franchised outlets opened, transferred,
+          terminated, were not renewed, reacquired, or ceased for other reasons, and
+          how many company-owned outlets opened, closed, were reacquired or sold?
+        fdd_items: [20]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - outlets.changes_by_year_and_region
+          - outlets.openings
+          - outlets.transfers
+          - outlets.terminations
+          - outlets.non_renewals
+          - outlets.reacquisitions
+          - outlets.ceased_other
+          - outlets.company_opened_closed_sold
+          - outlets.churn_metrics
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Mutually exclusive change categories reconcile start/end outlet counts;
+            definitions, period, geography, unknowns and calculated churn are explicit.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" FDD Item 20 terminations non-renewals closures'
+          - '"{brand}" franchise outlets closed transferred {country}'
+        dependencies: [fdd20.systemwide_outlet_history]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, outlets, closures, churn, critical]
+
+      - id: fdd20.pipeline_and_references
+        title: "Projected outlets and franchisee references"
+        question: >-
+          How many signed-but-not-open and projected outlets exist; what current and
+          former franchisee business-reference rosters, outlet locations, statuses,
+          exit dates/reasons and permitted contact routes are disclosed; and are
+          confidentiality clauses, associations or resale ownership histories reported?
+        fdd_items: [20]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - outlets.signed_not_open
+          - outlets.projected_next_year
+          - franchisees.reference_availability
+          - franchisees.former_reference_availability
+          - franchisees.current_business_reference_roster
+          - franchisees.former_business_reference_roster
+          - franchisees.reference_outlet_location
+          - franchisees.reference_status
+          - franchisees.former_exit_date_and_reason
+          - franchisees.permitted_business_contact_route
+          - franchisees.associations
+          - franchisees.confidentiality_disclosure
+          - outlets.resale_ownership_history
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Counts and usable business-reference rosters support a non-cherry-picked
+            sample, with location/status and former exit context. Business contact
+            routes are retained only when permitted; home/private data is excluded.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" FDD Item 20 projected openings franchisees'
+          - '"{brand}" franchisee association former franchisees'
+        dependencies: [fdd20.systemwide_outlet_history]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [fdd, outlets, references]
+
+      - id: fdd21.financial_statements
+        title: "Franchisor financial statements"
+        question: >-
+          Which balance sheets, income/operations, equity and cash-flow statements
+          are supplied, for which periods, are they independently audited, and do
+          guarantees, qualifications, going-concern issues or startup phase-ins apply?
+        fdd_items: [21]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - franchisor_financials.periods
+          - franchisor_financials.statement_types
+          - franchisor_financials.audit_status
+          - franchisor_financials.auditor
+          - franchisor_financials.opinion
+          - franchisor_financials.going_concern
+          - franchisor_financials.guarantees
+          - franchisor_financials.startup_phase_in
+        evidence:
+          min_sources: 1
+          preferred_source_types: [audited_financial, legal_document, registry]
+          acceptance_criteria: >-
+            Required periods and statements are inventoried, audit opinion and entity
+            scope are clear, and qualifications, guarantees or missing periods are flagged.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{legal_name}" audited financial statements franchise'
+          - '"{brand}" FDD Item 21 financial statements'
+        dependencies: [scope.document_inventory]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [fdd, financial_health, critical]
+
+      - id: fdd22.contracts
+        title: "Contracts and cross-document consistency"
+        question: >-
+          Which franchise, development, lease, financing, guarantee, software/data,
+          supply, purchase, option and other agreements must be signed, and do their
+          material terms agree with disclosures and sales materials?
+        fdd_items: [22]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - contracts.required_documents
+          - contracts.exhibits
+          - contracts.missing_documents
+          - contracts.disclosure_conflicts
+          - contracts.sales_material_conflicts
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document]
+          acceptance_criteria: >-
+            Every proposed agreement is inventoried by version and material fee,
+            obligation, territory, performance and exit terms are cross-checked.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise agreement development lease guarantee'
+          - '"{brand}" FDD Item 22 contracts exhibits'
+        dependencies: [scope.document_inventory]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, contracts, consistency, critical]
+
+      - id: fdd23.receipt_and_sellers
+        title: "Receipt, issue data, and franchise sellers"
+        question: >-
+          What are the disclosure issue date, exhibits, franchisor and seller contact
+          details, service agent, delivery/receipt date, format and retained proof?
+        fdd_items: [23]
+        minimum_depth: due_diligence
+        requirement: recommended
+        target_fields:
+          - disclosure.issue_date
+          - disclosure.exhibits
+          - disclosure.franchise_sellers
+          - disclosure.service_agent
+          - disclosure.delivery_date
+          - disclosure.receipt_proof
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Issue and receipt metadata are complete enough to identify the exact
+            document and assess timing, without retaining unnecessary signatures.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" FDD Item 23 receipt franchise sellers'
+          - '"{brand}" franchise disclosure issue date'
+        dependencies: [scope.document_inventory]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [fdd, receipt, provenance]
+
+  - id: us_process
+    title: "United States federal and state process controls"
+    framework: "16 CFR Part 436 plus applicable state law"
+    questions:
+      - id: us.definition_and_exemptions
+        title: "Federal definition and claimed exemptions"
+        question: >-
+          Does the relationship meet the current federal franchise elements, could
+          another business-opportunity rule apply, and is any current exemption
+          claimed with documented facts and counsel review?
+        fdd_items: [1]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - us_rule.franchise_elements
+          - us_rule.business_opportunity_check
+          - us_rule.claimed_exemptions
+          - us_rule.exemption_evidence
+          - us_rule.counsel_review_status
+        evidence:
+          min_sources: 2
+          preferred_source_types: [regulator, government, legal_document]
+          acceptance_criteria: >-
+            Facts are mapped to the current rule text; thresholds are read live from
+            eCFR and any legal conclusion remains assigned to qualified counsel.
+          requires_independent_corroboration: true
+          max_age_days: 30
+        search_query_templates:
+          - 'site:ecfr.gov 16 CFR 436 franchise definition exemptions current'
+          - 'site:ftc.gov Franchise Rule exemptions current'
+        dependencies: [scope.jurisdictions, scope.offer_and_transaction]
+        sensitivity: legal
+        jurisdiction: us_only
+        tags: [us, federal, applicability]
+
+      - id: us.delivery_and_updates
+        title: "Federal delivery, timing, update, and retention controls"
+        question: >-
+          Were current federal timing rules for FDD delivery, material contract
+          changes, annual and quarterly updates, plain-language format, receipts,
+          retention and seller conduct satisfied?
+        fdd_items: [23]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - us_process.fdd_delivered_at
+          - us_process.binding_agreement_signed_at
+          - us_process.payment_made_at
+          - us_process.initial_review_days
+          - us_process.fdd_delivery_timing
+          - us_process.proposed_agreement_delivered_at
+          - us_process.unilateral_material_change
+          - us_process.change_initiated_by_prospect
+          - us_process.final_agreement_signed_at
+          - us_process.revised_agreement_review_days
+          - us_process.contract_change_timing
+          - us_process.annual_update
+          - us_process.quarterly_updates
+          - us_process.format_and_plain_english
+          - us_process.receipt_retention
+          - us_process.materially_different_disclosure_versions
+          - us_process.disclosure_version_last_used_fiscal_year
+          - us_process.disclosure_version_retention_3y
+          - us_process.seller_conduct
+        evidence:
+          min_sources: 2
+          preferred_source_types: [regulator, legal_document]
+          acceptance_criteria: >-
+            Source timestamps permit independent calculation of the initial and
+            revised-agreement review periods. Receipt retention and retention of every
+            materially different disclosure version for three years after the close
+            of the fiscal year when last used are tested separately. Each control is
+            checked against current rule text; materiality, prospect-initiated changes,
+            deviations and unresolved legal questions are separately flagged.
+          requires_independent_corroboration: true
+          max_age_days: 30
+        search_query_templates:
+          - 'site:ecfr.gov 16 CFR 436 disclosure 14 days 7 days updates receipts'
+          - 'site:ftc.gov Franchise Rule compliance guide delivery update retention'
+        dependencies: [us.definition_and_exemptions, fdd23.receipt_and_sellers]
+        sensitivity: legal
+        jurisdiction: us_only
+        tags: [us, federal, process]
+
+      - id: us.state_overlay
+        title: "State registration, disclosure, and relationship-law overlay"
+        question: >-
+          For every potentially applicable state or U.S. territory, what franchise or
+          business-opportunity definition, registration or exemption, filing, addendum,
+          seller, advertising, financial-assurance, delivery and relationship
+          requirements apply?
+        fdd_items: [1, 17, 23]
+        minimum_depth: due_diligence
+        requirement: critical
+        target_fields:
+          - state_rules.by_state
+          - state_rules.registration_or_exemption
+          - state_rules.effective_and_renewal_dates
+          - state_rules.addenda_and_risk_factors
+          - state_rules.seller_and_advertising_filings
+          - state_rules.financial_assurance
+          - state_rules.relationship_protections
+        evidence:
+          min_sources: 2
+          preferred_source_types: [regulator, government, legal_document]
+          acceptance_criteria: >-
+            Each state has current regulator and statute/rule evidence, trigger facts,
+            filing status and unresolved counsel questions; federal status is separate.
+          requires_independent_corroboration: true
+          max_age_days: 30
+        search_query_templates:
+          - 'franchise registration regulator laws {regions}'
+          - 'franchise relationship law termination transfer {regions}'
+        dependencies: [scope.jurisdictions, us.definition_and_exemptions]
+        sensitivity: legal
+        jurisdiction: us_only
+        tags: [us, state, registration, relationship_law]
+
+      - id: us.sba_eligibility
+        title: "SBA financing eligibility, not endorsement"
+        question: >-
+          If SBA financing is relevant, is the brand currently in the SBA Franchise
+          Directory, what documents and certification are current, and which current
+          SOP requirements remain for the lender and borrower?
+        fdd_items: []
+        minimum_depth: due_diligence
+        requirement: recommended
+        target_fields:
+          - sba.financing_relevant
+          - sba.directory_status
+          - sba.checked_at
+          - sba.required_documents
+          - sba.certification_status
+          - sba.sop_requirements
+        evidence:
+          min_sources: 1
+          preferred_source_types: [government]
+          acceptance_criteria: >-
+            Directory status is checked on the collection date and labeled only as
+            financing eligibility, never as endorsement or proof of likely success.
+          requires_independent_corroboration: false
+          max_age_days: 30
+        search_query_templates:
+          - 'site:sba.gov franchise directory "{brand}"'
+          - 'site:sba.gov SOP 50 10 franchise current'
+        dependencies: [scope.brand_identity]
+        sensitivity: financial
+        jurisdiction: us_only
+        tags: [us, sba, financing]
+
+  - id: independent_due_diligence
+    title: "Independent commercial and risk due diligence"
+    framework: "FTC Consumer Guide and SBA planning guidance"
+    questions:
+      - id: dd.market_demand_competition
+        title: "Demand, saturation, and competition"
+        question: >-
+          What evidence describes target-market demand, customer segments, repeat
+          business, seasonality, pricing, direct/indirect competitors, saturation,
+          online substitutes and location dependence?
+        fdd_items: [1, 12]
+        minimum_depth: due_diligence
+        requirement: required
+        target_fields:
+          - market.demand
+          - market.customer_segments
+          - market.repeat_and_seasonality
+          - market.pricing
+          - market.competitors
+          - market.saturation
+          - market.location_dependence
+        evidence:
+          min_sources: 2
+          preferred_source_types: [government, industry, reputable_media, official]
+          acceptance_criteria: >-
+            Market claims use dated target-region data and distinguish franchisor
+            assertions from independent demand and competition evidence.
+          requires_independent_corroboration: true
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" market competitors saturation {regions}'
+          - 'industry market size demand {country} "{brand}"'
+        dependencies: [scope.brand_identity, scope.jurisdictions]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [market, competition]
+
+      - id: dd.unit_economics
+        title: "Comparable unit economics and downside cases"
+        question: >-
+          What reliable evidence supports sales volume, ticket, gross margin, COGS,
+          labor, rent, fees, capex, working capital, debt service, break-even, cash
+          generation and downside scenarios for a comparable mature unit?
+        fdd_items: [7, 19]
+        minimum_depth: risk
+        requirement: critical
+        target_fields:
+          - unit_economics.revenue_drivers
+          - unit_economics.gross_margin
+          - unit_economics.cogs
+          - unit_economics.labor
+          - unit_economics.rent
+          - unit_economics.fees
+          - unit_economics.capex
+          - unit_economics.working_capital
+          - unit_economics.debt_service
+          - unit_economics.break_even
+          - unit_economics.downside_scenarios
+        evidence:
+          min_sources: 2
+          preferred_source_types: [legal_document, audited_financial, franchisee_interview]
+          acceptance_criteria: >-
+            A dated, comparable-unit model exposes assumptions, sample, geography,
+            ranges and downside sensitivity; revenue is never mislabeled as profit.
+          requires_independent_corroboration: true
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise unit economics break-even costs'
+          - '"{brand}" franchisee revenue profit rent labor fees'
+        dependencies: [fdd07.initial_investment, fdd06.other_fees, fdd19.fpr_methodology]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [risk, unit_economics, critical]
+
+      - id: dd.franchisee_interviews
+        title: "Current and former franchisee interviews"
+        question: >-
+          What do a non-cherry-picked set of current and former franchisees report
+          about actual cost, opening time, break-even, support, suppliers, advertising,
+          disputes, renewals, transfer and reasons for leaving?
+        fdd_items: [20]
+        minimum_depth: risk
+        requirement: required
+        target_fields:
+          - franchisee_voice.sample_method
+          - franchisee_voice.current_interviews
+          - franchisee_voice.former_interviews
+          - franchisee_voice.common_themes
+          - franchisee_voice.corroborated_findings
+          - franchisee_voice.unverified_opinions
+        evidence:
+          min_sources: 3
+          preferred_source_types: [franchisee_interview, legal_document]
+          acceptance_criteria: >-
+            The sampling method, consent, dates and attribution policy are recorded;
+            opinions remain separate from facts and recurring claims seek corroboration.
+          requires_independent_corroboration: true
+          max_age_days: 730
+        search_query_templates:
+          - '"{brand}" franchisee experience interview'
+          - '"{brand}" former franchisee why left'
+        dependencies: [fdd20.pipeline_and_references]
+        sensitivity: opinion
+        jurisdiction: all
+        tags: [risk, interviews, sentiment]
+
+      - id: dd.complaints_controversies
+        title: "Complaints, investigations, and controversies"
+        question: >-
+          What recurring complaints, regulator reports, reputable investigations or
+          operational controversies exist, and which claims are corroborated versus
+          merely alleged or anecdotal?
+        fdd_items: [3]
+        minimum_depth: risk
+        requirement: required
+        target_fields:
+          - reputation.complaints
+          - reputation.regulator_reports
+          - reputation.media_investigations
+          - reputation.recurring_themes
+          - reputation.corroboration_status
+          - reputation.responses_and_resolutions
+        evidence:
+          min_sources: 2
+          preferred_source_types: [regulator, court, reputable_media, review_platform, social]
+          acceptance_criteria: >-
+            Allegations, verified events, company responses and outcomes are separated;
+            material negative claims require reliable independent corroboration.
+          requires_independent_corroboration: true
+          max_age_days: 365
+        search_query_templates:
+          - '"{brand}" franchise complaints controversy investigation'
+          - '"{legal_name}" regulator complaint franchisee'
+        dependencies: [scope.brand_identity, fdd03.litigation]
+        sensitivity: opinion
+        jurisdiction: all
+        tags: [risk, complaints, media]
+
+      - id: dd.franchisor_business_health
+        title: "Franchisor incentives, capacity, and resilience"
+        question: >-
+          Is the franchisor financially and operationally able to support planned
+          growth, and does its economics depend on recurring royalties from healthy
+          units or disproportionately on new franchise sales and supplier income?
+        fdd_items: [8, 20, 21]
+        minimum_depth: risk
+        requirement: required
+        target_fields:
+          - franchisor_health.revenue_mix
+          - franchisor_health.royalty_dependency
+          - franchisor_health.initial_fee_dependency
+          - franchisor_health.supplier_income
+          - franchisor_health.support_capacity
+          - franchisor_health.growth_plan
+          - franchisor_health.distress_scenario
+        evidence:
+          min_sources: 2
+          preferred_source_types: [audited_financial, legal_document, reputable_media]
+          acceptance_criteria: >-
+            Revenue incentives, liquidity, support staffing and expansion commitments
+            are evaluated from statements and operational evidence with limitations.
+          requires_independent_corroboration: true
+          max_age_days: 365
+        search_query_templates:
+          - '"{legal_name}" revenue franchise fees royalties financial statements'
+          - '"{brand}" franchise support capacity growth plan'
+        dependencies: [fdd08.required_suppliers, fdd20.outlet_changes, fdd21.financial_statements]
+        sensitivity: financial
+        jurisdiction: all
+        tags: [risk, franchisor_health]
+
+      - id: dd.local_tax_permits
+        title: "Tax, entity, permits, zoning, and employment questions"
+        question: >-
+          Which entity, tax classification, registrations, permits, zoning, health,
+          safety, employment, payroll, sales/VAT and local operating obligations need
+          specialist confirmation for the target location and transaction?
+        fdd_items: [1, 7, 9]
+        minimum_depth: risk
+        requirement: required
+        target_fields:
+          - local_compliance.entity_structure
+          - local_compliance.tax_questions
+          - local_compliance.permits
+          - local_compliance.zoning
+          - local_compliance.health_safety
+          - local_compliance.employment
+          - local_compliance.specialists_required
+        evidence:
+          min_sources: 2
+          preferred_source_types: [government, regulator, legal_document]
+          acceptance_criteria: >-
+            A location-specific checklist cites current authorities and routes legal,
+            tax and accounting conclusions to qualified professionals.
+          requires_independent_corroboration: true
+          max_age_days: 90
+        search_query_templates:
+          - 'business permits zoning tax employment franchise {regions}'
+          - 'franchise fee tax treatment {country}'
+        dependencies: [scope.jurisdictions, fdd07.initial_investment]
+        sensitivity: legal
+        jurisdiction: all
+        tags: [risk, tax, permits]
+
+  - id: unit_level
+    title: "Unit-level location intelligence"
+    framework: "optional Level 4 research"
+    questions:
+      - id: unit.location_inventory
+        title: "Verified location inventory"
+        question: >-
+          What is the current list of operating, planned, relocated and closed units,
+          with address, coordinates, format, status, source and verification date?
+        fdd_items: [20]
+        minimum_depth: unit
+        requirement: critical
+        target_fields:
+          - locations.units
+          - locations.addresses
+          - locations.coordinates
+          - locations.formats
+          - locations.statuses
+          - locations.open_close_dates
+          - locations.verification_dates
+        evidence:
+          min_sources: 2
+          preferred_source_types: [official, government, registry]
+          acceptance_criteria: >-
+            Each location is deduplicated and independently verified with status,
+            stable identifier, source, date and uncertainty; completeness is measured.
+          requires_independent_corroboration: true
+          max_age_days: 90
+        search_query_templates:
+          - '"{brand}" official store locator {country}'
+          - '"{brand}" locations addresses {regions}'
+        dependencies: [scope.brand_identity, fdd20.outlet_changes]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [unit, locations, critical]
+
+      - id: unit.review_signals
+        title: "Location-level review signals"
+        question: >-
+          Using authorized APIs or manual review, what rating count, rating trend,
+          dated recurring themes and response patterns exist per verified location?
+        fdd_items: []
+        minimum_depth: unit
+        requirement: recommended
+        target_fields:
+          - location_reviews.provider
+          - location_reviews.place_identifier
+          - location_reviews.rating
+          - location_reviews.review_count
+          - location_reviews.theme_summary
+          - location_reviews.observed_at
+        evidence:
+          min_sources: 1
+          preferred_source_types: [review_platform]
+          acceptance_criteria: >-
+            Metrics come from an authorized method, map to a verified location and
+            date, avoid bulk copying review text, and remain labeled as sentiment.
+          requires_independent_corroboration: false
+          max_age_days: 90
+        search_query_templates:
+          - '"{brand}" reviews {regions}'
+        dependencies: [unit.location_inventory]
+        sensitivity: opinion
+        jurisdiction: all
+        tags: [unit, reviews, sentiment]
+
+      - id: unit.operator_public_data
+        title: "Necessary public operator information"
+        question: >-
+          Where legally justified, which public business entity operates each unit,
+          what is the evidence, and can the research goal be met without collecting
+          names or private contact details of natural persons?
+        fdd_items: [20]
+        minimum_depth: unit
+        requirement: optional
+        target_fields:
+          - location_operators.business_entity
+          - location_operators.public_registry_reference
+          - location_operators.role
+          - location_operators.legal_basis_and_necessity
+          - location_operators.verified_at
+        evidence:
+          min_sources: 2
+          preferred_source_types: [registry, government, official]
+          acceptance_criteria: >-
+            Only necessary public business data with documented purpose and legal
+            basis is retained; private natural-person data is excluded by default.
+          requires_independent_corroboration: true
+          max_age_days: 180
+        search_query_templates:
+          - '"{brand}" operator company registry {regions}'
+        dependencies: [unit.location_inventory]
+        sensitivity: personal_data
+        jurisdiction: all
+        tags: [unit, operator, privacy]
+
+  - id: data_quality
+    title: "Evidence, freshness, conflicts, and completion"
+    framework: "internal audit standard"
+    questions:
+      - id: quality.source_metadata
+        title: "Source and evidence metadata"
+        question: >-
+          Does every planned fact require source URL/file, publisher, source type,
+          publication/effective date, collection date, precise excerpt/location,
+          jurisdiction, reliability and claim confidence?
+        fdd_items: []
+        minimum_depth: catalog
+        requirement: critical
+        target_fields:
+          - quality.source_metadata_complete
+          - quality.evidence_locations
+          - quality.source_reliability
+          - quality.claim_confidence
+        evidence:
+          min_sources: 1
+          preferred_source_types: [government, regulator, legal_document, official]
+          acceptance_criteria: >-
+            The storage contract rejects factual claims without retrievable evidence,
+            dates and separate source-reliability and claim-confidence values.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - 'evidence metadata checklist for "{brand}" research'
+        dependencies: []
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [quality, provenance, critical]
+
+      - id: quality.conflicts_and_statuses
+        title: "Missing and conflicting data protocol"
+        question: >-
+          How will the run distinguish not_applicable, not_disclosed, not_found and
+          conflicting values, preserve competing claims, and generate targeted
+          follow-up tasks instead of guessing?
+        fdd_items: []
+        minimum_depth: catalog
+        requirement: critical
+        target_fields:
+          - quality.missing_statuses
+          - quality.conflict_records
+          - quality.follow_up_policy
+          - quality.no_guessing_rule
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            Status values are explicit, conflicts retain all evidence, and unresolved
+            critical fields create follow-ups while still respecting round limits.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - 'conflicting sources checklist "{brand}"'
+        dependencies: [quality.source_metadata]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [quality, conflicts, critical]
+
+      - id: quality.completion_and_human_gate
+        title: "Completion, stopping, and human-review gate"
+        question: >-
+          What critical fields, evidence thresholds, freshness rules and contradiction
+          limits define completion, and what prevents automatic publication or import?
+        fdd_items: []
+        minimum_depth: catalog
+        requirement: critical
+        target_fields:
+          - quality.critical_fields
+          - quality.scoring_rules
+          - quality.freshness_rules
+          - quality.stop_conditions
+          - quality.human_review_gate
+          - quality.import_approval
+        evidence:
+          min_sources: 1
+          preferred_source_types: [legal_document, official]
+          acceptance_criteria: >-
+            A run stops only at threshold with no critical gaps or at max rounds,
+            and all outputs remain staging artifacts until documented human approval.
+          requires_independent_corroboration: false
+          max_age_days: 365
+        search_query_templates:
+          - 'quality completion checklist "{brand}" research plan'
+        dependencies: [quality.source_metadata, quality.conflicts_and_statuses]
+        sensitivity: public_business
+        jurisdiction: all
+        tags: [quality, stopping, human_review, critical]

@@ -94,4 +94,5 @@ Desktop.ini
 
 # DatacollectorAI
 datacollector/.env
-datacollector/
+datacollector/data/runs/*
+!datacollector/data/runs/.gitkeep

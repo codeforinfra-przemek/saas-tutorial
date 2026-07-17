@@ -63,6 +63,10 @@
                     <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6"/></svg>
                     <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Porównaj dane</span>
                 </a>
+                <a href="{% url 'franchises:list' %}" data-drawer-hide="app-sidebar" class="mobile-map-link sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-brand-50 hover:text-brand-700 lg:justify-center" title="Mapa">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Zm0 0V3m6 18V6"/></svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Mapa</span>
+                </a>
             </div>
             {% if request.user.is_staff %}
                 <a href="{% url 'franchises:manage_list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'franchise_management' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Zarządzaj franczyzami">
@@ -90,6 +94,30 @@
                 <a href="{% url 'billing:manage_requests' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'subscription_management' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Obsługa subskrypcji">
                     <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 4h12v16H6V4Zm3 4h6m-6 4h6m-6 4h3"/></svg>
                     <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Obsługa subskrypcji</span>
+                </a>
+                <a href="{% url 'vendor:dashboard' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'vendor' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Panel vendora">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 20V6a1 1 0 0 1 1-1h7v15M4 20h16M9 9h1m-1 4h1m6-5h3a1 1 0 0 1 1 1v11m-4-7h1m-1 4h1"/></svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Panel vendora</span>
+                </a>
+                <a href="{% url 'billing:vendor_billing' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'subscriptions' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Rozliczenia wszystkich organizacji">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16v10H4V7Zm3 3h6m-6 3h4m6-3h.01"/></svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Rozliczenia</span>
+                </a>
+                <a href="{% url 'billing:vendor_pricing' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'pricing' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Pakiety franczyz">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M6 11h12M8 15h8M10 19h4M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/></svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Pakiety</span>
+                </a>
+                <a href="{% url 'shortlists:saved_list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'saved' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Zapisane">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m12 17-6 3 1.5-6.5L2.5 9l6.7-.6L12 2l2.8 6.4 6.7.6-5 4.5L18 20l-6-3Z"/></svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Zapisane</span>
+                </a>
+                <a href="{% url 'content:article_list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'content' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Poradnik">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 4h10a4 4 0 0 1 4 4v12H9a4 4 0 0 0-4-4V4Zm0 0v12m4-8h6m-6 4h6"/></svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Poradnik</span>
+                </a>
+                <a href="{% url 'billing:investor_services' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'investor_services' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Usługi dla inwestora">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M6 11h12M8 15h8M10 19h4M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/></svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Usługi</span>
                 </a>
             {% elif can_access_vendor_portal %}
                 <a href="{% url 'vendor:dashboard' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'vendor' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Vendor dashboard">
@@ -123,10 +151,6 @@
                     <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Zgłoszenia profili</span>
                 </a>
             {% else %}
-                <a href="{% url 'franchises:list' %}" data-drawer-hide="app-sidebar" class="mobile-map-link sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-950" title="Mapa">
-                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Zm0 0V3m6 18V6"/></svg>
-                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Mapa</span>
-                </a>
                 {% if request.user.is_authenticated %}
                     <a href="{% url 'shortlists:saved_list' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'saved' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Zapisane">
                         <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m12 17-6 3 1.5-6.5L2.5 9l6.7-.6L12 2l2.8 6.4 6.7.6-5 4.5L18 20l-6-3Z"/></svg>
