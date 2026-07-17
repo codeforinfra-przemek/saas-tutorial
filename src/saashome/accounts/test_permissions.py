@@ -109,6 +109,29 @@ class AccessControlTests(TestCase):
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 200)
 
+    def test_navigation_is_tailored_to_the_account_role(self):
+        anonymous_page = self.client.get(reverse("home"))
+        self.assertContains(anonymous_page, 'title="Poradnik"')
+        self.assertContains(anonymous_page, 'title="Usługi dla inwestora"')
+        self.assertNotContains(anonymous_page, 'title="Vendor dashboard"')
+
+        self.client.force_login(self.vendor)
+        vendor_page = self.client.get(reverse("home"))
+        self.assertContains(vendor_page, 'title="Vendor dashboard"')
+        self.assertContains(vendor_page, 'title="Leady vendora"')
+        self.assertContains(vendor_page, 'title="Profile franczyz"')
+        self.assertContains(vendor_page, 'title="Rozliczenia"')
+        self.assertNotContains(vendor_page, 'title="Poradnik"')
+        self.assertNotContains(vendor_page, 'title="Wszystkie leady"')
+
+        self.client.force_login(self.staff)
+        staff_page = self.client.get(reverse("home"))
+        self.assertContains(staff_page, 'title="Zarządzaj franczyzami"')
+        self.assertContains(staff_page, 'title="Wszystkie leady"')
+        self.assertContains(staff_page, 'title="Analityka platformy"')
+        self.assertNotContains(staff_page, 'title="Poradnik"')
+        self.assertNotContains(staff_page, 'title="Vendor dashboard"')
+
     def test_anonymous_viewer_is_redirected_from_private_pages(self):
         for url in (
             reverse("accounts:dashboard"),

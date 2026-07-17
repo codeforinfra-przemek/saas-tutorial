@@ -23,7 +23,7 @@ def claim_profile_view(request, slug):
     ).first()
     if existing_claim:
         return render(request, "onboarding/claim_profile.html", {
-            "site_name": "SaaS Home", "page_title": "Claim profile", "active_page": "vendor",
+            "site_name": "SaaS Home", "page_title": "Claim profile", "active_page": "vendor_claims",
             "franchise": franchise, "existing_claim": existing_claim,
         })
 
@@ -44,7 +44,7 @@ def claim_profile_view(request, slug):
         return redirect("onboarding:vendor_claims")
 
     return render(request, "onboarding/claim_profile.html", {
-        "site_name": "SaaS Home", "page_title": "Claim profile", "active_page": "vendor",
+        "site_name": "SaaS Home", "page_title": "Claim profile", "active_page": "vendor_claims",
         "franchise": franchise, "form": form,
     })
 
@@ -53,5 +53,5 @@ def claim_profile_view(request, slug):
 def vendor_claims_list_view(request):
     claims = ClaimProfileRequest.objects.filter(user=request.user).select_related("franchise", "organization")
     return render(request, "onboarding/vendor_claims_list.html", {
-        "site_name": "SaaS Home", "page_title": "My claim requests", "active_page": "vendor", "claims": claims,
+        "site_name": "SaaS Home", "page_title": "My claim requests", "active_page": "vendor_claims", "claims": claims,
     })

@@ -168,7 +168,7 @@ def vendor_franchise_list_view(request):
     context = {
         "site_name": "SaaS Home",
         "page_title": "My franchises",
-        "active_page": "vendor",
+        "active_page": "vendor_franchises",
         "rows": rows,
     }
     return render(request, "vendor/franchises/list.html", context)
@@ -193,7 +193,7 @@ def vendor_franchise_edit_view(request, slug):
         context = {
             "site_name": "SaaS Home",
             "page_title": "Edit franchise profile",
-            "active_page": "vendor",
+            "active_page": "vendor_franchises",
             "franchise": franchise,
             "update_request": submitted_request,
             "form": form,
@@ -242,7 +242,7 @@ def vendor_franchise_edit_view(request, slug):
     context = {
         "site_name": "SaaS Home",
         "page_title": "Edit franchise profile",
-        "active_page": "vendor",
+        "active_page": "vendor_franchises",
         "franchise": franchise,
         "update_request": update_request,
         "form": form,
@@ -401,7 +401,7 @@ def vendor_franchise_media_view(request, slug):
         {
             "site_name": "SaaS Home",
             "page_title": f"Media: {franchise.name}",
-            "active_page": "vendor",
+            "active_page": "vendor_franchises",
             "franchise": franchise,
             "plan": plan,
             "can_manage": can_manage,
