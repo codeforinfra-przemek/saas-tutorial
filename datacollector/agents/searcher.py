@@ -12,24 +12,35 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
-from ..llm.protocol import ProviderSearchSource, SearcherGeneration, SearcherLLM
+from ..llm.protocol import (
+    ProviderSearchSource,
+    SearcherGeneration,
+    SearcherLLM,
+    SearcherProviderError,
+)
 from ..schemas import (
+    AgentIterationUsage,
+    PRIORITY_ORDER,
     ResearchPlan,
     ResearchTask,
     SearchAction,
+    SearchAttemptFailure,
     SearchLimits,
+    SearchQueryCoverage,
     SearchResults,
     SearchSource,
     SearchSourceOrigin,
     SearchTaskResult,
     SearchTaskStatus,
+    SearcherDraft,
     SearcherSourceDraft,
+    SearcherTaskDraft,
     SourceType,
 )
 
 
 DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "searcher_system_v1.md"
+    Path(__file__).resolve().parent.parent / "prompts" / "searcher_system_v2.md"
 )
 UNRESOLVED_QUERY_MARKER = re.compile(r"\{[^{}]+\}|\[[^\[\]]+\]|<[^<>]+>")
 TRACKING_QUERY_KEYS = {
@@ -38,11 +49,51 @@ TRACKING_QUERY_KEYS = {
     "mc_cid",
     "mc_eid",
     "ref_src",
+    "trk",
+}
+RETRY_COVERAGE_GAP_PREFIXES = (
+    "planned_query_attempts:",
+    "source_candidates:",
+    "preferred_source_type_missing",
+    "independent_candidate_domains:",
+)
+MULTI_LABEL_PUBLIC_SUFFIXES = {
+    "ac.uk",
+    "co.jp",
+    "co.nz",
+    "co.uk",
+    "com.au",
+    "com.br",
+    "com.mx",
+    "com.pl",
+    "com.tr",
+    "edu.pl",
+    "gov.au",
+    "gov.uk",
+    "net.au",
+    "net.pl",
+    "org.au",
+    "org.pl",
+    "org.uk",
 }
 
 
 class SearcherValidationError(ValueError):
     """Raised before saving an invalid or misleading search artifact."""
+
+
+def _paid_postprocessing_error(
+    exc: Exception,
+    usages: list[AgentIterationUsage],
+) -> SearcherProviderError:
+    """Preserve all known provider usage when local paid processing fails."""
+
+    return SearcherProviderError(
+        "Paid Searcher post-processing failed "
+        f"({type(exc).__name__}); provider usage must be retained.",
+        code="postprocessing_error",
+        usages=list(usages),
+    )
 
 
 def _deduplicate(values: list[str]) -> list[str]:
@@ -117,6 +168,18 @@ def _source_id(canonical_url: str) -> str:
 
 def _query_key(value: str) -> str:
     return " ".join(value.split()).casefold()
+
+
+def _candidate_domain(value: str) -> str:
+    """Return a conservative registrable-domain approximation."""
+
+    hostname = (urlsplit(value).hostname or "").lower().rstrip(".")
+    labels = hostname.removeprefix("www.").split(".")
+    if len(labels) <= 2:
+        return ".".join(labels)
+    suffix = ".".join(labels[-2:])
+    label_count = 3 if suffix in MULTI_LABEL_PUBLIC_SUFFIXES else 2
+    return ".".join(labels[-label_count:])
 
 
 def _sanitize_task(task: ResearchTask) -> tuple[ResearchTask, int]:
@@ -194,13 +257,14 @@ def _seed_sources(plan: ResearchPlan, discovered_at: datetime) -> list[SearchSou
         sources.append(
             SearchSource(
                 source_id=_source_id(canonical),
-                url=url,
+                url=canonical,
                 canonical_url=canonical,
                 title="",
                 source_type=source_type,
                 origin=SearchSourceOrigin.PLAN_SEED,
-                provider_verified=False,
+                provider_observed=False,
                 task_ids=[],
+                observed_in_action_ids=[],
                 discovered_via_queries=[],
                 relevance_note=(
                     f"{seed_note} It was not searched or validated by the free "
@@ -210,6 +274,87 @@ def _seed_sources(plan: ResearchPlan, discovered_at: datetime) -> list[SearchSou
             )
         )
     return sources
+
+
+def _combine_generations(
+    generations: list[SearcherGeneration],
+) -> SearcherGeneration:
+    """Combine successful provider calls before deterministic validation."""
+
+    if not generations:
+        raise SearcherValidationError("Searcher produced no successful generations.")
+
+    warnings: list[str] = []
+    sources_by_url: dict[str, SearcherSourceDraft] = {}
+    task_drafts: dict[str, SearcherTaskDraft] = {}
+    actions: list[SearchAction] = []
+    provider_sources_by_url: dict[str, ProviderSearchSource] = {}
+
+    for generation in generations:
+        warnings.extend(generation.draft.warnings)
+        actions.extend(generation.actions)
+        for provider_source in generation.provider_sources:
+            existing_provider = provider_sources_by_url.get(provider_source.url)
+            if existing_provider is None or (
+                not existing_provider.title and provider_source.title
+            ):
+                provider_sources_by_url[provider_source.url] = provider_source
+
+        for draft_source in generation.draft.sources:
+            canonical = _canonicalize_public_url(draft_source.url)
+            key = canonical or draft_source.url
+            existing = sources_by_url.get(key)
+            if existing is None:
+                sources_by_url[key] = draft_source
+                continue
+            sources_by_url[key] = existing.model_copy(
+                update={
+                    "title": existing.title or draft_source.title,
+                    "source_type": (
+                        draft_source.source_type
+                        if existing.source_type == SourceType.UNKNOWN
+                        else existing.source_type
+                    ),
+                    "task_ids": _deduplicate(
+                        [*existing.task_ids, *draft_source.task_ids]
+                    ),
+                    "relevance_note": (
+                        existing.relevance_note or draft_source.relevance_note
+                    ),
+                }
+            )
+
+        for draft in generation.draft.task_results:
+            existing = task_drafts.get(draft.task_id)
+            if existing is None:
+                task_drafts[draft.task_id] = draft
+                continue
+            notes = _deduplicate([existing.notes, draft.notes])
+            task_drafts[draft.task_id] = existing.model_copy(
+                update={
+                    "status": draft.status,
+                    "attempted_queries": _deduplicate(
+                        [*existing.attempted_queries, *draft.attempted_queries]
+                    ),
+                    "source_urls": _deduplicate(
+                        [*existing.source_urls, *draft.source_urls]
+                    ),
+                    "unresolved_targets": draft.unresolved_targets,
+                    "notes": "; ".join(notes)[:1000],
+                }
+            )
+
+    combined_draft = SearcherDraft.model_construct(
+        warnings=_deduplicate(warnings),
+        sources=list(sources_by_url.values()),
+        task_results=list(task_drafts.values()),
+    )
+    return SearcherGeneration(
+        draft=combined_draft,
+        usage=generations[0].usage,
+        actions=actions,
+        provider_sources=list(provider_sources_by_url.values()),
+    )
 
 
 class SearcherAgent:
@@ -232,6 +377,9 @@ class SearcherAgent:
         requested_task_ids: list[str] | None = None,
         task_limit: int | None = 5,
         max_search_calls: int = 10,
+        min_queries_per_task: int = 1,
+        max_retry_tasks: int = 0,
+        retry_search_calls: int = 1,
     ) -> SearchResults:
         if iteration < 1:
             raise SearcherValidationError("Searcher iteration must be at least 1.")
@@ -240,6 +388,26 @@ class SearcherAgent:
         if max_search_calls < 1 or max_search_calls > 100:
             raise SearcherValidationError(
                 "Searcher max search calls must be between 1 and 100."
+            )
+        if min_queries_per_task < 1 or min_queries_per_task > 20:
+            raise SearcherValidationError(
+                "Searcher minimum queries per task must be between 1 and 20."
+            )
+        if max_retry_tasks < 0 or max_retry_tasks > 50:
+            raise SearcherValidationError(
+                "Searcher max retry tasks must be between 0 and 50."
+            )
+        if retry_search_calls < 1 or retry_search_calls > 10:
+            raise SearcherValidationError(
+                "Searcher retry search calls must be between 1 and 10."
+            )
+        if max_retry_tasks and max_search_calls < 2:
+            raise SearcherValidationError(
+                "Quality retry requires at least two global search calls."
+            )
+        if self.llm is None and max_retry_tasks:
+            raise SearcherValidationError(
+                "Offline Searcher cannot run paid quality retries."
             )
 
         requested = _deduplicate(requested_task_ids or [])
@@ -254,9 +422,18 @@ class SearcherAgent:
             sanitized_task, removed = _sanitize_task(task)
             sanitized.append(sanitized_task)
             removed_queries += removed
+        tasks_without_queries = [
+            task.task_id for task in sanitized if not task.search_queries
+        ]
+        if self.llm is not None and tasks_without_queries:
+            raise SearcherValidationError(
+                "Paid Searcher cannot run tasks without executable Planner "
+                f"queries: {tasks_without_queries}"
+            )
 
         created_at = datetime.now(timezone.utc)
         warnings: list[str] = []
+        failed_attempts: list[SearchAttemptFailure] = []
         if removed_queries:
             warnings.append(
                 f"Skipped {removed_queries} plan queries containing unresolved "
@@ -272,7 +449,18 @@ class SearcherAgent:
                     status=SearchTaskStatus.QUERY_WORKLOAD_ONLY,
                     planned_queries=task.search_queries,
                     attempted_queries=[],
+                    planned_queries_attempted=[],
+                    derived_queries_attempted=[],
+                    query_coverage=SearchQueryCoverage.WORKLOAD_ONLY,
+                    minimum_query_attempts=min(
+                        min_queries_per_task,
+                        len(task.search_queries),
+                    ),
+                    minimum_sources=task.min_sources,
+                    action_ids=[],
                     source_ids=[],
+                    coverage_gaps=[],
+                    unresolved_targets=[],
                     notes=(
                         "Free mode prepared the query workload only; no network "
                         "search was executed."
@@ -301,36 +489,152 @@ class SearcherAgent:
                 raise SearcherValidationError(
                     f"Cannot load Searcher prompt: {self.prompt_path}"
                 ) from exc
+            reserved_retry_calls = min(
+                max_retry_tasks * retry_search_calls,
+                max_search_calls - 1,
+            )
+            initial_search_calls = max_search_calls - reserved_retry_calls
             generation = self.llm.generate(
                 plan,
                 sanitized,
                 system_prompt,
                 iteration=iteration,
-                max_search_calls=max_search_calls,
+                call_index=1,
+                max_search_calls=initial_search_calls,
+                min_queries_per_task=min_queries_per_task,
             )
-            safe_actions, removed_action_urls = self._sanitize_actions(
-                generation.actions
-            )
-            generation = SearcherGeneration(
-                draft=generation.draft,
-                usage=generation.usage,
-                actions=safe_actions,
-                provider_sources=generation.provider_sources,
-            )
-            sources, task_results, merge_warnings = self._merge_generation(
-                sanitized,
-                generation,
-                created_at,
-            )
-            warnings.extend(generation.draft.warnings)
+            agent_usage = [generation.usage]
+            try:
+                safe_actions, removed_action_urls = self._sanitize_actions(
+                    generation.actions
+                )
+                generation = SearcherGeneration(
+                    draft=generation.draft,
+                    usage=generation.usage,
+                    actions=safe_actions,
+                    provider_sources=generation.provider_sources,
+                )
+                generations = [generation]
+                removed_action_url_count = removed_action_urls
+                initial_sources, initial_task_results, _ = self._merge_generation(
+                    sanitized,
+                    generation,
+                    created_at,
+                    min_queries_per_task=min_queries_per_task,
+                )
+            except Exception as exc:
+                raise _paid_postprocessing_error(exc, agent_usage) from None
+            del initial_sources
+
+            if max_retry_tasks:
+                task_by_id = {task.task_id: task for task in sanitized}
+                plan_order = {
+                    task.task_id: index for index, task in enumerate(sanitized)
+                }
+                retryable_ids = [
+                    result.task_id
+                    for result in initial_task_results
+                    if result.status
+                    in {
+                        SearchTaskStatus.PARTIAL,
+                        SearchTaskStatus.NO_SOURCES_FOUND,
+                        SearchTaskStatus.NOT_SEARCHED,
+                    }
+                    and (
+                        result.status != SearchTaskStatus.PARTIAL
+                        or any(
+                            gap.startswith(RETRY_COVERAGE_GAP_PREFIXES)
+                            for gap in result.coverage_gaps
+                        )
+                    )
+                ]
+                retryable_ids.sort(
+                    key=lambda task_id: (
+                        -PRIORITY_ORDER[task_by_id[task_id].priority],
+                        plan_order[task_id],
+                    )
+                )
+                for task_id in retryable_ids[:max_retry_tasks]:
+                    used_actions = sum(
+                        len(item.actions) for item in generations
+                    )
+                    remaining_calls = max_search_calls - used_actions
+                    if remaining_calls < 1:
+                        warnings.append(
+                            "Quality retry stopped because the global tool-call "
+                            "limit was exhausted."
+                        )
+                        break
+                    call_index = len(generations) + len(failed_attempts) + 1
+                    retry_task = task_by_id[task_id]
+                    try:
+                        retry_generation = self.llm.generate(
+                            plan,
+                            [retry_task],
+                            system_prompt,
+                            iteration=iteration,
+                            call_index=call_index,
+                            max_search_calls=min(
+                                retry_search_calls,
+                                remaining_calls,
+                            ),
+                            min_queries_per_task=min_queries_per_task,
+                        )
+                    except SearcherProviderError as exc:
+                        usage_recorded = exc.usage is not None
+                        if usage_recorded:
+                            agent_usage.append(exc.usage)
+                        failed_attempts.append(
+                            SearchAttemptFailure(
+                                call_index=call_index,
+                                scope_task_ids=[task_id],
+                                error_code=exc.code,
+                                usage_recorded=usage_recorded,
+                                observed_tool_calls=exc.observed_tool_calls,
+                                tool_usage=exc.tool_usage,
+                                token_usage_unknown=not usage_recorded,
+                            )
+                        )
+                        warnings.append(
+                            f"Quality retry call {call_index} for {task_id} "
+                            f"failed with {exc.code}; retained earlier results."
+                        )
+                        break
+                    agent_usage.append(retry_generation.usage)
+                    try:
+                        safe_retry_actions, removed_retry_urls = (
+                            self._sanitize_actions(retry_generation.actions)
+                        )
+                        removed_action_url_count += removed_retry_urls
+                        generations.append(
+                            SearcherGeneration(
+                                draft=retry_generation.draft,
+                                usage=retry_generation.usage,
+                                actions=safe_retry_actions,
+                                provider_sources=retry_generation.provider_sources,
+                            )
+                        )
+                    except Exception as exc:
+                        raise _paid_postprocessing_error(exc, agent_usage) from None
+
+            try:
+                combined_generation = _combine_generations(generations)
+                sources, task_results, merge_warnings = self._merge_generation(
+                    sanitized,
+                    combined_generation,
+                    created_at,
+                    min_queries_per_task=min_queries_per_task,
+                )
+            except Exception as exc:
+                raise _paid_postprocessing_error(exc, agent_usage) from None
+            warnings.extend(combined_generation.draft.warnings)
             warnings.extend(merge_warnings)
-            if removed_action_urls:
+            if removed_action_url_count:
                 warnings.append(
-                    f"Removed {removed_action_urls} non-public or invalid URLs "
+                    f"Removed {removed_action_url_count} non-public or invalid URLs "
                     "from the provider action trace."
                 )
-            actions = generation.actions
-            agent_usage = [generation.usage]
+            actions = combined_generation.actions
             model = self.llm.model_name
             generated_by = "openai"
             search_executed = True
@@ -339,33 +643,42 @@ class SearcherAgent:
         unselected_ids = [
             task.task_id for task in plan.tasks if task.task_id not in set(selected_ids)
         ]
-        return SearchResults(
-            search_id=str(uuid4()),
-            plan_run_id=plan.run_id,
-            plan_sha256=plan_sha256,
-            plan_reference=plan_reference,
-            created_at=created_at,
-            iteration=iteration,
-            generated_by=generated_by,
-            model=model,
-            brand_name=plan.planner_input.brand_name,
-            target_country=plan.planner_input.target_country,
-            depth=plan.planner_input.depth,
-            search_executed=search_executed,
-            limits=SearchLimits(
-                max_search_calls=max_search_calls,
-                task_limit=task_limit,
-                requested_task_ids=requested,
-            ),
-            selected_task_ids=selected_ids,
-            unselected_task_ids=unselected_ids,
-            actions=actions,
-            sources=sources,
-            task_results=task_results,
-            warnings=_deduplicate(warnings),
-            compliance_rules=plan.compliance_rules,
-            agent_usage=agent_usage,
-        )
+        try:
+            return SearchResults(
+                search_id=str(uuid4()),
+                plan_run_id=plan.run_id,
+                plan_sha256=plan_sha256,
+                plan_reference=plan_reference,
+                created_at=created_at,
+                iteration=iteration,
+                generated_by=generated_by,
+                model=model,
+                brand_name=plan.planner_input.brand_name,
+                target_country=plan.planner_input.target_country,
+                depth=plan.planner_input.depth,
+                search_executed=search_executed,
+                limits=SearchLimits(
+                    max_search_calls=max_search_calls,
+                    task_limit=task_limit,
+                    requested_task_ids=requested,
+                    min_queries_per_task=min_queries_per_task,
+                    max_retry_tasks=max_retry_tasks,
+                    retry_search_calls=retry_search_calls,
+                ),
+                selected_task_ids=selected_ids,
+                unselected_task_ids=unselected_ids,
+                actions=actions,
+                sources=sources,
+                task_results=task_results,
+                warnings=_deduplicate(warnings),
+                compliance_rules=plan.compliance_rules,
+                agent_usage=agent_usage,
+                failed_attempts=failed_attempts,
+            )
+        except Exception as exc:
+            if self.llm is not None and agent_usage:
+                raise _paid_postprocessing_error(exc, agent_usage) from None
+            raise
 
     @staticmethod
     def _sanitize_actions(
@@ -373,7 +686,7 @@ class SearcherAgent:
     ) -> tuple[list[SearchAction], int]:
         sanitized: list[SearchAction] = []
         removed_urls = 0
-        for action in actions:
+        for action_index, action in enumerate(actions, 1):
             target_url = None
             if action.target_url:
                 target_url = _canonicalize_public_url(action.target_url)
@@ -389,6 +702,11 @@ class SearcherAgent:
             sanitized.append(
                 action.model_copy(
                     update={
+                        "action_id": action.action_id
+                        or (
+                            f"call-{action.call_index:03d}-"
+                            f"action-{action_index:03d}"
+                        ),
                         "target_url": target_url,
                         "source_urls": _deduplicate(source_urls),
                     }
@@ -401,6 +719,8 @@ class SearcherAgent:
         tasks: list[ResearchTask],
         generation: SearcherGeneration,
         discovered_at: datetime,
+        *,
+        min_queries_per_task: int,
     ) -> tuple[list[SearchSource], list[SearchTaskResult], list[str]]:
         selected_ids = {task.task_id for task in tasks}
         warnings: list[str] = []
@@ -414,7 +734,8 @@ class SearcherAgent:
             provider_by_canonical.setdefault(canonical, source)
         if rejected_provider_urls:
             warnings.append(
-                f"Rejected {rejected_provider_urls} non-public or invalid provider URLs."
+                f"Rejected {rejected_provider_urls} non-public or invalid "
+                "provider URLs."
             )
 
         draft_by_canonical: dict[str, SearcherSourceDraft] = {}
@@ -455,26 +776,99 @@ class SearcherAgent:
                 "Removed model mappings to task IDs outside the selected plan scope."
             )
 
-        queries_by_url: defaultdict[str, list[str]] = defaultdict(list)
-        executed_queries: list[str] = []
-        for action in generation.actions:
-            executed_queries.extend(action.queries)
-            for raw_url in action.source_urls:
+        completed_actions = [
+            action for action in generation.actions if action.status == "completed"
+        ]
+        completed_action_by_id = {
+            action.action_id: action
+            for action in completed_actions
+            if action.action_id is not None
+        }
+        action_ids_by_url: defaultdict[str, list[str]] = defaultdict(list)
+        for action in completed_actions:
+            action_urls = list(action.source_urls)
+            if action.target_url:
+                action_urls.append(action.target_url)
+            for raw_url in action_urls:
                 canonical = _canonicalize_public_url(raw_url)
-                if canonical is not None:
-                    queries_by_url[canonical].extend(action.queries)
-        executed_query_keys = {_query_key(query) for query in executed_queries}
+                if canonical is None or action.action_id is None:
+                    continue
+                action_ids_by_url[canonical].append(action.action_id)
+
+        task_specific_queries: dict[str, list[str]] = {}
+        task_action_ids: dict[str, list[str]] = {}
+        attributed_query_keys: set[str] = set()
+        for task in tasks:
+            planned_queries = set(task.search_queries)
+            attempted: list[str] = []
+            relevant_action_ids: list[str] = []
+            for action in completed_actions:
+                action_matches_task = False
+                single_task_scope = action.scope_task_ids == [task.task_id]
+                for query in action.queries:
+                    if task.task_id in action.scope_task_ids and (
+                        query in planned_queries or single_task_scope
+                    ):
+                        attempted.append(query)
+                        attributed_query_keys.add(_query_key(query))
+                        action_matches_task = True
+                if action_matches_task and action.action_id is not None:
+                    relevant_action_ids.append(action.action_id)
+            task_specific_queries[task.task_id] = _deduplicate(attempted)
+            task_action_ids[task.task_id] = _deduplicate(relevant_action_ids)
+
+        executed_queries = _deduplicate(
+            [query for action in completed_actions for query in action.queries]
+        )
+        unattributed_queries = [
+            query
+            for query in executed_queries
+            if _query_key(query) not in attributed_query_keys
+        ]
+        if unattributed_queries:
+            warnings.append(
+                f"Kept {len(unattributed_queries)} executed queries only in the "
+                "action trace because a multi-task batch did not provide "
+                "deterministic task attribution."
+            )
 
         sources: list[SearchSource] = []
-        source_id_by_url: dict[str, str] = {}
+        unassigned_provider_sources = 0
+        actionless_provider_sources = 0
         for canonical, provider_source in provider_by_canonical.items():
+            candidate_task_ids = [
+                task.task_id
+                for task in tasks
+                if task.task_id in task_ids_by_url[canonical]
+            ]
+            url_action_ids = _deduplicate(action_ids_by_url[canonical])
+            mapped_task_ids = [
+                task_id
+                for task_id in candidate_task_ids
+                if any(
+                    task_id in completed_action_by_id[action_id].scope_task_ids
+                    for action_id in url_action_ids
+                )
+            ]
+            if not mapped_task_ids:
+                unassigned_provider_sources += 1
+                continue
+            observed_action_ids = [
+                action_id
+                for action_id in url_action_ids
+                if set(completed_action_by_id[action_id].scope_task_ids).intersection(
+                    mapped_task_ids
+                )
+            ]
+            if not observed_action_ids:
+                actionless_provider_sources += 1
+                continue
             draft_source = draft_by_canonical.get(canonical)
             source_id = _source_id(canonical)
-            source_id_by_url[canonical] = source_id
             sources.append(
                 SearchSource(
                     source_id=source_id,
-                    url=provider_source.url,
+                    url=canonical,
                     canonical_url=canonical,
                     title=(
                         provider_source.title
@@ -486,18 +880,32 @@ class SearcherAgent:
                         else SourceType.UNKNOWN
                     ),
                     origin=SearchSourceOrigin.OPENAI_WEB_SEARCH,
-                    provider_verified=True,
-                    task_ids=[
-                        task.task_id
-                        for task in tasks
-                        if task.task_id in task_ids_by_url[canonical]
-                    ],
-                    discovered_via_queries=_deduplicate(queries_by_url[canonical]),
+                    provider_observed=True,
+                    task_ids=mapped_task_ids,
+                    observed_in_action_ids=observed_action_ids,
+                    discovered_via_queries=_deduplicate(
+                        [
+                            completed_action_by_id[action_id].queries[0]
+                            for action_id in observed_action_ids
+                            if len(completed_action_by_id[action_id].queries) == 1
+                        ]
+                    ),
                     relevance_note=(
                         draft_source.relevance_note if draft_source else ""
                     ),
                     discovered_at=discovered_at,
                 )
+            )
+        if unassigned_provider_sources:
+            warnings.append(
+                f"Left {unassigned_provider_sources} unassigned provider URL "
+                "candidates in the action trace instead of forwarding them to "
+                "Extractor."
+            )
+        if actionless_provider_sources:
+            warnings.append(
+                f"Excluded {actionless_provider_sources} mapped provider URLs "
+                "without action-level provenance."
             )
 
         task_results: list[SearchTaskResult] = []
@@ -508,20 +916,91 @@ class SearcherAgent:
                 for source in sources
                 if task.task_id in source.task_ids
             ]
-            attempted_queries = []
-            if draft is not None:
-                attempted_queries = [
-                    query
-                    for query in draft.attempted_queries
-                    if _query_key(query) in executed_query_keys
-                ]
-            if mapped_source_ids:
-                status = SearchTaskStatus.SOURCES_FOUND
-            elif (
-                draft is not None
-                and draft.status == SearchTaskStatus.NO_SOURCES_FOUND
-                and attempted_queries
+            attempted_queries = task_specific_queries[task.task_id]
+            planned_queries = set(task.search_queries)
+            planned_queries_attempted = [
+                query
+                for query in attempted_queries
+                if query in planned_queries
+            ]
+            derived_queries_attempted = [
+                query
+                for query in attempted_queries
+                if query not in planned_queries
+            ]
+            minimum_query_attempts = min(
+                min_queries_per_task,
+                len(task.search_queries),
+            )
+            if not planned_queries_attempted:
+                query_coverage = SearchQueryCoverage.NONE
+            elif len(planned_queries_attempted) >= minimum_query_attempts:
+                query_coverage = SearchQueryCoverage.COMPLETE
+            else:
+                query_coverage = SearchQueryCoverage.PARTIAL
+
+            relevant_action_ids = list(task_action_ids[task.task_id])
+            mapped_source_set = set(mapped_source_ids)
+            for source in sources:
+                if source.source_id not in mapped_source_set:
+                    continue
+                relevant_action_ids.extend(
+                    action_id
+                    for action_id in source.observed_in_action_ids
+                    if task.task_id
+                    in completed_action_by_id[action_id].scope_task_ids
+                )
+            relevant_action_ids = _deduplicate(relevant_action_ids)
+
+            unresolved_targets = (
+                _deduplicate(draft.unresolved_targets) if draft is not None else []
+            )
+            coverage_gaps: list[str] = []
+            if len(planned_queries_attempted) < minimum_query_attempts:
+                coverage_gaps.append(
+                    "planned_query_attempts:"
+                    f"{len(planned_queries_attempted)}/{minimum_query_attempts}"
+                )
+            if len(mapped_source_ids) < task.min_sources:
+                coverage_gaps.append(
+                    f"source_candidates:{len(mapped_source_ids)}/{task.min_sources}"
+                )
+            source_types = {
+                source.source_type
+                for source in sources
+                if source.source_id in mapped_source_set
+            }
+            if mapped_source_ids and not source_types.intersection(
+                task.preferred_source_types
             ):
+                coverage_gaps.append("preferred_source_type_missing")
+            candidate_domains = {
+                _candidate_domain(source.canonical_url)
+                for source in sources
+                if source.source_id in mapped_source_set
+            }
+            candidate_domains.discard("")
+            if (
+                task.requires_independent_corroboration
+                and len(candidate_domains) < 2
+            ):
+                coverage_gaps.append(
+                    f"independent_candidate_domains:{len(candidate_domains)}/2"
+                )
+            if draft is not None and draft.status == SearchTaskStatus.PARTIAL:
+                coverage_gaps.append("model_reported_partial")
+            if unresolved_targets:
+                coverage_gaps.append(
+                    f"unresolved_search_targets:{len(unresolved_targets)}"
+                )
+
+            if mapped_source_ids:
+                status = (
+                    SearchTaskStatus.PARTIAL
+                    if coverage_gaps
+                    else SearchTaskStatus.SOURCES_FOUND
+                )
+            elif attempted_queries:
                 status = SearchTaskStatus.NO_SOURCES_FOUND
             else:
                 status = SearchTaskStatus.NOT_SEARCHED
@@ -532,7 +1011,19 @@ class SearcherAgent:
                     status=status,
                     planned_queries=task.search_queries,
                     attempted_queries=_deduplicate(attempted_queries),
+                    planned_queries_attempted=_deduplicate(
+                        planned_queries_attempted
+                    ),
+                    derived_queries_attempted=_deduplicate(
+                        derived_queries_attempted
+                    ),
+                    query_coverage=query_coverage,
+                    minimum_query_attempts=minimum_query_attempts,
+                    minimum_sources=task.min_sources,
+                    action_ids=relevant_action_ids,
                     source_ids=mapped_source_ids,
+                    coverage_gaps=_deduplicate(coverage_gaps),
+                    unresolved_targets=unresolved_targets,
                     notes=draft.notes if draft is not None else "",
                 )
             )

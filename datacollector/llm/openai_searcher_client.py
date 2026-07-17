@@ -18,22 +18,7 @@ from ..schemas import (
 )
 from .openai_usage import build_agent_usage
 from .pricing import build_web_search_tool_usage
-from .protocol import ProviderSearchSource, SearcherGeneration
-
-
-class SearcherProviderError(RuntimeError):
-    """Raised when OpenAI does not produce a usable, auditable search result."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: str = "provider_error",
-        usage: Any | None = None,
-    ):
-        super().__init__(message)
-        self.code = code
-        self.usage = usage
+from .protocol import ProviderSearchSource, SearcherGeneration, SearcherProviderError
 
 
 def _as_mapping(value: Any) -> dict[str, Any]:
@@ -68,12 +53,15 @@ def _source_from_mapping(value: Any) -> ProviderSearchSource | None:
 
 def _extract_response_provenance(
     response: Any,
+    *,
+    call_index: int,
+    scope_task_ids: list[str],
 ) -> tuple[list[SearchAction], list[ProviderSearchSource], dict[str, int]]:
     actions: list[SearchAction] = []
     sources_by_url: dict[str, ProviderSearchSource] = {}
     action_counts: Counter[str] = Counter()
 
-    for raw_item in getattr(response, "output", []) or []:
+    for output_index, raw_item in enumerate(getattr(response, "output", []) or [], 1):
         item = _as_mapping(raw_item)
         item_type = item.get("type")
         if item_type == "web_search_call":
@@ -109,8 +97,12 @@ def _extract_response_provenance(
             actions.append(
                 SearchAction(
                     action_id=(
-                        str(item["id"]) if item.get("id") is not None else None
+                        str(item["id"])
+                        if item.get("id") is not None
+                        else f"call-{call_index:03d}-action-{output_index:03d}"
                     ),
+                    call_index=call_index,
+                    scope_task_ids=scope_task_ids,
                     action_type=action_type,
                     status=action_status,
                     queries=list(dict.fromkeys(queries)),
@@ -179,7 +171,9 @@ class OpenAISearcherClient:
         system_prompt: str,
         *,
         iteration: int,
+        call_index: int,
         max_search_calls: int,
+        min_queries_per_task: int,
     ) -> SearcherGeneration:
         payload = {
             "search_context": {
@@ -193,12 +187,24 @@ class OpenAISearcherClient:
                     plan.planner_input.known_official_website
                 ),
             },
-            "tasks": [_task_payload(task) for task in tasks],
+            "tasks": [
+                {
+                    **_task_payload(task),
+                    "minimum_query_attempts": min(
+                        min_queries_per_task,
+                        len(task.search_queries),
+                    ),
+                }
+                for task in tasks
+            ],
             "source_policy": plan.source_policy.model_dump(mode="json"),
             "compliance_rules": plan.compliance_rules,
             "instruction": (
                 "Discover public source candidates only. Do not extract a final "
-                "profile or assert normalized facts. Map consulted URLs to tasks."
+                "profile or assert normalized facts. For every task, issue at "
+                "least minimum_query_attempts provided search_queries exactly as "
+                "written before optional derived queries. Map every issued query "
+                "and every retained URL to its task."
             ),
         }
         web_search_tool: dict[str, Any] = {
@@ -233,6 +239,7 @@ class OpenAISearcherClient:
                 metadata={
                     "agent": "searcher",
                     "iteration": str(iteration),
+                    "call_index": str(call_index),
                     "plan_run_id": plan.run_id,
                 },
                 input=[
@@ -252,15 +259,27 @@ class OpenAISearcherClient:
             ) from None
 
         actions, provider_sources, action_counts = _extract_response_provenance(
-            response
+            response,
+            call_index=call_index,
+            scope_task_ids=[task.task_id for task in tasks],
         )
         tool_usage = [build_web_search_tool_usage(action_counts)]
+        failure_context = {
+            "observed_tool_calls": len(actions),
+            "tool_usage": tool_usage,
+            "agent": "searcher",
+            "iteration": iteration,
+            "call_index": call_index,
+            "scope_task_ids": [task.task_id for task in tasks],
+            "requested_model": self.settings.model,
+        }
         try:
             usage = build_agent_usage(
                 response,
                 self.settings,
                 agent="searcher",
                 iteration=iteration,
+                call_index=call_index,
                 scope_task_ids=[task.task_id for task in tasks],
                 tool_usage=tool_usage,
             )
@@ -268,6 +287,7 @@ class OpenAISearcherClient:
             raise SearcherProviderError(
                 "OpenAI Searcher response did not contain valid token usage.",
                 code="invalid_usage",
+                **failure_context,
             ) from None
 
         response_status = getattr(response, "status", None)
@@ -276,6 +296,7 @@ class OpenAISearcherClient:
                 f"OpenAI Searcher response ended with status {response_status!r}.",
                 code="incomplete_response",
                 usage=usage,
+                **failure_context,
             )
         draft = getattr(response, "output_parsed", None)
         if draft is None:
@@ -283,15 +304,18 @@ class OpenAISearcherClient:
                 "OpenAI Searcher response did not contain parsed structured output.",
                 code="missing_structured_output",
                 usage=usage,
+                **failure_context,
             )
         if not any(
             action.action_type == "search" and action.status == "completed"
             for action in actions
         ):
             raise SearcherProviderError(
-                "OpenAI Searcher response did not contain a completed web search action.",
+                "OpenAI Searcher response did not contain a completed web "
+                "search action.",
                 code="missing_completed_search",
                 usage=usage,
+                **failure_context,
             )
 
         return SearcherGeneration(

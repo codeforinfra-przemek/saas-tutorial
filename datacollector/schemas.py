@@ -9,13 +9,20 @@ from string import Formatter
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 SCHEMA_VERSION = "1.2.0"
 PROMPT_VERSION = "planner-system-v2"
-SEARCHER_SCHEMA_VERSION = "1.0.0"
-SEARCHER_PROMPT_VERSION = "searcher-system-v1"
+SEARCHER_SCHEMA_VERSION = "1.1.0"
+SEARCHER_PROMPT_VERSION = "searcher-system-v2"
 
 
 class ClosedModel(BaseModel):
@@ -473,14 +480,23 @@ class AgentIterationUsage(ClosedModel):
 
 
 class AgentFailureArtifact(ClosedModel):
-    """Usage ledger entry for a charged provider response that could not be used."""
+    """Known cost facts for a provider response that could not be used."""
 
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "1.1.0"] = "1.1.0"
     failure_id: str
     plan_run_id: str
     created_at: datetime
     error_code: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
-    usage: AgentIterationUsage
+    agent: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]*$")
+    iteration: int | None = Field(default=None, ge=1)
+    call_index: int | None = Field(default=None, ge=1)
+    scope_task_ids: list[str] = Field(default_factory=list)
+    provider: Literal["openai"] = "openai"
+    requested_model: str | None = None
+    usage: AgentIterationUsage | None = None
+    observed_tool_calls: int = Field(default=0, ge=0)
+    tool_usage: list[ToolUsage] = Field(default_factory=list)
+    token_usage_unknown: bool = False
 
     @model_validator(mode="after")
     def validate_failure_ids(self) -> "AgentFailureArtifact":
@@ -494,6 +510,52 @@ class AgentFailureArtifact(ClosedModel):
                 raise ValueError(f"{field_name} must be a valid UUIDv4.") from exc
             if parsed.version != 4:
                 raise ValueError(f"{field_name} must be a valid UUIDv4.")
+        if self.schema_version == "1.0.0":
+            if self.usage is None:
+                raise ValueError("Schema 1.0 failure artifacts require usage.")
+            return self
+        if (
+            self.agent is None
+            or self.iteration is None
+            or self.call_index is None
+            or self.requested_model is None
+            or not self.requested_model.strip()
+        ):
+            raise ValueError(
+                "Schema 1.1 failure artifacts require agent, call, and model metadata."
+            )
+        if len(self.scope_task_ids) != len(set(self.scope_task_ids)):
+            raise ValueError("Failure artifact task scope must be unique.")
+        billed_tool_calls = sum(item.calls for item in self.tool_usage)
+        if billed_tool_calls > self.observed_tool_calls:
+            raise ValueError(
+                "Observed tool calls cannot be lower than billed tool usage."
+            )
+        if self.usage is None:
+            if not self.token_usage_unknown:
+                raise ValueError(
+                    "A failure without provider usage must mark tokens unknown."
+                )
+        else:
+            if self.token_usage_unknown:
+                raise ValueError(
+                    "A failure with provider usage cannot mark tokens unknown."
+                )
+            if (
+                self.agent != self.usage.agent
+                or self.iteration != self.usage.iteration
+                or self.call_index != self.usage.call_index
+                or self.scope_task_ids != self.usage.scope_task_ids
+                or self.provider != self.usage.provider
+                or self.requested_model != self.usage.requested_model
+            ):
+                raise ValueError(
+                    "Failure metadata must match its provider usage entry."
+                )
+            if self.tool_usage != self.usage.tool_usage:
+                raise ValueError(
+                    "Failure tool usage must match its provider usage entry."
+                )
         return self
 
 
@@ -603,8 +665,17 @@ class ResearchPlan(ClosedModel):
 class SearchTaskStatus(StrEnum):
     QUERY_WORKLOAD_ONLY = "query_workload_only"
     SOURCES_FOUND = "sources_found"
+    PARTIAL = "partial"
     NO_SOURCES_FOUND = "no_sources_found"
     NOT_SEARCHED = "not_searched"
+
+
+class SearchQueryCoverage(StrEnum):
+    LEGACY_UNKNOWN = "legacy_unknown"
+    WORKLOAD_ONLY = "workload_only"
+    NONE = "none"
+    PARTIAL = "partial"
+    COMPLETE = "complete"
 
 
 class SearchSourceOrigin(StrEnum):
@@ -627,6 +698,7 @@ class SearcherTaskDraft(ClosedModel):
     status: SearchTaskStatus
     attempted_queries: list[str] = Field(default_factory=list, max_length=20)
     source_urls: list[str] = Field(default_factory=list, max_length=30)
+    unresolved_targets: list[str] = Field(default_factory=list, max_length=20)
     notes: str = Field(default="", max_length=1000)
 
 
@@ -651,10 +723,15 @@ class SearchLimits(ClosedModel):
     max_search_calls: int = Field(ge=1, le=100)
     task_limit: int | None = Field(default=None, ge=1)
     requested_task_ids: list[str] = Field(default_factory=list)
+    min_queries_per_task: int = Field(default=1, ge=1, le=20)
+    max_retry_tasks: int = Field(default=0, ge=0, le=50)
+    retry_search_calls: int = Field(default=1, ge=1, le=10)
 
 
 class SearchAction(ClosedModel):
     action_id: str | None = None
+    call_index: int = Field(default=1, ge=1)
+    scope_task_ids: list[str] = Field(default_factory=list)
     action_type: str = Field(min_length=1, max_length=100)
     status: str = Field(default="completed", min_length=1, max_length=100)
     queries: list[str] = Field(default_factory=list)
@@ -669,11 +746,20 @@ class SearchSource(ClosedModel):
     title: str = Field(default="", max_length=500)
     source_type: SourceType = SourceType.UNKNOWN
     origin: SearchSourceOrigin
-    provider_verified: bool
+    provider_observed: bool = Field(
+        validation_alias=AliasChoices("provider_observed", "provider_verified")
+    )
     task_ids: list[str] = Field(default_factory=list)
+    observed_in_action_ids: list[str] = Field(default_factory=list)
     discovered_via_queries: list[str] = Field(default_factory=list)
     relevance_note: str = Field(default="", max_length=1000)
     discovered_at: datetime
+
+    @property
+    def provider_verified(self) -> bool:
+        """Compatibility accessor for code reading schema 1.0 artifacts."""
+
+        return self.provider_observed
 
 
 class SearchTaskResult(ClosedModel):
@@ -682,14 +768,34 @@ class SearchTaskResult(ClosedModel):
     status: SearchTaskStatus
     planned_queries: list[str]
     attempted_queries: list[str]
+    planned_queries_attempted: list[str] = Field(default_factory=list)
+    derived_queries_attempted: list[str] = Field(default_factory=list)
+    query_coverage: SearchQueryCoverage = SearchQueryCoverage.LEGACY_UNKNOWN
+    minimum_query_attempts: int = Field(default=0, ge=0)
+    minimum_sources: int = Field(default=0, ge=0)
+    action_ids: list[str] = Field(default_factory=list)
     source_ids: list[str]
+    coverage_gaps: list[str] = Field(default_factory=list)
+    unresolved_targets: list[str] = Field(default_factory=list)
     notes: str = Field(default="", max_length=1000)
+
+
+class SearchAttemptFailure(ClosedModel):
+    """A non-fatal paid retry that could not be used in the final result."""
+
+    call_index: int = Field(ge=2)
+    scope_task_ids: list[str] = Field(min_length=1)
+    error_code: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    usage_recorded: bool
+    observed_tool_calls: int = Field(default=0, ge=0)
+    tool_usage: list[ToolUsage] = Field(default_factory=list)
+    token_usage_unknown: bool = False
 
 
 class SearchResults(ClosedModel):
     """Auditable source-discovery artifact consumed later by Extractor."""
 
-    schema_version: Literal["1.0.0"] = SEARCHER_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = SEARCHER_SCHEMA_VERSION
     prompt_version: str = SEARCHER_PROMPT_VERSION
     search_id: str
     plan_run_id: str
@@ -712,6 +818,7 @@ class SearchResults(ClosedModel):
     warnings: list[str]
     compliance_rules: list[str]
     agent_usage: list[AgentIterationUsage] = Field(default_factory=list)
+    failed_attempts: list[SearchAttemptFailure] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_search_results(self) -> "SearchResults":
@@ -744,6 +851,31 @@ class SearchResults(ClosedModel):
             raise ValueError("Search source IDs must be unique.")
         known_sources = set(source_ids)
         known_tasks = set(self.selected_task_ids)
+        action_ids = [action.action_id for action in self.actions]
+        populated_action_ids = [item for item in action_ids if item is not None]
+        if len(populated_action_ids) != len(set(populated_action_ids)):
+            raise ValueError("Search action IDs must be unique when present.")
+        if self.schema_version == "1.1.0" and len(populated_action_ids) != len(
+            self.actions
+        ):
+            raise ValueError("Schema 1.1 search actions require stable action IDs.")
+        known_actions = set(populated_action_ids)
+        action_by_id = {
+            action.action_id: action
+            for action in self.actions
+            if action.action_id is not None
+        }
+        for action in self.actions:
+            if len(action.scope_task_ids) != len(set(action.scope_task_ids)):
+                raise ValueError("Search action scope task IDs must be unique.")
+            if len(action.queries) != len(set(action.queries)):
+                raise ValueError("Search action queries must be unique.")
+            if len(action.source_urls) != len(set(action.source_urls)):
+                raise ValueError("Search action source URLs must be unique.")
+            if not set(action.scope_task_ids).issubset(known_tasks):
+                raise ValueError(
+                    "Search action scopes may reference only selected tasks."
+                )
         source_by_id = {source.source_id: source for source in self.sources}
         for source in self.sources:
             if len(source.task_ids) != len(set(source.task_ids)):
@@ -754,32 +886,148 @@ class SearchResults(ClosedModel):
                 raise ValueError("Search source query provenance must be unique.")
             if not set(source.task_ids).issubset(known_tasks):
                 raise ValueError("Search sources may reference only selected tasks.")
-            if source.provider_verified != (
+            if (
+                self.schema_version == "1.1.0"
+                and source.url != source.canonical_url
+            ):
+                raise ValueError(
+                    "Schema 1.1 source URL must equal its canonical URL."
+                )
+            if len(source.observed_in_action_ids) != len(
+                set(source.observed_in_action_ids)
+            ):
+                raise ValueError("Search source action IDs must be unique.")
+            if not set(source.observed_in_action_ids).issubset(known_actions):
+                raise ValueError("Search sources reference unknown action IDs.")
+            if source.provider_observed != (
                 source.origin == SearchSourceOrigin.OPENAI_WEB_SEARCH
             ):
                 raise ValueError(
-                    "Search source origin must match provider verification status."
+                    "Search source origin must match provider observation status."
                 )
+            if (
+                self.schema_version == "1.1.0"
+                and source.origin == SearchSourceOrigin.OPENAI_WEB_SEARCH
+                and (not source.task_ids or not source.observed_in_action_ids)
+            ):
+                raise ValueError(
+                    "Schema 1.1 provider sources must be mapped to tasks and actions."
+                )
+            if self.schema_version == "1.1.0" and source.observed_in_action_ids:
+                observed_actions = [
+                    action_by_id[action_id]
+                    for action_id in source.observed_in_action_ids
+                ]
+                if any(action.status != "completed" for action in observed_actions):
+                    raise ValueError(
+                        "Source provenance may reference only completed actions."
+                    )
+                if any(
+                    source.canonical_url
+                    not in {
+                        *action.source_urls,
+                        *([action.target_url] if action.target_url else []),
+                    }
+                    for action in observed_actions
+                ):
+                    raise ValueError(
+                        "Source provenance actions must contain the source URL."
+                    )
+                if any(
+                    not set(action.scope_task_ids).intersection(source.task_ids)
+                    for action in observed_actions
+                ):
+                    raise ValueError(
+                        "Each source provenance action must share a mapped task."
+                    )
+                if any(
+                    not any(
+                        task_id in action.scope_task_ids
+                        for action in observed_actions
+                    )
+                    for task_id in source.task_ids
+                ):
+                    raise ValueError(
+                        "Every source task must be covered by a provenance action."
+                    )
+                unambiguous_queries = {
+                    action.queries[0]
+                    for action in observed_actions
+                    if len(action.queries) == 1
+                }
+                if not set(source.discovered_via_queries).issubset(
+                    unambiguous_queries
+                ):
+                    raise ValueError(
+                        "Source query provenance must come from a single-query "
+                        "observed action."
+                    )
         for result in self.task_results:
             for values, field_name in (
                 (result.planned_queries, "planned_queries"),
                 (result.attempted_queries, "attempted_queries"),
+                (result.planned_queries_attempted, "planned_queries_attempted"),
+                (result.derived_queries_attempted, "derived_queries_attempted"),
+                (result.action_ids, "action_ids"),
                 (result.source_ids, "source_ids"),
+                (result.coverage_gaps, "coverage_gaps"),
+                (result.unresolved_targets, "unresolved_targets"),
             ):
                 if len(values) != len(set(values)):
                     raise ValueError(f"Task result {field_name} values must be unique.")
             if not set(result.source_ids).issubset(known_sources):
                 raise ValueError("Task results reference unknown source IDs.")
-            if result.status == SearchTaskStatus.SOURCES_FOUND and not result.source_ids:
-                raise ValueError("sources_found task results require source IDs.")
+            if not set(result.action_ids).issubset(known_actions):
+                raise ValueError("Task results reference unknown action IDs.")
+            if not set(result.planned_queries_attempted).issubset(
+                set(result.planned_queries)
+            ):
+                raise ValueError(
+                    "planned_queries_attempted must be a subset of planned_queries."
+                )
+            if not set(result.planned_queries_attempted).issubset(
+                set(result.attempted_queries)
+            ):
+                raise ValueError(
+                    "planned_queries_attempted must be a subset of attempted_queries."
+                )
+            if not set(result.derived_queries_attempted).issubset(
+                set(result.attempted_queries)
+            ):
+                raise ValueError(
+                    "derived_queries_attempted must be a subset of attempted_queries."
+                )
+            if set(result.planned_queries_attempted) & set(
+                result.derived_queries_attempted
+            ):
+                raise ValueError(
+                    "Planned and derived attempted queries cannot overlap."
+                )
+            if result.status in {
+                SearchTaskStatus.SOURCES_FOUND,
+                SearchTaskStatus.PARTIAL,
+            } and not result.source_ids:
+                raise ValueError(
+                    "sources_found and partial task results require source IDs."
+                )
             if result.status == SearchTaskStatus.NO_SOURCES_FOUND and (
                 not result.attempted_queries or result.source_ids
             ):
                 raise ValueError(
                     "no_sources_found requires attempted queries and no sources."
                 )
+            if result.status == SearchTaskStatus.NOT_SEARCHED and (
+                result.attempted_queries
+                or result.action_ids
+                or result.source_ids
+            ):
+                raise ValueError(
+                    "not_searched cannot contain attempts, actions, or sources."
+                )
             if result.status == SearchTaskStatus.QUERY_WORKLOAD_ONLY and (
-                result.attempted_queries or result.source_ids
+                result.attempted_queries
+                or result.source_ids
+                or result.action_ids
             ):
                 raise ValueError(
                     "query_workload_only cannot contain attempts or sources."
@@ -788,6 +1036,71 @@ class SearchResults(ClosedModel):
                 if result.task_id not in source_by_id[source_id].task_ids:
                     raise ValueError(
                         "Task/source mappings must be symmetric in search results."
+                    )
+            if self.schema_version == "1.1.0":
+                if any(
+                    action_by_id[action_id].status != "completed"
+                    or result.task_id
+                    not in action_by_id[action_id].scope_task_ids
+                    for action_id in result.action_ids
+                ):
+                    raise ValueError(
+                        "Task results may reference only completed actions in "
+                        "their task scope."
+                    )
+                referenced_action_queries = {
+                    query
+                    for action_id in result.action_ids
+                    for query in action_by_id[action_id].queries
+                }
+                if not set(result.attempted_queries).issubset(
+                    referenced_action_queries
+                ):
+                    raise ValueError(
+                        "Task attempted queries must occur in its referenced actions."
+                    )
+                if result.query_coverage == SearchQueryCoverage.LEGACY_UNKNOWN:
+                    raise ValueError(
+                        "Schema 1.1 task results require explicit query coverage."
+                    )
+                expected_minimum = min(
+                    result.minimum_query_attempts,
+                    len(result.planned_queries),
+                )
+                planned_attempt_count = len(result.planned_queries_attempted)
+                expected_coverage = (
+                    SearchQueryCoverage.WORKLOAD_ONLY
+                    if result.status == SearchTaskStatus.QUERY_WORKLOAD_ONLY
+                    else SearchQueryCoverage.NONE
+                    if planned_attempt_count == 0
+                    else SearchQueryCoverage.COMPLETE
+                    if planned_attempt_count >= expected_minimum
+                    else SearchQueryCoverage.PARTIAL
+                )
+                if result.query_coverage != expected_coverage:
+                    raise ValueError(
+                        "Task query_coverage does not match confirmed planned queries."
+                    )
+                if result.status == SearchTaskStatus.SOURCES_FOUND and (
+                    result.query_coverage != SearchQueryCoverage.COMPLETE
+                    or len(result.source_ids) < result.minimum_sources
+                    or result.coverage_gaps
+                    or result.unresolved_targets
+                ):
+                    raise ValueError(
+                        "sources_found requires complete minimum Searcher coverage."
+                    )
+                if result.status == SearchTaskStatus.PARTIAL and (
+                    not result.source_ids
+                    or (
+                        result.query_coverage == SearchQueryCoverage.COMPLETE
+                        and len(result.source_ids) >= result.minimum_sources
+                        and not result.coverage_gaps
+                        and not result.unresolved_targets
+                    )
+                ):
+                    raise ValueError(
+                        "partial requires sources plus an explicit coverage gap."
                     )
         result_by_task = {result.task_id: result for result in self.task_results}
         for source in self.sources:
@@ -805,15 +1118,74 @@ class SearchResults(ClosedModel):
             raise ValueError(
                 "Agent usage entries must be unique per agent iteration and call."
             )
+        failed_call_indices = [item.call_index for item in self.failed_attempts]
+        if len(failed_call_indices) != len(set(failed_call_indices)):
+            raise ValueError("Failed Searcher call indices must be unique.")
+        usage_call_indices = {usage.call_index for usage in self.agent_usage}
+        for failure in self.failed_attempts:
+            if not set(failure.scope_task_ids).issubset(known_tasks):
+                raise ValueError(
+                    "Failed Searcher attempts may reference only selected tasks."
+                )
+            if failure.usage_recorded != (
+                failure.call_index in usage_call_indices
+            ):
+                raise ValueError(
+                    "Failed Searcher attempt usage flag must match the usage ledger."
+                )
+            if sum(item.calls for item in failure.tool_usage) > (
+                failure.observed_tool_calls
+            ):
+                raise ValueError(
+                    "Failed attempt observed tool calls cannot be lower than "
+                    "billed tool usage."
+                )
+            if failure.usage_recorded:
+                failed_usage = next(
+                    usage
+                    for usage in self.agent_usage
+                    if usage.call_index == failure.call_index
+                )
+                recorded_failed_search_calls = sum(
+                    tool.calls
+                    for tool in failed_usage.tool_usage
+                    if tool.tool == "web_search"
+                )
+                if recorded_failed_search_calls > failure.observed_tool_calls:
+                    raise ValueError(
+                        "Failed attempt tool-call count cannot be lower than its "
+                        "recorded search calls."
+                    )
+                if failure.tool_usage != failed_usage.tool_usage:
+                    raise ValueError(
+                        "Failed attempt tool usage must match its usage ledger entry."
+                    )
+                if failure.token_usage_unknown:
+                    raise ValueError(
+                        "Failed attempt with usage cannot mark tokens unknown."
+                    )
+            elif not failure.token_usage_unknown:
+                raise ValueError(
+                    "Failed attempt without usage must mark tokens unknown."
+                )
 
         if self.generated_by == "offline":
-            if self.model is not None or self.agent_usage or self.search_executed:
+            if (
+                self.model is not None
+                or self.agent_usage
+                or self.failed_attempts
+                or self.search_executed
+            ):
                 raise ValueError(
-                    "Free Searcher cannot declare a model, usage, or executed search."
+                    "Free Searcher cannot declare a model, provider attempts, "
+                    "usage, or executed search."
                 )
-            if self.actions or any(source.provider_verified for source in self.sources):
+            if self.actions or any(
+                source.provider_observed for source in self.sources
+            ):
                 raise ValueError(
-                    "Free Searcher cannot contain provider actions or verified sources."
+                    "Free Searcher cannot contain provider actions or observed "
+                    "provider sources."
                 )
             if any(
                 result.status != SearchTaskStatus.QUERY_WORKLOAD_ONLY
@@ -856,14 +1228,46 @@ class SearchResults(ClosedModel):
             observed_search_calls = sum(
                 action.action_type == "search" for action in self.actions
             )
+            action_call_indices = {action.call_index for action in self.actions}
+            if not action_call_indices.issubset(usage_call_indices):
+                raise ValueError(
+                    "Every recorded Searcher action must have a usage entry."
+                )
+            usage_by_call_index = {
+                usage.call_index: usage for usage in self.agent_usage
+            }
+            if self.schema_version == "1.1.0" and any(
+                set(action.scope_task_ids)
+                != set(usage_by_call_index[action.call_index].scope_task_ids)
+                for action in self.actions
+            ):
+                raise ValueError(
+                    "Search action scope must match usage scope for its call."
+                )
+            if not usage_call_indices.issubset(
+                action_call_indices | set(failed_call_indices)
+            ):
+                raise ValueError(
+                    "Every Searcher usage entry must belong to actions or a "
+                    "recorded failed attempt."
+                )
             recorded_search_calls = sum(
                 tool.calls
                 for usage in self.agent_usage
+                if usage.call_index not in set(failed_call_indices)
                 for tool in usage.tool_usage
                 if tool.tool == "web_search"
             )
             if observed_search_calls != recorded_search_calls:
                 raise ValueError(
                     "Recorded web search tool calls must match search actions."
+                )
+            failed_tool_calls = sum(
+                failure.observed_tool_calls for failure in self.failed_attempts
+            )
+            if len(self.actions) + failed_tool_calls > self.limits.max_search_calls:
+                raise ValueError(
+                    "Successful actions and observed failed tool calls exceed "
+                    "the configured global tool-call cap."
                 )
         return self

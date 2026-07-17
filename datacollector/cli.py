@@ -27,6 +27,7 @@ from .schemas import (
     AgentIterationUsage,
     PlannerInput,
     ResearchDepth,
+    ToolUsage,
 )
 from .storage.json_store import (
     DEFAULT_RUNS_DIR,
@@ -43,6 +44,13 @@ def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be at least 0")
     return parsed
 
 
@@ -165,7 +173,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-search-calls",
         type=_positive_int,
         default=10,
-        help="Hard Responses tool-call cap for this iteration (default: 10).",
+        help=(
+            "Global hard tool-call cap across initial search and retries "
+            "(default: 10)."
+        ),
+    )
+    search_parser.add_argument(
+        "--min-queries-per-task",
+        type=_positive_int,
+        default=1,
+        help="Minimum exact Planner queries required per task (default: 1).",
+    )
+    search_parser.add_argument(
+        "--max-retry-tasks",
+        type=_nonnegative_int,
+        default=0,
+        help=(
+            "Opt-in paid quality retries, one task per request; 0 disables "
+            "additional spend (default: 0)."
+        ),
+    )
+    search_parser.add_argument(
+        "--retry-search-calls",
+        type=_positive_int,
+        default=1,
+        help="Maximum tool calls reserved for each opt-in retry (default: 1).",
     )
     search_parser.add_argument(
         "--model", help="Override OPENAI_MODEL for this invocation."
@@ -255,6 +287,56 @@ def _usage_summary(usage: AgentIterationUsage) -> dict[str, object]:
     }
 
 
+def _usage_totals(
+    usages: list[AgentIterationUsage],
+    *,
+    failed_call_indices: list[int] | None = None,
+    unledgered_tool_usage: list[ToolUsage] | None = None,
+    has_unknown_token_usage: bool = False,
+) -> dict[str, object]:
+    known_costs = [
+        usage.cost_estimate.total_estimated_cost_usd
+        for usage in usages
+        if usage.cost_estimate is not None
+    ]
+    tool_usage = [
+        *(item for usage in usages for item in usage.tool_usage),
+        *(unledgered_tool_usage or []),
+    ]
+    recorded_call_indices = {
+        *(usage.call_index for usage in usages),
+        *(failed_call_indices or []),
+    }
+    return {
+        "api_attempts_recorded": len(recorded_call_indices),
+        "api_calls_with_usage": len(usages),
+        "input_tokens": sum(usage.tokens.input_tokens for usage in usages),
+        "cached_input_tokens": sum(
+            usage.tokens.cached_input_tokens for usage in usages
+        ),
+        "cache_write_input_tokens": sum(
+            usage.tokens.cache_write_input_tokens for usage in usages
+        ),
+        "output_tokens": sum(usage.tokens.output_tokens for usage in usages),
+        "reasoning_tokens": sum(
+            usage.tokens.reasoning_tokens for usage in usages
+        ),
+        "total_tokens": sum(usage.tokens.total_tokens for usage in usages),
+        "tool_calls": sum(item.calls for item in tool_usage),
+        "tool_cost_usd": str(
+            sum(
+                (item.estimated_cost_usd for item in tool_usage),
+                start=Decimal("0"),
+            )
+        ),
+        "estimated_cost_usd": (
+            str(sum(known_costs, start=Decimal("0")))
+            if len(known_costs) == len(usages) and not has_unknown_token_usage
+            else None
+        ),
+    }
+
+
 def _run_search(args: argparse.Namespace) -> int:
     plan, plan_sha256 = load_research_plan(args.plan)
     result_directory = args.output_dir or args.plan.parent
@@ -279,25 +361,83 @@ def _run_search(args: argparse.Namespace) -> int:
                 requested_task_ids=args.task,
                 task_limit=args.limit_tasks,
                 max_search_calls=args.max_search_calls,
+                min_queries_per_task=args.min_queries_per_task,
+                max_retry_tasks=args.max_retry_tasks,
+                retry_search_calls=args.retry_search_calls,
             )
         except SearcherProviderError as exc:
-            if exc.usage is None:
+            if not exc.usages and not exc.observed_tool_calls:
                 raise
-            failure_path = save_agent_failure(
-                AgentFailureArtifact(
-                    failure_id=str(uuid4()),
-                    plan_run_id=plan.run_id,
-                    created_at=datetime.now(timezone.utc),
-                    error_code=exc.code,
-                    usage=exc.usage,
-                ),
-                args.plan,
-                output_dir=args.output_dir,
-            )
+            failure_artifacts: list[AgentFailureArtifact] = []
+            for usage in exc.usages:
+                billed_tool_calls = sum(item.calls for item in usage.tool_usage)
+                observed_tool_calls = max(
+                    billed_tool_calls,
+                    exc.observed_tool_calls if len(exc.usages) == 1 else 0,
+                )
+                failure_artifacts.append(
+                    AgentFailureArtifact(
+                        failure_id=str(uuid4()),
+                        plan_run_id=plan.run_id,
+                        created_at=datetime.now(timezone.utc),
+                        error_code=exc.code,
+                        agent=usage.agent,
+                        iteration=usage.iteration,
+                        call_index=usage.call_index,
+                        scope_task_ids=usage.scope_task_ids,
+                        provider=usage.provider,
+                        requested_model=usage.requested_model,
+                        usage=usage,
+                        observed_tool_calls=observed_tool_calls,
+                        tool_usage=usage.tool_usage,
+                        token_usage_unknown=False,
+                    )
+                )
+            if not exc.usages:
+                if (
+                    exc.agent is None
+                    or exc.iteration is None
+                    or exc.call_index is None
+                    or exc.requested_model is None
+                ):
+                    raise
+                failure_artifacts.append(
+                    AgentFailureArtifact(
+                        failure_id=str(uuid4()),
+                        plan_run_id=plan.run_id,
+                        created_at=datetime.now(timezone.utc),
+                        error_code=exc.code,
+                        agent=exc.agent,
+                        iteration=exc.iteration,
+                        call_index=exc.call_index,
+                        scope_task_ids=exc.scope_task_ids,
+                        requested_model=exc.requested_model,
+                        usage=None,
+                        observed_tool_calls=exc.observed_tool_calls,
+                        tool_usage=exc.tool_usage,
+                        token_usage_unknown=True,
+                    )
+                )
+            failure_paths = [
+                save_agent_failure(
+                    failure,
+                    args.plan,
+                    output_dir=args.output_dir,
+                )
+                for failure in failure_artifacts
+            ]
             raise SearcherProviderError(
-                f"{exc} Provider usage saved to {failure_path}.",
+                f"{exc} Provider usage saved to: "
+                f"{', '.join(str(path) for path in failure_paths)}.",
                 code=exc.code,
-                usage=exc.usage,
+                usages=exc.usages,
+                observed_tool_calls=exc.observed_tool_calls,
+                tool_usage=exc.tool_usage,
+                agent=exc.agent,
+                iteration=exc.iteration,
+                call_index=exc.call_index,
+                scope_task_ids=exc.scope_task_ids,
+                requested_model=exc.requested_model,
             ) from None
 
         results_path = save_search_results(
@@ -310,6 +450,17 @@ def _run_search(args: argparse.Namespace) -> int:
         status_counts[result.status.value] = (
             status_counts.get(result.status.value, 0) + 1
         )
+    query_coverage_counts: dict[str, int] = {}
+    for result in results.task_results:
+        query_coverage_counts[result.query_coverage.value] = (
+            query_coverage_counts.get(result.query_coverage.value, 0) + 1
+        )
+    action_candidate_urls = {
+        url
+        for action in results.actions
+        for url in [*action.source_urls, action.target_url]
+        if url is not None
+    }
     summary = {
         "search_id": results.search_id,
         "plan_run_id": results.plan_run_id,
@@ -321,16 +472,40 @@ def _run_search(args: argparse.Namespace) -> int:
         "selected_tasks": len(results.selected_task_ids),
         "unselected_tasks": len(results.unselected_task_ids),
         "search_actions": len(results.actions),
+        "action_candidate_urls": len(action_candidate_urls),
         "sources": len(results.sources),
+        "provider_observed_sources": sum(
+            source.provider_observed for source in results.sources
+        ),
         "provider_verified_sources": sum(
-            source.provider_verified for source in results.sources
+            source.provider_observed for source in results.sources
         ),
         "plan_seed_sources": sum(
-            not source.provider_verified for source in results.sources
+            not source.provider_observed for source in results.sources
         ),
         "task_statuses": status_counts,
+        "task_query_coverage": query_coverage_counts,
+        "failed_attempts": [
+            attempt.model_dump(mode="json") for attempt in results.failed_attempts
+        ],
         "warnings": results.warnings,
         "agent_usage": [_usage_summary(usage) for usage in results.agent_usage],
+        "usage_totals": _usage_totals(
+            results.agent_usage,
+            failed_call_indices=[
+                attempt.call_index for attempt in results.failed_attempts
+            ],
+            unledgered_tool_usage=[
+                tool
+                for attempt in results.failed_attempts
+                if not attempt.usage_recorded
+                for tool in attempt.tool_usage
+            ],
+            has_unknown_token_usage=any(
+                attempt.token_usage_unknown
+                for attempt in results.failed_attempts
+            ),
+        ),
         "sources_path": str(results_path),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))

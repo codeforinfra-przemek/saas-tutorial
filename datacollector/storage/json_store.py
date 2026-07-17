@@ -124,14 +124,22 @@ def save_agent_failure(
     plan_path: Path | str,
     output_dir: Path | str | None = None,
 ) -> Path:
-    """Persist usage for a completed but unusable provider response."""
+    """Persist known usage/cost facts for an unusable provider response."""
 
     directory = Path(output_dir) if output_dir is not None else Path(plan_path).parent
     attempt_directory = directory / "attempts"
     attempt_directory.mkdir(parents=True, exist_ok=True)
-    usage = failure.usage
+    agent = failure.usage.agent if failure.usage is not None else failure.agent
+    iteration = (
+        failure.usage.iteration if failure.usage is not None else failure.iteration
+    )
+    call_index = (
+        failure.usage.call_index if failure.usage is not None else failure.call_index
+    )
+    if agent is None or iteration is None or call_index is None:
+        raise ValueError("Failure artifact is missing filename metadata.")
     filename = (
-        f"{usage.agent}-r{usage.iteration:03d}-c{usage.call_index:03d}-"
+        f"{agent}-r{iteration:03d}-c{call_index:03d}-"
         f"failed-{failure.failure_id[:8]}.json"
     )
     failure_path = attempt_directory / filename

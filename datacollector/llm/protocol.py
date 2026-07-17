@@ -14,6 +14,7 @@ from ..schemas import (
     ResearchTask,
     SearchAction,
     SearcherDraft,
+    ToolUsage,
 )
 
 
@@ -35,6 +36,58 @@ class SearcherGeneration:
     usage: AgentIterationUsage
     actions: list[SearchAction]
     provider_sources: list[ProviderSearchSource]
+
+
+class SearcherProviderError(RuntimeError):
+    """Raised when a provider response cannot produce a usable search result."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "provider_error",
+        usage: AgentIterationUsage | None = None,
+        usages: list[AgentIterationUsage] | None = None,
+        observed_tool_calls: int = 0,
+        tool_usage: list[ToolUsage] | None = None,
+        agent: str | None = None,
+        iteration: int | None = None,
+        call_index: int | None = None,
+        scope_task_ids: list[str] | None = None,
+        requested_model: str | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        collected_usages = list(usages or [])
+        if usage is not None and usage not in collected_usages:
+            collected_usages.append(usage)
+        self.usages = collected_usages
+        self.usage = usage or (collected_usages[-1] if collected_usages else None)
+        self.observed_tool_calls = observed_tool_calls
+        self.tool_usage = list(
+            tool_usage
+            if tool_usage is not None
+            else self.usage.tool_usage
+            if self.usage is not None
+            else []
+        )
+        self.agent = agent or (self.usage.agent if self.usage is not None else None)
+        self.iteration = iteration or (
+            self.usage.iteration if self.usage is not None else None
+        )
+        self.call_index = call_index or (
+            self.usage.call_index if self.usage is not None else None
+        )
+        self.scope_task_ids = list(
+            scope_task_ids
+            if scope_task_ids is not None
+            else self.usage.scope_task_ids
+            if self.usage is not None
+            else []
+        )
+        self.requested_model = requested_model or (
+            self.usage.requested_model if self.usage is not None else None
+        )
 
 
 class PlannerLLM(Protocol):
@@ -62,5 +115,7 @@ class SearcherLLM(Protocol):
         system_prompt: str,
         *,
         iteration: int,
+        call_index: int,
         max_search_calls: int,
+        min_queries_per_task: int,
     ) -> SearcherGeneration: ...

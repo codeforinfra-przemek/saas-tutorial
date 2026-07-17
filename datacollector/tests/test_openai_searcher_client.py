@@ -21,11 +21,13 @@ class FakeResponses:
         include_action=True,
         output_override=None,
         response_status="completed",
+        invalid_usage=False,
     ):
         self.draft = draft
         self.include_action = include_action
         self.output_override = output_override
         self.response_status = response_status
+        self.invalid_usage = invalid_usage
         self.kwargs = None
 
     def parse(self, **kwargs):
@@ -68,6 +70,16 @@ class FakeResponses:
         )
         if self.output_override is not None:
             output = self.output_override
+        usage = None if self.invalid_usage else SimpleNamespace(
+            input_tokens=1000,
+            input_tokens_details=SimpleNamespace(
+                cached_tokens=0,
+                cache_write_tokens=0,
+            ),
+            output_tokens=100,
+            output_tokens_details=SimpleNamespace(reasoning_tokens=20),
+            total_tokens=1100,
+        )
         return SimpleNamespace(
             id="resp_search",
             _request_id="req_search",
@@ -76,16 +88,7 @@ class FakeResponses:
             status=self.response_status,
             output_parsed=self.draft,
             output=output,
-            usage=SimpleNamespace(
-                input_tokens=1000,
-                input_tokens_details=SimpleNamespace(
-                    cached_tokens=0,
-                    cache_write_tokens=0,
-                ),
-                output_tokens=100,
-                output_tokens_details=SimpleNamespace(reasoning_tokens=20),
-                total_tokens=1100,
-            ),
+            usage=usage,
         )
 
 
@@ -97,12 +100,14 @@ class FakeOpenAI:
         include_action=True,
         output_override=None,
         response_status="completed",
+        invalid_usage=False,
     ):
         self.responses = FakeResponses(
             draft,
             include_action=include_action,
             output_override=output_override,
             response_status=response_status,
+            invalid_usage=invalid_usage,
         )
 
 
@@ -126,7 +131,9 @@ class OpenAISearcherClientTests(TestCase):
             [self.plan.tasks[0]],
             "Searcher system prompt",
             iteration=2,
+            call_index=3,
             max_search_calls=4,
+            min_queries_per_task=1,
         )
 
         request = fake_client.responses.kwargs
@@ -138,6 +145,7 @@ class OpenAISearcherClientTests(TestCase):
         )
         self.assertEqual(request["tool_choice"], "required")
         self.assertEqual(request["max_tool_calls"], 4)
+        self.assertEqual(request["metadata"]["call_index"], "3")
         self.assertEqual(
             request["include"],
             ["web_search_call.action.sources"],
@@ -160,10 +168,17 @@ class OpenAISearcherClientTests(TestCase):
         self.assertIn("source_hints", payload["tasks"][0])
         self.assertIn("acceptance_criteria", payload["tasks"][0])
         self.assertIn("depends_on", payload["tasks"][0])
+        self.assertEqual(payload["tasks"][0]["minimum_query_attempts"], 1)
         self.assertEqual(len(generation.actions), 1)
+        self.assertEqual(generation.actions[0].call_index, 3)
+        self.assertEqual(
+            generation.actions[0].scope_task_ids,
+            [self.plan.tasks[0].task_id],
+        )
         self.assertEqual(len(generation.provider_sources), 1)
         self.assertEqual(generation.usage.agent, "searcher")
         self.assertEqual(generation.usage.iteration, 2)
+        self.assertEqual(generation.usage.call_index, 3)
         self.assertEqual(
             generation.usage.scope_task_ids,
             [self.plan.tasks[0].task_id],
@@ -195,10 +210,13 @@ class OpenAISearcherClientTests(TestCase):
                 [self.plan.tasks[0]],
                 "Searcher system prompt",
                 iteration=1,
+                call_index=1,
                 max_search_calls=2,
+                min_queries_per_task=1,
             )
 
         self.assertIsNotNone(raised.exception.usage)
+        self.assertEqual(raised.exception.observed_tool_calls, 0)
         self.assertEqual(raised.exception.usage.tokens.total_tokens, 1100)
 
     def test_completed_open_page_url_is_retained_as_provider_source(self):
@@ -237,7 +255,9 @@ class OpenAISearcherClientTests(TestCase):
             [self.plan.tasks[0]],
             "Searcher system prompt",
             iteration=1,
+            call_index=1,
             max_search_calls=3,
+            min_queries_per_task=1,
         )
 
         self.assertIn(
@@ -263,8 +283,41 @@ class OpenAISearcherClientTests(TestCase):
                 [self.plan.tasks[0]],
                 "Searcher system prompt",
                 iteration=1,
+                call_index=1,
                 max_search_calls=2,
+                min_queries_per_task=1,
             )
 
         self.assertEqual(raised.exception.code, "incomplete_response")
         self.assertIsNotNone(raised.exception.usage)
+        self.assertEqual(raised.exception.observed_tool_calls, 1)
+
+    def test_invalid_token_usage_keeps_known_tool_cost_and_attempt_metadata(self):
+        client = OpenAISearcherClient(
+            OpenAISettings(api_key="test", model="gpt-5.6-terra"),
+            client=FakeOpenAI(
+                SearcherDraft(warnings=[], sources=[], task_results=[]),
+                invalid_usage=True,
+            ),
+        )
+
+        with self.assertRaises(SearcherProviderError) as raised:
+            client.generate(
+                self.plan,
+                [self.plan.tasks[0]],
+                "Searcher system prompt",
+                iteration=4,
+                call_index=2,
+                max_search_calls=2,
+                min_queries_per_task=1,
+            )
+
+        error = raised.exception
+        self.assertEqual(error.code, "invalid_usage")
+        self.assertIsNone(error.usage)
+        self.assertEqual(error.observed_tool_calls, 1)
+        self.assertEqual(error.tool_usage[0].estimated_cost_usd, Decimal("0.01"))
+        self.assertEqual(error.agent, "searcher")
+        self.assertEqual(error.iteration, 4)
+        self.assertEqual(error.call_index, 2)
+        self.assertEqual(error.requested_model, "gpt-5.6-terra")
