@@ -117,6 +117,8 @@ class AccessControlTests(TestCase):
 
         self.client.force_login(self.vendor)
         vendor_page = self.client.get(reverse("home"))
+        self.assertContains(vendor_page, 'title="Lista franczyz"')
+        self.assertContains(vendor_page, 'title="Porównaj dane"')
         self.assertContains(vendor_page, 'title="Vendor dashboard"')
         self.assertContains(vendor_page, 'title="Leady vendora"')
         self.assertContains(vendor_page, 'title="Profile franczyz"')
@@ -126,6 +128,8 @@ class AccessControlTests(TestCase):
 
         self.client.force_login(self.staff)
         staff_page = self.client.get(reverse("home"))
+        self.assertContains(staff_page, 'title="Lista franczyz"')
+        self.assertContains(staff_page, 'title="Porównaj dane"')
         self.assertContains(staff_page, 'title="Zarządzaj franczyzami"')
         self.assertContains(staff_page, 'title="Wszystkie leady"')
         self.assertContains(staff_page, 'title="Analityka platformy"')
