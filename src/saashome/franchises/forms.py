@@ -1,6 +1,9 @@
-from django import forms
+from pathlib import Path
 
-from .models import Franchise, FranchiseCategory, FranchiseLocation, FranchiseUpdateRequest
+from django import forms
+from django.core.validators import MaxLengthValidator
+
+from .models import Franchise, FranchiseAsset, FranchiseCategory, FranchiseLocation, FranchiseUpdateRequest
 
 
 FIELD_CLASSES = (
@@ -273,7 +276,12 @@ class FranchiseUpdateRequestForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         disabled = kwargs.pop("disabled", False)
+        plan = kwargs.pop("plan", None)
         super().__init__(*args, **kwargs)
+        max_description_length = getattr(plan, "max_description_length", 1200) or 1200
+        self.fields["description"].validators.append(MaxLengthValidator(max_description_length))
+        self.fields["description"].widget.attrs["maxlength"] = max_description_length
+        self.fields["description"].help_text = f"Limit w obecnym planie: {max_description_length} znaków."
         for field in self.fields.values():
             field.disabled = disabled
             if isinstance(field.widget, forms.CheckboxInput):
@@ -295,3 +303,44 @@ class FranchiseUpdateRequestForm(forms.ModelForm):
             self.add_error("franchising_since", "Rok rozpoczęcia franczyzy nie może być wcześniejszy niż rok założenia.")
 
         return cleaned_data
+
+
+class FranchiseAssetForm(forms.ModelForm):
+    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+    DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx"}
+
+    class Meta:
+        model = FranchiseAsset
+        fields = ("title", "description", "file", "sort_order")
+        labels = {
+            "title": "Tytuł",
+            "description": "Opis lub podpis",
+            "file": "Plik",
+            "sort_order": "Kolejność",
+        }
+
+    def __init__(self, *args, asset_type, **kwargs):
+        self.asset_type = asset_type
+        super().__init__(*args, **kwargs)
+        self.fields["file"].widget.attrs["accept"] = (
+            "image/jpeg,image/png,image/webp"
+            if asset_type == FranchiseAsset.TYPE_IMAGE
+            else ".pdf,.doc,.docx,.xls,.xlsx"
+        )
+        for field in self.fields.values():
+            field.widget.attrs["class"] = FIELD_CLASSES
+
+    def clean_file(self):
+        uploaded_file = self.cleaned_data["file"]
+        extension = Path(uploaded_file.name).suffix.lower()
+        allowed_extensions = (
+            self.IMAGE_EXTENSIONS
+            if self.asset_type == FranchiseAsset.TYPE_IMAGE
+            else self.DOCUMENT_EXTENSIONS
+        )
+        if extension not in allowed_extensions:
+            raise forms.ValidationError("Ten format pliku nie jest obsługiwany.")
+        max_size = 10 * 1024 * 1024 if self.asset_type == FranchiseAsset.TYPE_IMAGE else 20 * 1024 * 1024
+        if uploaded_file.size > max_size:
+            raise forms.ValidationError("Plik jest za duży.")
+        return uploaded_file

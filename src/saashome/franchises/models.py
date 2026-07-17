@@ -209,6 +209,58 @@ class FranchiseLocation(models.Model):
         return f"{self.franchise.name} - {self.city}"
 
 
+class FranchiseAsset(models.Model):
+    TYPE_IMAGE = "image"
+    TYPE_DOCUMENT = "document"
+    ASSET_TYPE_CHOICES = (
+        (TYPE_IMAGE, "Zdjęcie"),
+        (TYPE_DOCUMENT, "Dokument"),
+    )
+
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Oczekuje na moderację"),
+        (STATUS_APPROVED, "Zatwierdzony"),
+        (STATUS_REJECTED, "Odrzucony"),
+    )
+
+    franchise = models.ForeignKey(Franchise, on_delete=models.CASCADE, related_name="assets")
+    asset_type = models.CharField(max_length=20, choices=ASSET_TYPE_CHOICES)
+    title = models.CharField(max_length=160)
+    description = models.CharField(max_length=260, blank=True)
+    file = models.FileField(upload_to="franchise_assets/%Y/%m/")
+    sort_order = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="uploaded_franchise_assets",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_franchise_assets",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["asset_type", "sort_order", "created_at"]
+        indexes = [
+            models.Index(fields=["franchise", "asset_type", "status"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.franchise} - {self.title}"
+
+
 class FranchiseUpdateRequest(models.Model):
     STATUS_DRAFT = "draft"
     STATUS_SUBMITTED = "submitted"

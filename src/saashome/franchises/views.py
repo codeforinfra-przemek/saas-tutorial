@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.text import slugify
 
-from billing.services import apply_promotion_flags, get_organization_plan
+from billing.services import apply_promotion_flags, get_franchise_plan
 from accounts.permissions import staff_required
 from leads.forms import LeadForm
 from leads.models import Lead
@@ -23,7 +23,7 @@ from visits.models import Visit
 from visits.services import create_visit
 
 from .forms import FranchiseLocationForm, FranchiseManagementForm
-from .models import Franchise, FranchiseCategory, FranchiseLocation
+from .models import Franchise, FranchiseAsset, FranchiseCategory, FranchiseLocation
 from .presentation import category_visual, decorate_categories
 
 def management_context(**kwargs):
@@ -272,7 +272,7 @@ def franchise_compare_view(request):
 
 def franchise_detail_view(request, slug):
     franchise = get_object_or_404(
-        Franchise.objects.select_related("category", "organization").prefetch_related("locations"),
+        Franchise.objects.select_related("category", "organization").prefetch_related("locations", "assets"),
         slug=slug,
         is_active=True,
     )
@@ -295,6 +295,8 @@ def franchise_detail_view(request, slug):
             else:
                 lead_form.add_error(None, " ".join(error_messages))
 
+    plan = get_franchise_plan(franchise)
+    approved_assets = franchise.assets.filter(status=FranchiseAsset.STATUS_APPROVED)
     context = {
         "site_name": "SaaS Home",
         "page_title": franchise.name,
@@ -303,7 +305,17 @@ def franchise_detail_view(request, slug):
         "locations": locations,
         "lead_form": lead_form,
         "map_markers": build_map_markers(locations),
-        "organization_plan": get_organization_plan(franchise.organization),
+        "organization_plan": plan,
+        "franchise_plan": plan,
+        "gallery_images": approved_assets.filter(asset_type=FranchiseAsset.TYPE_IMAGE)[: plan.max_gallery_images]
+        if plan and plan.max_gallery_images
+        else [],
+        "profile_documents": approved_assets.filter(asset_type=FranchiseAsset.TYPE_DOCUMENT)[
+            : plan.max_documents_per_franchise
+        ]
+        if plan and plan.can_show_documents
+        else [],
+        "show_website": bool(franchise.website_url and (not franchise.organization_id or (plan and plan.can_show_website))),
         "is_saved": is_franchise_saved_by_user(request.user, franchise),
     }
     return render(request, "franchises/detail.html", context)

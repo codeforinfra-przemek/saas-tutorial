@@ -7,11 +7,17 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from accounts.permissions import vendor_required
+from accounts.permissions import can_manage_franchise_billing, staff_required, vendor_required
 from accounts.services import get_user_franchises, get_user_organizations
-from billing.services import get_active_subscription, get_organization_plan, organization_has_feature
-from franchises.forms import FranchiseUpdateRequestForm
-from franchises.models import FranchiseUpdateRequest
+from billing.services import (
+    franchise_has_feature,
+    get_active_franchise_subscription,
+    get_active_franchise_subscription_map,
+    get_franchise_plan,
+    get_franchise_plan_map,
+)
+from franchises.forms import FranchiseAssetForm, FranchiseUpdateRequestForm
+from franchises.models import FranchiseAsset, FranchiseUpdateRequest
 from franchises.services import create_update_request_from_franchise
 from leads.forms import LeadStatusForm
 from leads.models import Lead
@@ -34,38 +40,18 @@ def vendor_dashboard_view(request):
     franchise_ids = list(franchises.values_list("id", flat=True))
     since_30d = timezone.now() - timedelta(days=30)
 
-    organization_rows = []
-    lead_enabled_org_ids = set()
-    analytics_enabled_org_ids = set()
-    for organization in organizations:
-        subscription = get_active_subscription(organization)
-        plan = subscription.plan if subscription else get_organization_plan(organization)
-        features = {
-            "can_view_leads": bool(plan and plan.can_view_leads),
-            "can_view_analytics": bool(plan and plan.can_view_analytics),
-            "can_show_website": bool(plan and plan.can_show_website),
-            "can_show_documents": bool(plan and plan.can_show_documents),
-            "can_be_verified": bool(plan and plan.can_be_verified),
-            "can_be_promoted": bool(plan and plan.can_be_promoted),
-        }
-        if features["can_view_leads"]:
-            lead_enabled_org_ids.add(organization.id)
-        if features["can_view_analytics"]:
-            analytics_enabled_org_ids.add(organization.id)
-        organization_rows.append(
-            {
-                "organization": organization,
-                "subscription": subscription,
-                "plan": plan,
-                "features": features,
-            }
-        )
-
+    organization_rows = [{"organization": organization} for organization in organizations]
+    plans_by_franchise = get_franchise_plan_map(franchises)
+    subscriptions_by_franchise = get_active_franchise_subscription_map(franchises)
     lead_contact_franchise_ids = [
-        franchise.id for franchise in franchises if franchise.organization_id in lead_enabled_org_ids
+        franchise.id
+        for franchise in franchises
+        if getattr(plans_by_franchise.get(franchise.id), "can_view_leads", False)
     ]
     analytics_franchise_ids = [
-        franchise.id for franchise in franchises if franchise.organization_id in analytics_enabled_org_ids
+        franchise.id
+        for franchise in franchises
+        if getattr(plans_by_franchise.get(franchise.id), "can_view_analytics", False)
     ]
 
     visits = Visit.objects.filter(franchise_id__in=franchise_ids)
@@ -86,8 +72,8 @@ def vendor_dashboard_view(request):
 
     franchise_rows = []
     for franchise in franchises:
-        can_view_analytics = franchise.organization_id in analytics_enabled_org_ids
-        can_view_leads = franchise.organization_id in lead_enabled_org_ids
+        can_view_analytics = franchise.id in analytics_franchise_ids
+        can_view_leads = franchise.id in lead_contact_franchise_ids
         views_count = visits_30d_by_franchise.get(franchise.id, 0) if can_view_analytics else None
         leads_count = leads_30d_by_franchise.get(franchise.id, 0)
         franchise_rows.append(
@@ -98,6 +84,8 @@ def vendor_dashboard_view(request):
                 "conversion_30d": percent(leads_count, views_count) if can_view_analytics else None,
                 "can_view_analytics": can_view_analytics,
                 "can_view_leads": can_view_leads,
+                "plan": plans_by_franchise.get(franchise.id),
+                "subscription": subscriptions_by_franchise.get(franchise.id),
             }
         )
 
@@ -124,8 +112,8 @@ def vendor_dashboard_view(request):
         "conversion_rate_30d": percent(leads_30d_count, visits_30d_count),
         "franchise_rows": franchise_rows,
         "recent_leads": recent_leads,
-        "can_view_any_lead_contacts": bool(lead_enabled_org_ids),
-        "can_view_any_analytics": bool(analytics_enabled_org_ids),
+        "can_view_any_lead_contacts": bool(lead_contact_franchise_ids),
+        "can_view_any_analytics": bool(analytics_franchise_ids),
         "lead_contact_franchise_ids": lead_contact_franchise_ids,
         "pending_update_requests_count": FranchiseUpdateRequest.objects.filter(
             franchise_id__in=franchise_ids,
@@ -142,6 +130,8 @@ def vendor_dashboard_view(request):
 @vendor_required
 def vendor_franchise_list_view(request):
     franchises = list(get_user_franchises(request.user))
+    plans_by_franchise = get_franchise_plan_map(franchises)
+    subscriptions_by_franchise = get_active_franchise_subscription_map(franchises)
     latest_updates = {}
     update_requests = FranchiseUpdateRequest.objects.filter(
         franchise__in=franchises,
@@ -155,6 +145,8 @@ def vendor_franchise_list_view(request):
             {
                 "franchise": franchise,
                 "latest_update": latest_updates.get(franchise.id),
+                "plan": plans_by_franchise.get(franchise.id),
+                "subscription": subscriptions_by_franchise.get(franchise.id),
             }
         )
 
@@ -172,6 +164,8 @@ def vendor_franchise_edit_view(request, slug):
     franchises = get_user_franchises(request.user)
     franchise = get_object_or_404(franchises, slug=slug)
     organization = franchise.organization
+    plan = get_franchise_plan(franchise)
+    can_manage = can_manage_franchise_billing(request.user, franchise)
 
     submitted_request = FranchiseUpdateRequest.objects.filter(
         franchise=franchise,
@@ -180,7 +174,7 @@ def vendor_franchise_edit_view(request, slug):
     ).order_by("-submitted_at").first()
 
     if submitted_request:
-        form = FranchiseUpdateRequestForm(instance=submitted_request, disabled=True)
+        form = FranchiseUpdateRequestForm(instance=submitted_request, disabled=True, plan=plan)
         context = {
             "site_name": "SaaS Home",
             "page_title": "Edit franchise profile",
@@ -189,6 +183,8 @@ def vendor_franchise_edit_view(request, slug):
             "update_request": submitted_request,
             "form": form,
             "read_only": True,
+            "plan": plan,
+            "can_manage": can_manage,
         }
         return render(request, "vendor/franchises/edit.html", context)
 
@@ -202,9 +198,17 @@ def vendor_franchise_edit_view(request, slug):
         .first()
     )
     if not update_request:
-        update_request = create_update_request_from_franchise(franchise, request.user)
+        update_request = create_update_request_from_franchise(franchise, request.user, save=can_manage)
 
-    form = FranchiseUpdateRequestForm(request.POST or None, instance=update_request)
+    form = FranchiseUpdateRequestForm(
+        request.POST or None,
+        instance=update_request,
+        plan=plan,
+        disabled=not can_manage,
+    )
+    if request.method == "POST" and not can_manage:
+        messages.error(request, "Tylko właściciel lub administrator organizacji może edytować profil.")
+        return redirect("vendor:franchise_edit", slug=franchise.slug)
     if request.method == "POST" and form.is_valid():
         update_request = form.save(commit=False)
         update_request.submitted_by = request.user
@@ -228,6 +232,8 @@ def vendor_franchise_edit_view(request, slug):
         "update_request": update_request,
         "form": form,
         "read_only": False,
+        "plan": plan,
+        "can_manage": can_manage,
     }
     return render(request, "vendor/franchises/edit.html", context)
 
@@ -242,6 +248,9 @@ def vendor_franchise_update_submit_view(request, pk):
     manageable_franchises = get_user_franchises(request.user)
     if not manageable_franchises.filter(pk=update_request.franchise_id).exists():
         return redirect("vendor:franchises")
+    if not can_manage_franchise_billing(request.user, update_request.franchise):
+        messages.error(request, "Tylko właściciel lub administrator organizacji może wysłać zmiany.")
+        return redirect("vendor:franchise_edit", slug=update_request.franchise.slug)
     if update_request.status in (
         FranchiseUpdateRequest.STATUS_DRAFT,
         FranchiseUpdateRequest.STATUS_REJECTED,
@@ -259,6 +268,7 @@ def vendor_lead_list_view(request):
     status = request.GET.get("status", "").strip()
     franchise_id = request.GET.get("franchise", "").strip()
     franchises = get_user_franchises(request.user)
+    lead_plan_map = get_franchise_plan_map(franchises)
 
     if status:
         leads = leads.filter(status=status)
@@ -268,7 +278,7 @@ def vendor_lead_list_view(request):
     base_leads = get_vendor_leads_for_user(request.user)
     rows = []
     for lead in leads[:200]:
-        can_view_contact = organization_has_feature(lead.franchise.organization, "can_view_leads")
+        can_view_contact = getattr(lead_plan_map.get(lead.franchise_id), "can_view_leads", False)
         lead.can_view_contact = can_view_contact
         rows.append({"lead": lead, "can_view_contact": can_view_contact})
 
@@ -293,7 +303,7 @@ def vendor_lead_list_view(request):
 @vendor_required
 def vendor_lead_detail_view(request, pk):
     lead = get_object_or_404(get_vendor_leads_for_user(request.user), pk=pk)
-    can_view_contact = organization_has_feature(lead.franchise.organization, "can_view_leads")
+    can_view_contact = franchise_has_feature(lead.franchise, "can_view_leads")
 
     if request.method == "GET":
         create_lead_activity(lead, LeadActivity.TYPE_VENDOR_VIEWED, user=request.user)
@@ -320,3 +330,101 @@ def vendor_lead_detail_view(request, pk):
         "activities": lead.activities.select_related("created_by").order_by("-created_at")[:50],
     }
     return render(request, "vendor/leads/detail.html", context)
+
+
+@vendor_required
+def vendor_franchise_media_view(request, slug):
+    franchise = get_object_or_404(get_user_franchises(request.user), slug=slug)
+    plan = get_franchise_plan(franchise)
+    can_manage = can_manage_franchise_billing(request.user, franchise)
+    images = franchise.assets.filter(asset_type=FranchiseAsset.TYPE_IMAGE)
+    documents = franchise.assets.filter(asset_type=FranchiseAsset.TYPE_DOCUMENT)
+    image_usage = images.exclude(status=FranchiseAsset.STATUS_REJECTED).count()
+    document_usage = documents.exclude(status=FranchiseAsset.STATUS_REJECTED).count()
+
+    image_form = FranchiseAssetForm(asset_type=FranchiseAsset.TYPE_IMAGE, prefix="image")
+    document_form = FranchiseAssetForm(asset_type=FranchiseAsset.TYPE_DOCUMENT, prefix="document")
+    if request.method == "POST":
+        if not can_manage:
+            return redirect("vendor:franchise_media", slug=slug)
+        asset_type = request.POST.get("asset_type")
+        if asset_type not in (FranchiseAsset.TYPE_IMAGE, FranchiseAsset.TYPE_DOCUMENT):
+            messages.error(request, "Nieprawidłowy typ pliku.")
+            return redirect("vendor:franchise_media", slug=slug)
+        form = FranchiseAssetForm(
+            request.POST,
+            request.FILES,
+            asset_type=asset_type,
+            prefix="image" if asset_type == FranchiseAsset.TYPE_IMAGE else "document",
+        )
+        current_count = franchise.assets.filter(asset_type=asset_type).exclude(
+            status=FranchiseAsset.STATUS_REJECTED,
+        ).count()
+        limit = (
+            getattr(plan, "max_gallery_images", 0)
+            if asset_type == FranchiseAsset.TYPE_IMAGE
+            else getattr(plan, "max_documents_per_franchise", 0) or 0
+        )
+        if limit <= current_count:
+            messages.error(request, "Limit plików w tym planie został wykorzystany.")
+        elif form.is_valid():
+            asset = form.save(commit=False)
+            asset.franchise = franchise
+            asset.asset_type = asset_type
+            asset.uploaded_by = request.user
+            asset.save()
+            messages.success(request, "Plik zapisano i przekazano do moderacji.")
+            return redirect("vendor:franchise_media", slug=slug)
+        if asset_type == FranchiseAsset.TYPE_IMAGE:
+            image_form = form
+        else:
+            document_form = form
+
+    return render(
+        request,
+        "vendor/franchises/media.html",
+        {
+            "site_name": "SaaS Home",
+            "page_title": f"Media: {franchise.name}",
+            "active_page": "vendor",
+            "franchise": franchise,
+            "plan": plan,
+            "can_manage": can_manage,
+            "images": images,
+            "documents": documents,
+            "image_form": image_form,
+            "document_form": document_form,
+            "image_limit": getattr(plan, "max_gallery_images", 0),
+            "document_limit": getattr(plan, "max_documents_per_franchise", 0) or 0,
+            "image_usage": image_usage,
+            "document_usage": document_usage,
+        },
+    )
+
+
+@vendor_required
+@require_POST
+def vendor_franchise_asset_delete_view(request, slug, pk):
+    franchise = get_object_or_404(get_user_franchises(request.user), slug=slug)
+    if not can_manage_franchise_billing(request.user, franchise):
+        return redirect("vendor:franchise_media", slug=slug)
+    asset = get_object_or_404(FranchiseAsset, pk=pk, franchise=franchise)
+    asset.file.delete(save=False)
+    asset.delete()
+    messages.success(request, "Plik został usunięty.")
+    return redirect("vendor:franchise_media", slug=slug)
+
+
+@staff_required
+@require_POST
+def vendor_franchise_asset_review_view(request, slug, pk, decision):
+    franchise = get_object_or_404(get_user_franchises(request.user), slug=slug)
+    asset = get_object_or_404(FranchiseAsset, pk=pk, franchise=franchise)
+    if decision not in (FranchiseAsset.STATUS_APPROVED, FranchiseAsset.STATUS_REJECTED):
+        return redirect("vendor:franchise_media", slug=slug)
+    asset.status = decision
+    asset.reviewed_by = request.user
+    asset.reviewed_at = timezone.now()
+    asset.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+    messages.success(request, "Status pliku został zaktualizowany.")
+    return redirect("vendor:franchise_media", slug=slug)

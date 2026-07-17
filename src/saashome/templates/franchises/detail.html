@@ -31,8 +31,8 @@
                                     {% if franchise.display_verified %}
                                         <span class="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-black text-sky-700">Zweryfikowane</span>
                                     {% endif %}
-                                    {% if organization_plan and organization_plan.slug == "premium" %}
-                                        <span class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">Premium</span>
+                                    {% if franchise_plan and franchise_plan.slug == "pro" %}
+                                        <span class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">Pro</span>
                                     {% endif %}
                                 </div>
                                 <h1 class="mt-1 text-3xl font-black tracking-normal text-slate-950">{{ franchise.name }}</h1>
@@ -74,8 +74,19 @@
                         <section class="rounded-lg border border-slate-200 bg-white p-5">
                             <h2 class="text-lg font-black text-slate-950">Opis franczyzy</h2>
                             <p class="mt-3 whitespace-pre-line text-sm leading-7 text-slate-600">{{ franchise.description|default:franchise.short_description }}</p>
-                            {% if franchise.website_url and not franchise.organization or organization_plan.can_show_website %}<a href="{{ franchise.website_url }}" target="_blank" rel="noopener" class="mt-5 inline-flex min-h-10 items-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800">Otwórz stronę</a>{% endif %}
+                            {% if show_website %}<a href="{{ franchise.website_url }}" target="_blank" rel="noopener" class="mt-5 inline-flex min-h-10 items-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800">Otwórz stronę</a>{% endif %}
                         </section>
+
+                        {% if gallery_images %}
+                        <section>
+                            <h2 class="text-lg font-black text-slate-950">Galeria</h2>
+                            <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">{% for asset in gallery_images %}<figure class="overflow-hidden rounded-lg border border-slate-200 bg-white"><img src="{{ asset.file.url }}" alt="{{ asset.title }}" class="aspect-[4/3] w-full object-cover"><figcaption class="px-3 py-2 text-xs font-bold text-slate-700">{{ asset.title }}</figcaption></figure>{% endfor %}</div>
+                        </section>
+                        {% endif %}
+
+                        {% if profile_documents %}
+                        <section class="rounded-lg border border-slate-200 bg-white p-5"><h2 class="text-lg font-black text-slate-950">Dokumenty do pobrania</h2><div class="mt-4 divide-y divide-slate-100">{% for asset in profile_documents %}<a href="{{ asset.file.url }}" target="_blank" rel="noopener" class="flex min-h-12 items-center justify-between gap-3 py-3 text-sm font-bold text-slate-800 hover:text-brand-700"><span>{{ asset.title }}</span><span aria-hidden="true">↓</span></a>{% endfor %}</div></section>
+                        {% endif %}
 
                         <section class="rounded-lg border border-slate-200 bg-white p-5">
                             <h2 class="text-lg font-black text-slate-950">Model, lokal i umowa</h2>

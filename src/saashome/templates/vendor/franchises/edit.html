@@ -35,6 +35,12 @@
             </div>
         {% endif %}
 
+        <div class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
+            <p><span class="font-black text-slate-950">Plan {{ plan.name|default:"Free" }}</span> · limit opisu {{ plan.max_description_length|default:1200 }} znaków</p>
+            <div class="flex gap-3"><a href="{% url 'vendor:franchise_media' franchise.slug %}" class="font-bold text-brand-700">Media</a><a href="{% url 'billing:subscription_detail' franchise.slug %}" class="font-bold text-brand-700">Subskrypcja</a></div>
+        </div>
+        {% if not can_manage %}<div class="mb-5 rounded-lg border border-slate-200 bg-slate-100 p-4 text-sm font-semibold text-slate-700">Masz dostęp tylko do podglądu. Edycję wykonuje właściciel lub administrator organizacji.</div>{% endif %}
+
         <form method="post" class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             {% csrf_token %}
             {% if form.non_field_errors %}
@@ -62,10 +68,10 @@
             <div class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
                 <a href="{% url 'vendor:franchises' %}" class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Cancel</a>
                 <div class="flex flex-wrap gap-2">
-                    <button type="submit" name="action" value="save" {% if read_only %}disabled{% endif %} class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
+                    <button type="submit" name="action" value="save" {% if read_only or not can_manage %}disabled{% endif %} class="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
                         Save draft
                     </button>
-                    <button type="submit" name="action" value="submit" {% if read_only %}disabled{% endif %} class="inline-flex min-h-10 items-center justify-center rounded-lg bg-emerald-600 px-5 py-2 text-sm font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+                    <button type="submit" name="action" value="submit" {% if read_only or not can_manage %}disabled{% endif %} class="inline-flex min-h-10 items-center justify-center rounded-lg bg-emerald-600 px-5 py-2 text-sm font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
                         Submit for review
                     </button>
                 </div>

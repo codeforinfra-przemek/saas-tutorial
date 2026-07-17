@@ -119,6 +119,16 @@
                     </svg>
                     <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Vendor</span>
                 </a>
+                <a href="{% url 'billing:subscriptions' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'subscriptions' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Subskrypcje">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16v10H4V7Zm3 3h6m-6 3h4m6-3h.01"/></svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Subskrypcje</span>
+                </a>
+            {% endif %}
+            {% if request.user.is_staff %}
+                <a href="{% url 'billing:manage_requests' %}" data-drawer-hide="app-sidebar" class="sidebar-link flex items-center lg:justify-center gap-3 rounded-lg px-3 py-2.5 {% if active_page == 'subscription_management' %}bg-brand-50 text-brand-700{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-950{% endif %}" title="Obsługa subskrypcji">
+                    <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 4h12v16H6V4Zm3 4h6m-6 4h6m-6 4h3"/></svg>
+                    <span class="sidebar-label overflow-hidden whitespace-nowrap transition-opacity duration-200 lg:pointer-events-none lg:opacity-0">Obsługa subskrypcji</span>
+                </a>
             {% endif %}
         </nav>
 

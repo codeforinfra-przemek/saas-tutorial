@@ -27,8 +27,14 @@ class Plan(models.Model):
     can_show_documents = models.BooleanField(default=False)
     can_be_verified = models.BooleanField(default=False)
     can_be_promoted = models.BooleanField(default=False)
+    can_receive_priority_leads = models.BooleanField(default=False)
+    can_feature_in_category = models.BooleanField(default=False)
+    can_feature_on_homepage = models.BooleanField(default=False)
+    has_priority_support = models.BooleanField(default=False)
     max_franchises = models.PositiveIntegerField(null=True, blank=True)
     max_documents_per_franchise = models.PositiveIntegerField(null=True, blank=True)
+    max_gallery_images = models.PositiveIntegerField(default=0)
+    max_description_length = models.PositiveIntegerField(default=1200)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -42,6 +48,158 @@ class Plan(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class FranchiseSubscription(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_ACTIVE = "active"
+    STATUS_PAST_DUE = "past_due"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_EXPIRED = "expired"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Oczekuje na aktywację"),
+        (STATUS_ACTIVE, "Aktywna"),
+        (STATUS_PAST_DUE, "Płatność zaległa"),
+        (STATUS_CANCELLED, "Anulowana"),
+        (STATUS_EXPIRED, "Wygasła"),
+    )
+
+    PAYMENT_PENDING = "pending"
+    PAYMENT_PAID = "paid"
+    PAYMENT_OVERDUE = "overdue"
+    PAYMENT_NOT_REQUIRED = "not_required"
+    PAYMENT_STATUS_CHOICES = (
+        (PAYMENT_PENDING, "Oczekuje"),
+        (PAYMENT_PAID, "Opłacona"),
+        (PAYMENT_OVERDUE, "Zaległa"),
+        (PAYMENT_NOT_REQUIRED, "Nie jest wymagana"),
+    )
+
+    franchise = models.OneToOneField(
+        "franchises.Franchise",
+        on_delete=models.CASCADE,
+        related_name="billing_subscription",
+    )
+    plan = models.ForeignKey(Plan, on_delete=models.PROTECT, related_name="franchise_subscriptions")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    starts_at = models.DateTimeField(null=True, blank=True)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    cancel_at_period_end = models.BooleanField(default=False)
+    manual_payment_status = models.CharField(
+        max_length=20,
+        choices=PAYMENT_STATUS_CHOICES,
+        default=PAYMENT_PENDING,
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="requested_franchise_subscriptions",
+    )
+    admin_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["ends_at", "franchise__name"]
+        indexes = [
+            models.Index(fields=["status", "ends_at"]),
+            models.Index(fields=["plan", "status"]),
+            models.Index(fields=["manual_payment_status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.franchise} - {self.plan} ({self.status})"
+
+
+class FranchiseSubscriptionRequest(models.Model):
+    TYPE_START = "start"
+    TYPE_EXTEND = "extend"
+    TYPE_CHANGE_PLAN = "change_plan"
+    TYPE_CANCEL = "cancel"
+    REQUEST_TYPE_CHOICES = (
+        (TYPE_START, "Zakup subskrypcji"),
+        (TYPE_EXTEND, "Przedłużenie"),
+        (TYPE_CHANGE_PLAN, "Zmiana planu"),
+        (TYPE_CANCEL, "Anulowanie"),
+    )
+
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Oczekuje"),
+        (STATUS_APPROVED, "Zatwierdzone"),
+        (STATUS_REJECTED, "Odrzucone"),
+        (STATUS_CANCELLED, "Wycofane"),
+    )
+
+    DURATION_CHOICES = (
+        (1, "1 miesiąc"),
+        (3, "3 miesiące"),
+        (12, "12 miesięcy"),
+    )
+
+    franchise = models.ForeignKey(
+        "franchises.Franchise",
+        on_delete=models.CASCADE,
+        related_name="subscription_requests",
+    )
+    subscription = models.ForeignKey(
+        FranchiseSubscription,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="change_requests",
+    )
+    request_type = models.CharField(max_length=20, choices=REQUEST_TYPE_CHOICES)
+    requested_plan = models.ForeignKey(
+        Plan,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="franchise_subscription_requests",
+    )
+    duration_months = models.PositiveSmallIntegerField(choices=DURATION_CHOICES, default=1)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="franchise_subscription_change_requests",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_franchise_subscription_requests",
+    )
+    vendor_notes = models.TextField(blank=True)
+    admin_notes = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["franchise"],
+                condition=models.Q(status="pending"),
+                name="unique_pending_subscription_request_per_franchise",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["franchise", "status"]),
+            models.Index(fields=["request_type", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.franchise} - {self.get_request_type_display()} ({self.status})"
 
 
 class OrganizationSubscription(models.Model):

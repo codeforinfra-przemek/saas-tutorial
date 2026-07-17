@@ -6,7 +6,7 @@ from django.core.mail import BadHeaderError, send_mail
 from django.utils import timezone
 
 from accounts.services import get_user_franchises
-from billing.services import organization_has_feature
+from billing.services import franchise_has_feature
 
 from .models import Lead, LeadActivity
 
@@ -93,7 +93,7 @@ def notify_new_lead(lead, request=None):
     if (
         organization
         and organization.contact_email
-        and organization_has_feature(organization, "can_view_leads")
+        and franchise_has_feature(lead.franchise, "can_view_leads")
     ):
         recipients.append(organization.contact_email)
 
@@ -101,7 +101,9 @@ def notify_new_lead(lead, request=None):
     if not recipients:
         return
 
-    subject = f"New franchise lead: {lead.franchise.name}"
+    priority = franchise_has_feature(lead.franchise, "can_receive_priority_leads")
+    subject_prefix = "[PRIORYTET] " if priority else ""
+    subject = f"{subject_prefix}New franchise lead: {lead.franchise.name}"
     body = (
         f"Franchise: {lead.franchise.name}\n"
         f"Name: {lead.name}\n"
@@ -133,5 +135,5 @@ def notify_new_lead(lead, request=None):
     create_lead_activity(
         lead,
         LeadActivity.TYPE_EMAIL_NOTIFICATION_SENT,
-        metadata={"recipients": recipients},
+        metadata={"recipients": recipients, "priority": priority},
     )

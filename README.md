@@ -257,3 +257,28 @@ After pulling these changes, run:
 cd src/saashome
 python manage.py migrate
 ```
+
+## Per-franchise vendor subscriptions
+
+Paid access is assigned to a single franchise profile, not to the whole
+organization. Vendor pages:
+
+- `/subscriptions/` - plans, validity dates and pending changes;
+- `/pricing/vendor/` - comparison of `Profil`, `Promocja` and `Pro`;
+- `/vendor/franchises/<slug>/media/` - moderated gallery and documents;
+- `/manage/subscription-requests/` - staff approval of vendor requests.
+
+Owners and organization admins can start, extend, change or cancel a plan.
+Members have read-only access. Cancellation takes effect at the end of the paid
+period. This MVP does not charge a card: staff confirms payment and approves the
+request in the application view.
+
+Plan capabilities are enforced server-side. They control description and file
+limits, lead contact access, analytics, website/documents visibility, list
+promotion and Pro profile highlights.
+
+```bash
+cd src/saashome
+python manage.py migrate
+python manage.py seed_plans  # optional; migrations already create default plans
+```

@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import InvestorServiceRequest
+from .models import FranchiseSubscriptionRequest, InvestorServiceRequest, Plan
 
 
 FIELD_CLASSES = (
@@ -62,3 +62,34 @@ class InvestorServiceRequestForm(forms.ModelForm):
         ):
             self.add_error("specialist_area", "Wybierz lub opisz obszar wsparcia.")
         return cleaned_data
+
+
+class FranchiseSubscriptionActionForm(forms.Form):
+    plan = forms.ModelChoiceField(queryset=Plan.objects.none(), required=False, label="Plan")
+    duration_months = forms.TypedChoiceField(
+        choices=FranchiseSubscriptionRequest.DURATION_CHOICES,
+        coerce=int,
+        required=False,
+        label="Okres",
+    )
+    notes = forms.CharField(
+        required=False,
+        label="Informacja dla administratora",
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+    def __init__(self, *args, plans=None, require_plan=True, require_duration=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["plan"].queryset = plans if plans is not None else Plan.objects.none()
+        self.fields["plan"].required = require_plan
+        self.fields["duration_months"].required = require_duration
+        for field in self.fields.values():
+            field.widget.attrs["class"] = FIELD_CLASSES
+
+
+class SubscriptionReviewForm(forms.Form):
+    admin_notes = forms.CharField(
+        required=False,
+        label="Notatka",
+        widget=forms.Textarea(attrs={"rows": 3, "class": FIELD_CLASSES}),
+    )

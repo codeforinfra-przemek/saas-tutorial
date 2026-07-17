@@ -4,8 +4,8 @@ from datetime import timedelta
 from django.db.models import Count, Max
 from django.utils import timezone
 
-from accounts.services import get_user_franchises, get_user_organizations
-from billing.services import organization_has_feature
+from accounts.services import get_user_franchises
+from billing.services import get_franchise_plan_map
 from franchises.models import Franchise
 from leads.models import Lead
 from visits.models import Visit
@@ -76,21 +76,22 @@ def leads_budget_breakdown(leads):
 
 def get_vendor_analytics(user, range_key="30d"):
     start_date, end_date, normalized_key = get_date_range(range_key)
-    organizations = list(get_user_organizations(user))
-    analytics_enabled_organizations = [
-        organization for organization in organizations if organization_has_feature(organization, "can_view_analytics")
+    all_franchises = list(get_user_franchises(user))
+    plan_map = get_franchise_plan_map(all_franchises)
+    enabled_franchise_ids = [
+        franchise.id
+        for franchise in all_franchises
+        if getattr(plan_map.get(franchise.id), "can_view_analytics", False)
     ]
-    analytics_locked_organizations = [
-        organization for organization in organizations if organization not in analytics_enabled_organizations
-    ]
+    locked_franchises = [franchise for franchise in all_franchises if franchise.id not in enabled_franchise_ids]
 
-    if not analytics_enabled_organizations:
+    if not enabled_franchise_ids:
         return {
             "range_key": normalized_key,
             "start_date": start_date,
             "end_date": end_date,
-            "analytics_enabled_organizations": analytics_enabled_organizations,
-            "analytics_locked_organizations": analytics_locked_organizations,
+            "analytics_enabled_organizations": [],
+            "analytics_locked_organizations": locked_franchises,
             "can_view_analytics": False,
             "franchises": Franchise.objects.none(),
             "visits_count": 0,
@@ -103,7 +104,7 @@ def get_vendor_analytics(user, range_key="30d"):
             "leads_by_budget": [],
         }
 
-    franchises = get_user_franchises(user).filter(organization__in=analytics_enabled_organizations)
+    franchises = get_user_franchises(user).filter(id__in=enabled_franchise_ids)
     franchise_ids = list(franchises.values_list("id", flat=True))
     visits = Visit.objects.filter(
         franchise_id__in=franchise_ids,
@@ -158,8 +159,8 @@ def get_vendor_analytics(user, range_key="30d"):
         "range_key": normalized_key,
         "start_date": start_date,
         "end_date": end_date,
-        "analytics_enabled_organizations": analytics_enabled_organizations,
-        "analytics_locked_organizations": analytics_locked_organizations,
+        "analytics_enabled_organizations": franchises,
+        "analytics_locked_organizations": locked_franchises,
         "can_view_analytics": True,
         "franchises": franchises,
         "visits_count": visits_count,

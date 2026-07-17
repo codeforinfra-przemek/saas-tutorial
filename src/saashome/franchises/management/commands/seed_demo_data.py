@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from accounts.models import Organization, OrganizationMembership, UserProfile
-from billing.models import FranchisePromotion, OrganizationSubscription, Plan
+from billing.models import FranchisePromotion, FranchiseSubscription, OrganizationSubscription, Plan
 from content.models import Article, ArticleCategory, LandingPage
 from franchises.models import Franchise, FranchiseCategory, FranchiseLocation
 from franchises.reference_data import mcdonalds_reference_fields
@@ -31,7 +31,7 @@ class Command(BaseCommand):
         organizations = self.seed_organizations()
         franchises = self.seed_franchises(categories, organizations)
         self.seed_locations(franchises)
-        self.seed_subscriptions(organizations)
+        self.seed_subscriptions(organizations, franchises)
         self.seed_promotions(franchises)
         self.seed_leads(franchises)
         self.seed_visits(franchises)
@@ -694,8 +694,8 @@ class Command(BaseCommand):
                     },
                 )
 
-    def seed_subscriptions(self, organizations):
-        plan_cycle = ["premium", "basic", "enterprise", "premium", "basic"]
+    def seed_subscriptions(self, organizations, franchises):
+        plan_cycle = ["growth", "basic", "pro", "growth", "basic"]
         for index, organization in enumerate(organizations.values()):
             plan = Plan.objects.filter(slug=plan_cycle[index % len(plan_cycle)]).first()
             if not plan:
@@ -709,6 +709,25 @@ class Command(BaseCommand):
                     "ends_at": None,
                     "manual_payment_status": OrganizationSubscription.PAYMENT_PAID,
                     "admin_notes": "Demo subscription seeded for MVP presentation.",
+                },
+            )
+
+        now = timezone.now()
+        for index, franchise in enumerate(franchises.values()):
+            if not franchise.organization_id:
+                continue
+            plan = Plan.objects.filter(slug=plan_cycle[index % len(plan_cycle)]).first()
+            if not plan:
+                continue
+            FranchiseSubscription.objects.update_or_create(
+                franchise=franchise,
+                defaults={
+                    "plan": plan,
+                    "status": FranchiseSubscription.STATUS_ACTIVE,
+                    "starts_at": now,
+                    "ends_at": now + timezone.timedelta(days=365),
+                    "manual_payment_status": FranchiseSubscription.PAYMENT_PAID,
+                    "admin_notes": "Demo per-franchise subscription.",
                 },
             )
 

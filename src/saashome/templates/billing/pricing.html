@@ -1,67 +1,27 @@
 {% extends "base.html" %}
 
-{% block title %}{{ block.super }} | Pakiety{% endblock %}
-
-{% block topbar_title %}
-    <div>
-        <p class="text-sm font-black text-slate-950">Pakiety</p>
-        <p class="hidden text-xs font-semibold text-slate-500 sm:block">Manualna aktywacja planu dla vendora</p>
-    </div>
-{% endblock %}
+{% block title %}{{ block.super }} | Pakiety dla franczyz{% endblock %}
 
 {% block content %}
-    <section class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
-        <div class="mb-7 max-w-3xl">
-            <span class="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-extrabold uppercase tracking-wide text-brand-700 shadow-sm">Monetization MVP</span>
-            <h1 class="mt-4 text-4xl font-black tracking-normal text-slate-950">Pakiety dla franczyzodawców</h1>
-            <p class="mt-3 text-sm leading-6 text-slate-600">
-                Na tym etapie aktywacja planu odbywa się ręcznie przez administratora. Nie ma checkoutu, Stripe ani automatycznych płatności.
-            </p>
-        </div>
-
-        <div class="grid gap-4 lg:grid-cols-4">
-            {% for plan in plans %}
-                <article class="flex h-full flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm {% if plan.slug == 'premium' %}ring-2 ring-emerald-500{% endif %}">
-                    <div>
-                        <div class="flex items-center justify-between gap-3">
-                            <h2 class="text-xl font-black text-slate-950">{{ plan.name }}</h2>
-                            {% if plan.slug == "premium" %}
-                                <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">Popularny</span>
-                            {% endif %}
-                        </div>
-                        <p class="mt-3 min-h-12 text-sm leading-6 text-slate-600">{{ plan.description }}</p>
-                        <p class="mt-5 text-3xl font-black text-slate-950">
-                            {% if plan.price_monthly is None %}
-                                Indywidualnie
-                            {% else %}
-                                {{ plan.price_monthly|floatformat:0 }} {{ plan.currency }}
-                            {% endif %}
-                        </p>
-                        {% if plan.price_monthly is not None %}
-                            <p class="mt-1 text-xs font-semibold text-slate-500">miesięcznie, rozliczenie manualne</p>
-                        {% endif %}
-                    </div>
-
-                    <ul class="mt-5 space-y-2 text-sm text-slate-700">
-                        <li>{% if plan.can_view_leads %}✓{% else %}–{% endif %} Dostęp do leadów</li>
-                        <li>{% if plan.can_view_analytics %}✓{% else %}–{% endif %} Analityka profilu</li>
-                        <li>{% if plan.can_show_website %}✓{% else %}–{% endif %} Link do strony WWW</li>
-                        <li>{% if plan.can_show_documents %}✓{% else %}–{% endif %} Dokumenty w profilu</li>
-                        <li>{% if plan.can_be_verified %}✓{% else %}–{% endif %} Badge zweryfikowane</li>
-                        <li>{% if plan.can_be_promoted %}✓{% else %}–{% endif %} Promocje i premium widoczność</li>
-                    </ul>
-
-                    <div class="mt-auto pt-6">
-                        <a href="mailto:{{ contact_email }}?subject=Aktywacja planu {{ plan.name }}" class="inline-flex min-h-10 w-full items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800">
-                            Contact us to activate this plan
-                        </a>
-                    </div>
-                </article>
-            {% empty %}
-                <div class="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">
-                    Brak aktywnych planów. Uruchom <code>python manage.py seed_plans</code>.
-                </div>
-            {% endfor %}
-        </div>
-    </section>
+<section class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div class="max-w-3xl"><p class="text-xs font-extrabold uppercase text-brand-700">Widoczność per franczyza</p><h1 class="mt-2 text-3xl font-black text-slate-950 sm:text-4xl">Wybierz zakres dla każdego profilu</h1><p class="mt-3 text-sm leading-6 text-slate-600">Plan działa dla jednej franczyzy. Możesz niezależnie przedłużać, zmieniać lub kończyć każdą subskrypcję.</p></div>
+        <a href="{% url 'billing:subscriptions' %}" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-5 text-sm font-extrabold text-white hover:bg-slate-800">Moje subskrypcje</a>
+    </div>
+    <div class="mt-8 grid gap-5 lg:grid-cols-3">
+    {% for plan in plans %}
+        <article class="flex h-full flex-col rounded-lg border bg-white p-6 shadow-sm {% if plan.slug == 'growth' %}border-emerald-400 ring-2 ring-emerald-100{% else %}border-slate-200{% endif %}">
+            <div class="flex items-start justify-between gap-3"><div><p class="text-xs font-extrabold uppercase text-brand-700">{{ forloop.counter }} poziom</p><h2 class="mt-1 text-2xl font-black text-slate-950">{{ plan.name }}</h2></div>{% if plan.slug == 'growth' %}<span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">Najczęściej wybierany</span>{% endif %}</div>
+            <p class="mt-4 min-h-14 text-sm leading-6 text-slate-600">{{ plan.description }}</p>
+            <p class="mt-5 text-3xl font-black text-slate-950">{{ plan.price_monthly|floatformat:0 }} <span class="text-base">PLN</span></p><p class="text-xs text-slate-500">miesięcznie za jedną franczyzę</p>
+            <ul class="mt-6 space-y-2.5 text-sm text-slate-700">
+                <li>✓ Opis do {{ plan.max_description_length }} znaków</li><li>✓ {{ plan.max_gallery_images }} zdjęć i {{ plan.max_documents_per_franchise }} dokumentów</li><li>✓ Dostęp do leadów</li>
+                <li>{% if plan.can_view_analytics %}✓{% else %}–{% endif %} Analityka profilu</li><li>{% if plan.can_be_promoted %}✓{% else %}–{% endif %} Wyższa pozycja i etykieta Promowane</li><li>{% if plan.can_feature_on_homepage %}✓{% else %}–{% endif %} Wyróżnienie na stronie i w kategorii</li><li>{% if plan.can_receive_priority_leads %}✓{% else %}–{% endif %} Priorytetowa obsługa leadów</li><li>{% if plan.has_priority_support %}✓{% else %}–{% endif %} Priorytetowe wsparcie</li>
+            </ul>
+            <a href="{% url 'billing:subscriptions' %}" class="mt-auto inline-flex min-h-11 w-full items-center justify-center rounded-lg {% if plan.slug == 'growth' %}bg-emerald-600 hover:bg-emerald-700{% else %}bg-slate-950 hover:bg-slate-800{% endif %} px-4 py-2 text-sm font-extrabold text-white">Wybierz franczyzę</a>
+        </article>
+    {% empty %}<p class="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">Brak planów. Uruchom <code>python manage.py seed_plans</code>.</p>{% endfor %}
+    </div>
+    <p class="mt-6 text-xs leading-5 text-slate-500">MVP korzysta z zatwierdzania manualnego. Złożenie dyspozycji nie pobiera płatności; administrator aktywuje plan po potwierdzeniu rozliczenia.</p>
+</section>
 {% endblock %}

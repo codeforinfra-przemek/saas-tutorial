@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Franchise, FranchiseCategory, FranchiseLocation, FranchiseUpdateRequest
+from .models import Franchise, FranchiseAsset, FranchiseCategory, FranchiseLocation, FranchiseUpdateRequest
 
 
 @admin.register(FranchiseCategory)
@@ -78,6 +78,14 @@ class FranchiseLocationAdmin(admin.ModelAdmin):
     list_filter = ("location_type", "region", "is_active")
     search_fields = ("name", "franchise__name", "city", "region", "address")
     autocomplete_fields = ("franchise",)
+
+
+@admin.register(FranchiseAsset)
+class FranchiseAssetAdmin(admin.ModelAdmin):
+    list_display = ("title", "franchise", "asset_type", "status", "uploaded_by", "created_at")
+    list_filter = ("asset_type", "status", "created_at")
+    search_fields = ("title", "description", "franchise__name", "uploaded_by__email")
+    readonly_fields = ("uploaded_by", "reviewed_by", "reviewed_at", "created_at", "updated_at")
 
 
 @admin.register(FranchiseUpdateRequest)

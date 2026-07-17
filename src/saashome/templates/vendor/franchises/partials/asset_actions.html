@@ -1,0 +1,7 @@
+<div class="flex shrink-0 items-center gap-2">
+{% if request.user.is_staff and asset.status == 'pending' %}
+<form method="post" action="{% url 'vendor:franchise_asset_review' franchise.slug asset.pk 'approved' %}">{% csrf_token %}<button title="Zatwierdź" class="grid h-9 w-9 place-items-center rounded-lg bg-emerald-50 font-black text-emerald-700">✓</button></form>
+<form method="post" action="{% url 'vendor:franchise_asset_review' franchise.slug asset.pk 'rejected' %}">{% csrf_token %}<button title="Odrzuć" class="grid h-9 w-9 place-items-center rounded-lg bg-red-50 font-black text-red-700">×</button></form>
+{% endif %}
+{% if can_manage %}<form method="post" action="{% url 'vendor:franchise_asset_delete' franchise.slug asset.pk %}">{% csrf_token %}<button title="Usuń" class="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-red-700">×</button></form>{% endif %}
+</div>

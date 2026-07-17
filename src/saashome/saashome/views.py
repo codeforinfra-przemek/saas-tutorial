@@ -8,6 +8,9 @@ from django.core.mail import EmailMultiAlternatives
 from django.shortcuts import render
 from django.template.loader import render_to_string
 
+from billing.services import apply_promotion_flags
+from franchises.models import Franchise
+
 from .forms import ContactRequestForm
 
 
@@ -37,6 +40,14 @@ def send_contact_invitation_email(email):
 
 def home_view(request):
     contact_form = ContactRequestForm()
+    ranked_franchises = apply_promotion_flags(
+        Franchise.objects.filter(is_active=True).select_related("category", "organization")
+    )
+    featured_franchises = [
+        franchise
+        for franchise in ranked_franchises
+        if getattr(getattr(franchise, "subscription_plan", None), "can_feature_on_homepage", False)
+    ][:3]
 
     if request.method == "POST":
         contact_form = ContactRequestForm(request.POST)
@@ -76,6 +87,7 @@ def home_view(request):
         "course_code_url": "https://github.com/codingforentrepreneurs/SaaS-Foundations",
         "my_code_url": "https://github.com/codeforinfra-przemek/saas-tutorial",
         "contact_form": contact_form,
+        "featured_franchises": featured_franchises,
         "featured_objects": [
             {
                 "name": "Studio coworkingowe",
