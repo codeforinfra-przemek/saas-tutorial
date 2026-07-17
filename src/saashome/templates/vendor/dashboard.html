@@ -30,7 +30,7 @@
                 </div>
                 <div class="mt-3 flex flex-wrap gap-2">
                     {% for row in organization_rows %}
-                        <span class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-800">{{ row.organization.name }}</span>
+                        <span class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-800">{{ row.organization.name }} <span class="ml-1 font-semibold text-slate-500">{{ row.role_label }}</span></span>
                     {% endfor %}
                 </div>
             </div>

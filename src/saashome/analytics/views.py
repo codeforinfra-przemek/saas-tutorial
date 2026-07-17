@@ -13,7 +13,7 @@ def vendor_analytics_view(request):
     context = {
         "site_name": "SaaS Home",
         "page_title": "Analytics",
-        "active_page": "vendor",
+        "active_page": "vendor_analytics",
         "analytics": analytics,
         "range_options": ("7d", "30d", "90d"),
     }

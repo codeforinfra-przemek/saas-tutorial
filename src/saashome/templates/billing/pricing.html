@@ -32,7 +32,7 @@
                         </div>
                     </form>
                 {% elif not manageable_franchises %}
-                    <p class="rounded-lg bg-slate-50 p-3 text-sm font-semibold text-slate-600">Zakup może rozpocząć właściciel lub administrator organizacji.</p>
+                    <p class="rounded-lg bg-slate-50 p-3 text-sm font-semibold text-slate-600">Zakup może rozpocząć wyłącznie owner organizacji.</p>
                 {% else %}
                     <a href="{% url 'billing:subscriptions' %}" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-slate-300 px-4 text-sm font-extrabold text-slate-800 hover:bg-slate-50">Zamów manualnie</a>
                 {% endif %}

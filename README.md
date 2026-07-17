@@ -222,16 +222,18 @@ python manage.py runserver
 
 Application access is based on server-side checks, not only on hidden menu links:
 
-| Area | Guest | User | Vendor member | Staff/admin |
-| --- | --- | --- | --- | --- |
-| Public franchise and content pages | View | View | View | View |
-| Request franchise information | Create | Create | Create | Create |
-| Profile, saved list and comparison | Login required | Own data | Own data | Own data |
-| Claim an unclaimed franchise | Login required | Create/view own claims | Create/view own claims | Create/view own claims |
-| Vendor dashboard onboarding page | Login required | View empty onboarding state | View own organization data | View all active organizations |
-| Vendor franchises, leads and analytics | No | No | Own active organizations only | All active organizations |
-| Internal leads, visits and franchise management | No | No | No | Full access |
-| Django `/admin/` | No | No | No | Staff permissions apply |
+| Area | Guest | User | Vendor member | Organization admin | Organization owner | Staff |
+| --- | --- | --- | --- | --- | --- | --- |
+| Public franchise and content pages | View | View | View | View | View | View |
+| Request franchise information | Create | Create | Create | Create | Create | Create |
+| Profile, saved list and comparison | Login required | Own data | Own data | Own data | Own data | Own data |
+| Vendor dashboard and own organization data | No | No | View | View | View | All organizations |
+| Own organization's lead inbox and statuses | No | No | Manage | Manage | Manage | All organizations |
+| Edit own franchise profile and media | No | No | Read only | Manage | Manage | Manage all |
+| View subscriptions for own franchises | No | No | View | View | View | View all |
+| Buy, change, extend or cancel a subscription | No | No | No | No | Manage | Manage all |
+| Global `/leads/`, visits and management tools | No | No | No | No | No | Full access |
+| Django `/admin/` | No | No | No | No | No | Staff permissions apply |
 
 Vendor access comes from an active `OrganizationMembership` in an active
 `Organization`. The editable profile `user_type` value is not an authorization
@@ -268,10 +270,17 @@ organization. Vendor pages:
 - `/vendor/franchises/<slug>/media/` - moderated gallery and documents;
 - `/manage/subscription-requests/` - staff approval of vendor requests.
 
-Owners and organization admins can start, extend, change or cancel a plan.
-Members have read-only access. Cancellation takes effect at the end of the paid
-period. Plans with Stripe Price IDs use hosted Stripe Checkout and Customer
-Portal. Plans without those IDs keep the manual staff-approved fallback.
+Only organization owners can start, extend, change or cancel a plan. Organization
+admins and members have read-only billing access. Cancellation takes effect at
+the end of the paid period. Plans with Stripe Price IDs use hosted Stripe
+Checkout and Customer Portal. Plans without those IDs keep the manual
+staff-approved fallback.
+
+Organization roles decide *who may perform an action*. The franchise plan decides
+*which product features are available*: Free masks lead contact details, Profil
+unlocks them, Promocja adds promotion and analytics, and Pro adds the broadest
+profile and reporting limits. A higher plan never grants organization-owner
+permissions.
 
 Plan capabilities are enforced server-side. They control description and file
 limits, lead contact access, analytics, website/documents visibility, list

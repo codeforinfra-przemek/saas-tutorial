@@ -52,6 +52,16 @@ SPECIALIST_AREAS = (
 )
 
 
+def get_subscription_mode(franchise, subscription):
+    if not subscription:
+        return "Free"
+    if subscription.stripe_subscription_id:
+        return "Stripe"
+    if franchise.slug.startswith("demo-"):
+        return "Demo"
+    return "Manualna"
+
+
 def investor_services_view(request):
     initial = {"service_type": request.GET.get("service", InvestorServiceRequest.SERVICE_LOCATION_REPORT)}
     specialist_area = request.GET.get("specialist", "")
@@ -151,6 +161,7 @@ def franchise_subscription_list_view(request):
                 "active_subscription": active_subscriptions.get(franchise.id),
                 "pending_request": pending_requests.get(franchise.id),
                 "can_manage": can_manage_franchise_billing(request.user, franchise),
+                "billing_mode": get_subscription_mode(franchise, subscriptions.get(franchise.id)),
             }
         )
     return render(
@@ -199,6 +210,7 @@ def franchise_subscription_detail_view(request, slug):
             "plans": plans,
             "duration_choices": FranchiseSubscriptionRequest.DURATION_CHOICES,
             "can_manage": can_manage_franchise_billing(request.user, franchise),
+            "billing_mode": get_subscription_mode(franchise, subscription),
         },
     )
 
@@ -383,6 +395,7 @@ def vendor_billing_view(request):
             "franchise": franchise,
             "subscription": subscriptions.get(franchise.pk),
             "can_manage": can_manage_franchise_billing(request.user, franchise),
+            "billing_mode": get_subscription_mode(franchise, subscriptions.get(franchise.pk)),
         }
         for franchise in franchises
     ]

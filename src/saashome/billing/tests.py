@@ -35,6 +35,11 @@ class FranchiseSubscriptionTests(TestCase):
             email="member@example.com",
             password="test-password",
         )
+        self.admin = user_model.objects.create_user(
+            username="admin",
+            email="admin@example.com",
+            password="test-password",
+        )
         self.staff = user_model.objects.create_user(
             username="staff",
             email="staff@example.com",
@@ -51,6 +56,11 @@ class FranchiseSubscriptionTests(TestCase):
             user=self.member,
             organization=self.organization,
             role=OrganizationMembership.ROLE_MEMBER,
+        )
+        OrganizationMembership.objects.create(
+            user=self.admin,
+            organization=self.organization,
+            role=OrganizationMembership.ROLE_ADMIN,
         )
         category = FranchiseCategory.objects.create(name="Food", slug="food")
         self.franchise = Franchise.objects.create(
@@ -81,12 +91,17 @@ class FranchiseSubscriptionTests(TestCase):
             },
         )
 
-    def test_owner_can_request_plan_but_member_cannot(self):
+    def test_only_owner_can_request_plan_changes(self):
         url = reverse(
             "billing:subscription_request",
             kwargs={"slug": self.franchise.slug, "action": "start"},
         )
         self.client.force_login(self.member)
+        response = self.client.post(url, {"plan": self.basic.pk, "duration_months": 1})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(FranchiseSubscriptionRequest.objects.exists())
+
+        self.client.force_login(self.admin)
         response = self.client.post(url, {"plan": self.basic.pk, "duration_months": 1})
         self.assertEqual(response.status_code, 403)
         self.assertFalse(FranchiseSubscriptionRequest.objects.exists())
@@ -154,6 +169,23 @@ class FranchiseSubscriptionTests(TestCase):
         self.assertTrue(subscription.cancel_at_period_end)
         self.assertTrue(franchise_has_feature(self.franchise, "can_view_leads"))
 
+    def test_manual_subscription_shows_separate_owner_actions(self):
+        FranchiseSubscription.objects.create(
+            franchise=self.franchise,
+            plan=self.basic,
+            status=FranchiseSubscription.STATUS_ACTIVE,
+            starts_at=timezone.now(),
+            ends_at=timezone.now() + timedelta(days=30),
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse("billing:subscription_detail", args=[self.franchise.slug]))
+
+        self.assertContains(response, "Przedłuż")
+        self.assertContains(response, "Zmień plan")
+        self.assertContains(response, "Anuluj odnowienie")
+        self.assertContains(response, "Manualna")
+
 
 class StripeBillingTests(TestCase):
     def setUp(self):
@@ -166,6 +198,11 @@ class StripeBillingTests(TestCase):
         self.member = user_model.objects.create_user(
             username="stripe-member",
             email="stripe-member@example.com",
+            password="test-password",
+        )
+        self.admin = user_model.objects.create_user(
+            username="stripe-admin",
+            email="stripe-admin@example.com",
             password="test-password",
         )
         self.organization = Organization.objects.create(
@@ -182,6 +219,11 @@ class StripeBillingTests(TestCase):
             user=self.member,
             organization=self.organization,
             role=OrganizationMembership.ROLE_MEMBER,
+        )
+        OrganizationMembership.objects.create(
+            user=self.admin,
+            organization=self.organization,
+            role=OrganizationMembership.ROLE_ADMIN,
         )
         category = FranchiseCategory.objects.create(name="Stripe Food", slug="stripe-food")
         self.franchise = Franchise.objects.create(
@@ -209,11 +251,15 @@ class StripeBillingTests(TestCase):
         )
 
     @patch("billing.views.create_checkout_session", return_value="https://checkout.stripe.test/session")
-    def test_only_owner_or_admin_can_start_checkout(self, create_checkout):
+    def test_only_owner_can_start_checkout(self, create_checkout):
         url = reverse("billing:checkout", args=[self.plan.slug])
         payload = {"franchise_id": self.franchise.pk, "billing_interval": "monthly"}
 
         self.client.force_login(self.member)
+        self.assertEqual(self.client.post(url, payload).status_code, 403)
+        create_checkout.assert_not_called()
+
+        self.client.force_login(self.admin)
         self.assertEqual(self.client.post(url, payload).status_code, 403)
         create_checkout.assert_not_called()
 

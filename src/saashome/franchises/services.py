@@ -1,10 +1,10 @@
-from accounts.permissions import can_manage_franchise_billing
+from accounts.permissions import can_manage_franchise_profile
 
 from .models import FRANCHISE_VENDOR_EDITABLE_FIELDS, FranchiseUpdateRequest
 
 
 def user_can_manage_franchise(user, franchise):
-    return can_manage_franchise_billing(user, franchise)
+    return can_manage_franchise_profile(user, franchise)
 
 
 def create_update_request_from_franchise(franchise, user, save=True):

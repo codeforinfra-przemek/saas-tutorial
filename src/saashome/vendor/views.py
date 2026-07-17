@@ -7,7 +7,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from accounts.permissions import can_manage_franchise_billing, staff_required, vendor_required
+from accounts.models import OrganizationMembership
+from accounts.permissions import can_manage_franchise_profile, staff_required, vendor_required
 from accounts.services import get_user_franchises, get_user_organizations
 from billing.services import (
     franchise_has_feature,
@@ -40,7 +41,21 @@ def vendor_dashboard_view(request):
     franchise_ids = list(franchises.values_list("id", flat=True))
     since_30d = timezone.now() - timedelta(days=30)
 
-    organization_rows = [{"organization": organization} for organization in organizations]
+    membership_roles = {
+        membership.organization_id: membership.get_role_display()
+        for membership in OrganizationMembership.objects.filter(
+            user=request.user,
+            organization__in=organizations,
+            is_active=True,
+        )
+    }
+    organization_rows = [
+        {
+            "organization": organization,
+            "role_label": "Administrator" if request.user.is_staff else membership_roles.get(organization.id, "-"),
+        }
+        for organization in organizations
+    ]
     plans_by_franchise = get_franchise_plan_map(franchises)
     subscriptions_by_franchise = get_active_franchise_subscription_map(franchises)
     lead_contact_franchise_ids = [
@@ -165,7 +180,7 @@ def vendor_franchise_edit_view(request, slug):
     franchise = get_object_or_404(franchises, slug=slug)
     organization = franchise.organization
     plan = get_franchise_plan(franchise)
-    can_manage = can_manage_franchise_billing(request.user, franchise)
+    can_manage = can_manage_franchise_profile(request.user, franchise)
 
     submitted_request = FranchiseUpdateRequest.objects.filter(
         franchise=franchise,
@@ -248,7 +263,7 @@ def vendor_franchise_update_submit_view(request, pk):
     manageable_franchises = get_user_franchises(request.user)
     if not manageable_franchises.filter(pk=update_request.franchise_id).exists():
         return redirect("vendor:franchises")
-    if not can_manage_franchise_billing(request.user, update_request.franchise):
+    if not can_manage_franchise_profile(request.user, update_request.franchise):
         messages.error(request, "Tylko właściciel lub administrator organizacji może wysłać zmiany.")
         return redirect("vendor:franchise_edit", slug=update_request.franchise.slug)
     if update_request.status in (
@@ -285,7 +300,7 @@ def vendor_lead_list_view(request):
     context = {
         "site_name": "SaaS Home",
         "page_title": "Lead Inbox",
-        "active_page": "vendor",
+        "active_page": "vendor_leads",
         "rows": rows,
         "franchises": franchises,
         "status_choices": LeadStatusForm.VENDOR_STATUS_CHOICES,
@@ -323,7 +338,7 @@ def vendor_lead_detail_view(request, pk):
     context = {
         "site_name": "SaaS Home",
         "page_title": "Lead details",
-        "active_page": "vendor",
+        "active_page": "vendor_leads",
         "lead": lead,
         "can_view_contact": can_view_contact,
         "form": form,
@@ -336,7 +351,7 @@ def vendor_lead_detail_view(request, pk):
 def vendor_franchise_media_view(request, slug):
     franchise = get_object_or_404(get_user_franchises(request.user), slug=slug)
     plan = get_franchise_plan(franchise)
-    can_manage = can_manage_franchise_billing(request.user, franchise)
+    can_manage = can_manage_franchise_profile(request.user, franchise)
     images = franchise.assets.filter(asset_type=FranchiseAsset.TYPE_IMAGE)
     documents = franchise.assets.filter(asset_type=FranchiseAsset.TYPE_DOCUMENT)
     image_usage = images.exclude(status=FranchiseAsset.STATUS_REJECTED).count()
@@ -406,7 +421,7 @@ def vendor_franchise_media_view(request, slug):
 @require_POST
 def vendor_franchise_asset_delete_view(request, slug, pk):
     franchise = get_object_or_404(get_user_franchises(request.user), slug=slug)
-    if not can_manage_franchise_billing(request.user, franchise):
+    if not can_manage_franchise_profile(request.user, franchise):
         return redirect("vendor:franchise_media", slug=slug)
     asset = get_object_or_404(FranchiseAsset, pk=pk, franchise=franchise)
     asset.file.delete(save=False)
