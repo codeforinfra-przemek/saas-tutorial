@@ -299,6 +299,9 @@ class ExecutorAgent:
                     max_api_calls=max_extractor_api_calls,
                     cached_documents=cached_documents,
                     cached_document_search_id=prior_search.search_id,
+                    cached_document_origin=(
+                        "the exact predecessor Extractor artifact recorded by Executor"
+                    ),
                 )
             except ExtractorProviderError as exc:
                 raise ExecutorProviderError(

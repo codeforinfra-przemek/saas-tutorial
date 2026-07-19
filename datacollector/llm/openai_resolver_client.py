@@ -119,15 +119,26 @@ class OpenAIResolverClient:
                     "allowed_actions": [
                         action.value for action in item.allowed_actions
                     ],
-                    "candidate_source_ids": follow_up_by_id[
-                        item.follow_up_id
-                    ].candidate_source_ids,
-                    "retry_source_ids": follow_up_by_id[
-                        item.follow_up_id
-                    ].retry_source_ids,
-                    "reextract_source_ids": follow_up_by_id[
-                        item.follow_up_id
-                    ].reextract_source_ids,
+                    "candidate_source_ids": (
+                        follow_up_by_id[item.follow_up_id].candidate_source_ids
+                        if item.follow_up_id in follow_up_by_id
+                        else (
+                            item.selected_source_ids
+                            if "extract_known_source"
+                            in {action.value for action in item.allowed_actions}
+                            else []
+                        )
+                    ),
+                    "retry_source_ids": (
+                        follow_up_by_id[item.follow_up_id].retry_source_ids
+                        if item.follow_up_id in follow_up_by_id
+                        else []
+                    ),
+                    "reextract_source_ids": (
+                        follow_up_by_id[item.follow_up_id].reextract_source_ids
+                        if item.follow_up_id in follow_up_by_id
+                        else []
+                    ),
                     "existing_queries": item.queries,
                     "minimum_additional_sources": (
                         item.minimum_additional_sources

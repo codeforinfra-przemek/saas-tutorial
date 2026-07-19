@@ -18,11 +18,15 @@ from datacollector.schemas import (
     CheckerModelSemanticFit,
     CheckerModelSourceSupport,
     CheckerModelVerdict,
+    CheckerNextAction,
+    CheckerFollowUpReason,
+    ResearchPlan,
     ResolverAction,
     ResolverDraft,
     ResolverItemDraft,
     ResolverResults,
     ResolverStrategySource,
+    SourceType,
     TokenUsage,
 )
 from datacollector.tests import test_checker as checker_fixtures
@@ -215,6 +219,141 @@ class ResolverAgentTests(TestCase):
             ResolverAction.REEXTRACT_EXISTING,
         )
         self.assertEqual(len(results.execution_batches), 1)
+
+    def test_ready_selected_scope_schedules_next_plan_batch(self):
+        second_task = checker_fixtures.CheckerAgentTests.second_task
+        plan_payload = self.plan.model_dump(mode="python")
+        plan_payload["tasks"] = [self.plan.tasks[0], second_task]
+        expanded_plan = ResearchPlan.model_validate(plan_payload)
+        expanded_search = self.search_results.model_copy(
+            update={"unselected_task_ids": [second_task.task_id]}
+        )
+        checker = CheckerAgent(
+            checker_fixtures.FixtureCheckerLLM(
+                checker_fixtures.CheckerAgentTests._accepted_draft
+            )
+        ).create_check_results(
+            expanded_plan,
+            expanded_search,
+            self.extraction_results,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            search_sha256=checker_fixtures.SEARCH_SHA256,
+            extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            search_reference=checker_fixtures.SEARCH_REFERENCE,
+            iteration=4,
+        )
+
+        self.assertTrue(checker.selected_scope_ready)
+        self.assertEqual(
+            checker.recommended_next_action,
+            CheckerNextAction.RESEARCH_NEXT_BATCH,
+        )
+        results = ResolverAgent().create_resolution_results(
+            expanded_plan,
+            expanded_search,
+            self.extraction_results,
+            checker,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            search_sha256=checker_fixtures.SEARCH_SHA256,
+            extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            check_sha256=CHECK_SHA256,
+            check_reference=CHECK_REFERENCE,
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            search_reference=checker_fixtures.SEARCH_REFERENCE,
+            extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            iteration=4,
+            max_search_tasks=1,
+        )
+
+        self.assertEqual(results.search_task_ids, [second_task.task_id])
+        self.assertEqual(len(results.work_items), 1)
+        self.assertEqual(
+            results.work_items[0].reason,
+            CheckerFollowUpReason.SCOPE_NOT_STARTED,
+        )
+        self.assertEqual(
+            results.work_items[0].selected_action,
+            ResolverAction.SEARCH_NEW_SOURCE,
+        )
+        self.assertEqual(results.execution_source_ids, [])
+        self.assertTrue(
+            any("previously unevaluated" in warning for warning in results.warnings)
+        )
+
+    def test_ready_selected_scope_processes_known_source_before_new_tasks(self):
+        source = checker_fixtures.CheckerAgentTests._make_source(
+            4, SourceType.OFFICIAL
+        )
+        action = self.search_results.actions[0].model_copy(
+            update={
+                "source_urls": [
+                    *self.search_results.actions[0].source_urls,
+                    source.canonical_url,
+                ]
+            }
+        )
+        task_result = self.search_results.task_results[0].model_copy(
+            update={
+                "source_ids": [
+                    *self.search_results.task_results[0].source_ids,
+                    source.source_id,
+                ]
+            }
+        )
+        expanded_search = self.search_results.model_copy(
+            update={
+                "actions": [action],
+                "sources": [*self.search_results.sources, source],
+                "task_results": [task_result],
+            }
+        )
+        partial_extraction = self.extraction_results.model_copy(
+            update={"unselected_source_ids": [source.source_id]}
+        )
+        checker = CheckerAgent(
+            checker_fixtures.FixtureCheckerLLM(
+                checker_fixtures.CheckerAgentTests._accepted_draft
+            )
+        ).create_check_results(
+            self.plan,
+            expanded_search,
+            partial_extraction,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            search_sha256=checker_fixtures.SEARCH_SHA256,
+            extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            search_reference=checker_fixtures.SEARCH_REFERENCE,
+            iteration=4,
+        )
+
+        self.assertTrue(checker.selected_scope_ready)
+        self.assertEqual(checker.unevaluated_source_ids, [source.source_id])
+        results = ResolverAgent().create_resolution_results(
+            self.plan,
+            expanded_search,
+            partial_extraction,
+            checker,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            search_sha256=checker_fixtures.SEARCH_SHA256,
+            extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            check_sha256=CHECK_SHA256,
+            check_reference=CHECK_REFERENCE,
+            iteration=4,
+        )
+
+        self.assertEqual(results.search_task_ids, [])
+        self.assertEqual(results.execution_source_ids, [source.source_id])
+        self.assertEqual(
+            results.work_items[0].selected_action,
+            ResolverAction.EXTRACT_KNOWN_SOURCE,
+        )
+        self.assertEqual(
+            results.work_items[0].reason,
+            CheckerFollowUpReason.SOURCE_NOT_EVALUATED,
+        )
 
     def test_known_candidate_is_preferred_over_retry_and_reextraction(self):
         follow_up = self.checker_results.follow_up_tasks[0]

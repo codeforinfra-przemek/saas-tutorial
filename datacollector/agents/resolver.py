@@ -12,6 +12,8 @@ from uuid import uuid4
 from ..llm.protocol import ResolverLLM, ResolverProviderError
 from ..schemas import (
     AgentIterationUsage,
+    CheckerFollowUpAction,
+    CheckerFollowUpReason,
     CheckerFollowUpTask,
     CheckerIssueCode,
     CheckerNextAction,
@@ -115,20 +117,41 @@ class ResolverAgent:
             max_search_tasks=max_search_tasks,
             max_queries_per_item=max_queries_per_item,
         )
-        checker_order = {
-            item.follow_up_id: index
-            for index, item in enumerate(checker_results.follow_up_tasks)
-        }
-        ordered_follow_ups = sorted(
-            checker_results.follow_up_tasks,
-            key=lambda item: (
-                -PRIORITY_ORDER[item.priority],
-                checker_order[item.follow_up_id],
-            ),
+        expanding_scope = (
+            checker_results.recommended_next_action
+            == CheckerNextAction.RESEARCH_NEXT_BATCH
         )
-        selected_follow_ups = ordered_follow_ups[:max_follow_ups]
+        if expanding_scope:
+            ordered_follow_ups = self._build_scope_expansion_follow_ups(
+                plan,
+                search_results,
+                checker_results,
+            )
+            expansion_limit = min(
+                max_follow_ups,
+                (
+                    max_source_actions
+                    if checker_results.unevaluated_source_ids
+                    else max_search_tasks
+                ),
+            )
+            selected_follow_ups = ordered_follow_ups[:expansion_limit]
+        else:
+            checker_order = {
+                item.follow_up_id: index
+                for index, item in enumerate(checker_results.follow_up_tasks)
+            }
+            ordered_follow_ups = sorted(
+                checker_results.follow_up_tasks,
+                key=lambda item: (
+                    -PRIORITY_ORDER[item.priority],
+                    checker_order[item.follow_up_id],
+                ),
+            )
+            selected_follow_ups = ordered_follow_ups[:max_follow_ups]
         deferred_follow_up_ids = [
-            item.follow_up_id for item in ordered_follow_ups[max_follow_ups:]
+            item.follow_up_id
+            for item in ordered_follow_ups[len(selected_follow_ups):]
         ]
         available_source_ids = self._available_source_ids(
             selected_follow_ups,
@@ -143,11 +166,34 @@ class ResolverAgent:
         )
 
         warnings: list[str] = []
+        if expanding_scope:
+            if checker_results.unevaluated_source_ids:
+                warnings.append(
+                    f"Scheduled {len(selected_follow_ups)} known but unevaluated "
+                    "source(s) before expanding to new plan tasks."
+                )
+            else:
+                warnings.append(
+                    f"Scheduled {len(selected_follow_ups)} previously unevaluated "
+                    "plan task(s) as the next bounded research batch."
+                )
         if deferred_follow_up_ids:
-            warnings.append(
-                f"Deferred {len(deferred_follow_up_ids)} lower-priority follow-up "
-                "task(s) because max_follow_ups was reached."
-            )
+            if expanding_scope:
+                if checker_results.unevaluated_source_ids:
+                    warnings.append(
+                        f"Deferred {len(deferred_follow_up_ids)} remaining known "
+                        "source(s) to later scope-expansion batches."
+                    )
+                else:
+                    warnings.append(
+                        f"Deferred {len(deferred_follow_up_ids)} remaining plan "
+                        "task(s) to later scope-expansion batches."
+                    )
+            else:
+                warnings.append(
+                    f"Deferred {len(deferred_follow_up_ids)} lower-priority follow-up "
+                    "task(s) because max_follow_ups was reached."
+                )
         usage: list[AgentIterationUsage] = []
         failed_attempts: list[ResolverAttemptFailure] = []
         generated_by = "deterministic"
@@ -351,6 +397,100 @@ class ResolverAgent:
         ]
 
     @staticmethod
+    def _build_scope_expansion_follow_ups(
+        plan: ResearchPlan,
+        search_results: SearchResults,
+        checker_results: CheckerResults,
+    ) -> list[CheckerFollowUpTask]:
+        task_by_id = {task.task_id: task for task in plan.tasks}
+        if checker_results.unevaluated_source_ids:
+            source_by_id = {
+                source.source_id: source for source in search_results.sources
+            }
+            selected_task_ids = set(checker_results.selected_task_ids)
+            follow_ups: list[CheckerFollowUpTask] = []
+            for source_id in checker_results.unevaluated_source_ids:
+                source = source_by_id[source_id]
+                task_id = next(
+                    (
+                        item
+                        for item in source.task_ids
+                        if item in selected_task_ids
+                    ),
+                    source.task_ids[0],
+                )
+                task = task_by_id[task_id]
+                follow_ups.append(
+                    CheckerFollowUpTask(
+                        follow_up_id=_stable_id(
+                            "followup", "source-expansion", source.source_id
+                        ),
+                        task_id=task.task_id,
+                        target_field="__source_scope__",
+                        priority=task.priority,
+                        reason=CheckerFollowUpReason.SOURCE_NOT_EVALUATED,
+                        question=(
+                            "Extract and evaluate the known Searcher source for "
+                            f"task '{task.title}': {source.canonical_url}"
+                        ),
+                        required_source_types=[source.source_type],
+                        action=CheckerFollowUpAction.EXTRACT_KNOWN_SOURCE,
+                        candidate_source_ids=[source.source_id],
+                        minimum_additional_sources=0,
+                        requires_independent_source=False,
+                        suggested_queries=_deduplicate(task.search_queries)[:10],
+                        completion_criteria=(
+                            "Complete when the known source has a retrieval and "
+                            "extraction result and a new Checker pass evaluates it."
+                        ),
+                    )
+                )
+            return follow_ups
+
+        follow_ups: list[CheckerFollowUpTask] = []
+        for task_id in checker_results.unevaluated_task_ids:
+            task = task_by_id[task_id]
+            queries = _deduplicate(task.search_queries)
+            if not queries:
+                queries = [
+                    f'"{plan.planner_input.brand_name}" {task.title} '
+                    f"{plan.planner_input.target_country}"
+                ]
+            follow_ups.append(
+                CheckerFollowUpTask(
+                    follow_up_id=_stable_id(
+                        "followup", "scope-expansion", task.task_id
+                    ),
+                    task_id=task.task_id,
+                    target_field="__task_scope__",
+                    priority=task.priority,
+                    reason=CheckerFollowUpReason.SCOPE_NOT_STARTED,
+                    question=(
+                        "Research the previously unevaluated plan task: "
+                        f"{task.question}"
+                    ),
+                    required_source_types=task.preferred_source_types,
+                    related_claim_ids=[],
+                    supporting_claim_ids=[],
+                    action=CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE,
+                    candidate_source_ids=[],
+                    retry_source_ids=[],
+                    reextract_source_ids=[],
+                    minimum_additional_sources=task.min_sources,
+                    requires_independent_source=(
+                        task.requires_independent_corroboration
+                    ),
+                    suggested_queries=queries[:10],
+                    completion_criteria=(
+                        "Complete when this plan task has been searched, its mapped "
+                        "sources have been extracted, and a new Checker pass has "
+                        "evaluated every target field."
+                    ),
+                )
+            )
+        return follow_ups
+
+    @staticmethod
     def _field_issue_codes(
         checker_results: CheckerResults,
     ) -> dict[tuple[str, str], set[CheckerIssueCode]]:
@@ -386,6 +526,43 @@ class ResolverAgent:
             return selected
 
         for sequence, follow_up in enumerate(follow_ups, start=1):
+            if follow_up.reason == CheckerFollowUpReason.SCOPE_NOT_STARTED:
+                queries = _deduplicate(follow_up.suggested_queries)[
+                    :max_queries_per_item
+                ]
+                items.append(
+                    ResolverWorkItem(
+                        resolution_item_id=_stable_id(
+                            "resolution-item", follow_up.follow_up_id
+                        ),
+                        follow_up_id=follow_up.follow_up_id,
+                        task_id=follow_up.task_id,
+                        target_field=follow_up.target_field,
+                        priority=follow_up.priority,
+                        reason=follow_up.reason,
+                        sequence=sequence,
+                        allowed_actions=[ResolverAction.SEARCH_NEW_SOURCE],
+                        selected_action=ResolverAction.SEARCH_NEW_SOURCE,
+                        selected_source_ids=[],
+                        fallback_source_ids=[],
+                        queries=queries,
+                        related_claim_ids=[],
+                        supporting_claim_ids=[],
+                        minimum_additional_sources=(
+                            follow_up.minimum_additional_sources
+                        ),
+                        requires_independent_source=(
+                            follow_up.requires_independent_source
+                        ),
+                        completion_criteria=follow_up.completion_criteria,
+                        rationale=(
+                            "The prior selected scope passed its local gate; the next "
+                            "plan task requires a bounded new-source search."
+                        ),
+                    )
+                )
+                allocated_search_tasks.append(follow_up.task_id)
+                continue
             field_issues = issue_codes.get(
                 (follow_up.task_id, follow_up.target_field), set()
             )
@@ -657,14 +834,26 @@ class ResolverAgent:
             raise ResolverValidationError(
                 "Resolver requires a successful paid Checker artifact."
             )
-        if (
-            checker_results.passed
-            or checker_results.recommended_next_action
-            != CheckerNextAction.RESOLVE_GAPS
-            or not checker_results.follow_up_tasks
-        ):
+        repair_ready = (
+            not checker_results.passed
+            and checker_results.recommended_next_action
+            == CheckerNextAction.RESOLVE_GAPS
+            and bool(checker_results.follow_up_tasks)
+        )
+        expansion_ready = (
+            not checker_results.passed
+            and checker_results.recommended_next_action
+            == CheckerNextAction.RESEARCH_NEXT_BATCH
+            and checker_results.selected_scope_ready
+            and bool(
+                checker_results.unevaluated_task_ids
+                or checker_results.unevaluated_source_ids
+            )
+        )
+        if not (repair_ready or expansion_ready):
             raise ResolverValidationError(
-                "Checker artifact does not contain unresolved work for Resolver."
+                "Checker artifact contains neither repair work nor a ready "
+                "scope-expansion batch for Resolver."
             )
         if (
             plan.run_id != checker_results.plan_run_id

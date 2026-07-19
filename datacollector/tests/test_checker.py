@@ -28,6 +28,7 @@ from datacollector.schemas import (
     CheckerNextAction,
     CheckerSeverity,
     CheckerScoreBreakdown,
+    CheckerSemanticFit,
     CheckerUnsafeCategory,
     CheckerUnsafeItemDraft,
     CheckerVerdict,
@@ -35,6 +36,7 @@ from datacollector.schemas import (
     ExtractorClaimDraft,
     ExtractorDraft,
     PlannerInput,
+    RawExtractionClaim,
     ResearchPlan,
     SearchAction,
     SearchLimits,
@@ -703,12 +705,78 @@ class CheckerAgentTests(TestCase):
 
         self.assertGreaterEqual(results.quality_score, results.quality_threshold)
         self.assertFalse(results.scope_complete)
+        self.assertTrue(results.selected_scope_ready)
         self.assertEqual(results.unevaluated_task_ids, [self.second_task.task_id])
         self.assertFalse(results.passed)
         self.assertEqual(
             results.recommended_next_action,
-            CheckerNextAction.RESOLVE_GAPS,
+            CheckerNextAction.RESEARCH_NEXT_BATCH,
         )
+
+    def test_local_unit_format_contract_rejects_store_equipment_mapping(self):
+        claim = RawExtractionClaim(
+            claim_id="claim-aaaaaaaaaaaaaaaa",
+            task_id="task-offer-format",
+            target_field="offer.unit_formats",
+            value_text="umeblowany i w pełni wyposażony sklep",
+            citation_ids=["citation-aaaaaaaaaaaaaaaa"],
+            confidence=ExtractionConfidence.HIGH,
+        )
+        draft = CheckerDraft(
+            decisions=[
+                CheckerClaimDecisionDraft(
+                    claim_id=claim.claim_id,
+                    verdict=CheckerModelVerdict.ACCEPTED,
+                    semantic_fit=CheckerModelSemanticFit.DIRECT,
+                    source_support=CheckerModelSourceSupport.SUFFICIENT,
+                    rationale="The fixture deliberately accepts a bad field mapping.",
+                )
+            ]
+        )
+
+        decisions, _, _ = CheckerAgent._ground_draft(
+            draft,
+            [claim],
+            {"citation-aaaaaaaaaaaaaaaa": "source-aaaaaaaaaaaaaaaa"},
+            ["source-aaaaaaaaaaaaaaaa"],
+        )
+
+        self.assertEqual(decisions[0].verdict, CheckerVerdict.REJECTED)
+        self.assertEqual(decisions[0].semantic_fit, CheckerSemanticFit.MISMATCH)
+        self.assertIn(
+            CheckerIssueCode.UNSUPPORTED_FIELD_MAPPING,
+            decisions[0].issue_codes,
+        )
+
+    def test_local_unit_format_contract_allows_transaction_structure(self):
+        claim = RawExtractionClaim(
+            claim_id="claim-bbbbbbbbbbbbbbbb",
+            task_id="task-offer-format",
+            target_field="offer.unit_formats",
+            value_text="model single-unit obejmujący jeden sklep",
+            citation_ids=["citation-bbbbbbbbbbbbbbbb"],
+            confidence=ExtractionConfidence.HIGH,
+        )
+        draft = CheckerDraft(
+            decisions=[
+                CheckerClaimDecisionDraft(
+                    claim_id=claim.claim_id,
+                    verdict=CheckerModelVerdict.ACCEPTED,
+                    semantic_fit=CheckerModelSemanticFit.DIRECT,
+                    source_support=CheckerModelSourceSupport.SUFFICIENT,
+                    rationale="The quote identifies a supported transaction structure.",
+                )
+            ]
+        )
+
+        decisions, _, _ = CheckerAgent._ground_draft(
+            draft,
+            [claim],
+            {"citation-bbbbbbbbbbbbbbbb": "source-bbbbbbbbbbbbbbbb"},
+            ["source-bbbbbbbbbbbbbbbb"],
+        )
+
+        self.assertEqual(decisions[0].verdict, CheckerVerdict.ACCEPTED)
 
     def test_invalid_provider_claim_coverage_retains_usage_as_failed_attempt(self):
         def invalid_draft(extraction_results):

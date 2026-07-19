@@ -28,10 +28,10 @@ SEARCHER_SCHEMA_VERSION = "1.1.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v3"
 EXTRACTOR_SCHEMA_VERSION = "1.0.0"
 EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
-CHECKER_SCHEMA_VERSION = "1.1.0"
-CHECKER_PROMPT_VERSION = "checker-system-v2"
+CHECKER_SCHEMA_VERSION = "1.2.0"
+CHECKER_PROMPT_VERSION = "checker-system-v3"
 CHECKER_SCORING_VERSION = "checker-scoring-v2"
-RESOLVER_SCHEMA_VERSION = "1.0.0"
+RESOLVER_SCHEMA_VERSION = "1.1.0"
 RESOLVER_PROMPT_VERSION = "resolver-system-v1"
 EXECUTOR_SCHEMA_VERSION = "1.0.0"
 
@@ -2413,6 +2413,8 @@ class CheckerFollowUpReason(StrEnum):
     NEEDS_CORROBORATION = "needs_corroboration"
     RESOLVE_CONTRADICTION = "resolve_contradiction"
     SOURCE_NOT_ACCESSIBLE = "source_not_accessible"
+    SOURCE_NOT_EVALUATED = "source_not_evaluated"
+    SCOPE_NOT_STARTED = "scope_not_started"
 
 
 class CheckerFollowUpRoute(StrEnum):
@@ -2434,6 +2436,7 @@ class CheckerNextAction(StrEnum):
     RUN_PAID_CHECKER = "run_paid_checker"
     RETRY_CHECKER = "retry_checker"
     RESOLVE_GAPS = "resolve_gaps"
+    RESEARCH_NEXT_BATCH = "research_next_batch"
     HUMAN_REVIEW = "human_review"
 
 
@@ -2639,8 +2642,10 @@ class CheckerAttemptFailure(ClosedModel):
 class CheckerResults(ClosedModel):
     """Auditable quality decision consumed by Resolver and human review."""
 
-    schema_version: Literal["1.0.0", "1.1.0"] = CHECKER_SCHEMA_VERSION
-    prompt_version: Literal["checker-system-v1", "checker-system-v2"] = (
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = CHECKER_SCHEMA_VERSION
+    prompt_version: Literal[
+        "checker-system-v1", "checker-system-v2", "checker-system-v3"
+    ] = (
         CHECKER_PROMPT_VERSION
     )
     check_id: str
@@ -2669,6 +2674,7 @@ class CheckerResults(ClosedModel):
     unevaluated_task_ids: list[str]
     unevaluated_source_ids: list[str]
     scope_complete: bool
+    selected_scope_ready: bool = False
     source_assessments: list[CheckerSourceAssessment]
     claim_decisions: list[CheckerClaimDecision]
     contradictions: list[CheckerContradiction]
@@ -3046,15 +3052,23 @@ class CheckerResults(ClosedModel):
             item.severity in {CheckerSeverity.HIGH, CheckerSeverity.CRITICAL}
             for item in self.unsafe_items
         )
-        expected_passed = (
+        expected_selected_scope_ready = (
             self.generated_by == "openai"
             and not self.failed_attempts
             and self.quality_score >= self.quality_threshold
-            and self.scope_complete
             and not self.critical_missing_fields
-            and not self.unevaluated_critical_fields
             and not self.contradictions
             and not blocking_unsafe
+        )
+        if (
+            self.schema_version == "1.2.0"
+            and self.selected_scope_ready != expected_selected_scope_ready
+        ):
+            raise ValueError("Checker selected-scope ready flag is inconsistent.")
+        expected_passed = (
+            expected_selected_scope_ready
+            and self.scope_complete
+            and not self.unevaluated_critical_fields
         )
         if self.passed != expected_passed:
             raise ValueError("Checker pass flag is inconsistent with quality gates.")
@@ -3090,6 +3104,12 @@ class CheckerResults(ClosedModel):
             expected_action = CheckerNextAction.RETRY_CHECKER
         elif self.passed:
             expected_action = CheckerNextAction.HUMAN_REVIEW
+        elif (
+            self.schema_version == "1.2.0"
+            and self.selected_scope_ready
+            and (self.unevaluated_task_ids or self.unevaluated_source_ids)
+        ):
+            expected_action = CheckerNextAction.RESEARCH_NEXT_BATCH
         else:
             expected_action = CheckerNextAction.RESOLVE_GAPS
         if self.recommended_next_action != expected_action:
@@ -3241,7 +3261,7 @@ class ResolverAttemptFailure(ClosedModel):
 class ResolverResults(ClosedModel):
     """Bounded repair plan consumed by the next Searcher/Extractor round."""
 
-    schema_version: Literal["1.0.0"] = RESOLVER_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = RESOLVER_SCHEMA_VERSION
     prompt_version: Literal["resolver-system-v1"] = RESOLVER_PROMPT_VERSION
     resolution_id: str
     plan_run_id: str

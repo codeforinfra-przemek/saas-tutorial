@@ -861,6 +861,7 @@ class ExtractorAgent:
         max_api_calls: int = 5,
         cached_documents: list[SourceDocument] | None = None,
         cached_document_search_id: str | None = None,
+        cached_document_origin: str = "a prior Extractor artifact",
     ) -> ExtractionResults:
         self._validate_inputs(
             plan,
@@ -885,6 +886,11 @@ class ExtractorAgent:
             raise ExtractorValidationError("Plan artifact reference cannot be blank.")
         if self.llm is not None and not self.llm.model_name.strip():
             raise ExtractorValidationError("Paid Extractor model name cannot be blank.")
+        cached_document_origin = cached_document_origin.strip()
+        if not cached_document_origin or len(cached_document_origin) > 200:
+            raise ExtractorValidationError(
+                "Extractor cached-document origin must be 1 to 200 characters."
+            )
         requested = _deduplicate(requested_source_ids or [])
         selected_sources = _select_sources(search_results, requested, source_limit)
         selected_source_ids = [source.source_id for source in selected_sources]
@@ -987,13 +993,13 @@ class ExtractorAgent:
         cached_terminal_count = len(cache) - cached_parsed_count
         if cached_parsed_count:
             warnings.append(
-                f"Reused {cached_parsed_count} matching document(s) from a prior free "
-                "Extractor artifact; no network request was repeated for them."
+                f"Reused {cached_parsed_count} matching document(s) from "
+                f"{cached_document_origin}; no network request was repeated for them."
             )
         if cached_terminal_count:
             warnings.append(
                 f"Reused {cached_terminal_count} terminal retrieval result(s) from "
-                "a prior free Extractor artifact; anti-bot/access-denied/not-found/"
+                f"{cached_document_origin}; anti-bot/access-denied/not-found/"
                 "unsupported sources were not fetched again. Use a new iteration "
                 "to retry them."
             )

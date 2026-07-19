@@ -159,6 +159,16 @@ class ExecutorAgentTests(TestCase):
             execution.batch_results[0].status,
             ExecutorBatchStatus.COMPLETED,
         )
+        self.assertTrue(
+            any(
+                "exact predecessor Extractor artifact recorded by Executor"
+                in warning
+                for warning in execution.warnings
+            )
+        )
+        self.assertFalse(
+            any("prior free Extractor artifact" in warning for warning in execution.warnings)
+        )
 
     def test_paid_search_batch_uses_resolver_query_and_adds_new_source(self):
         original_item = self.resolution.work_items[0]

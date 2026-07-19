@@ -515,6 +515,7 @@ class ExtractorAgentTests(TestCase):
             fetcher=never_fetcher,
             search_results=search_results,
             cached_documents=first_results.documents,
+            cached_document_origin="the exact predecessor Extractor artifact",
         )
 
         self.assertEqual(never_fetcher.calls, [])
@@ -525,6 +526,15 @@ class ExtractorAgentTests(TestCase):
             [item.passage_id for item in first_results.evidence_passages],
         )
         self.assertTrue(any("Reused 1 matching document" in item for item in cached_results.warnings))
+        self.assertTrue(
+            any(
+                "the exact predecessor Extractor artifact" in item
+                for item in cached_results.warnings
+            )
+        )
+        self.assertFalse(
+            any("prior free Extractor" in item for item in cached_results.warnings)
+        )
 
     def test_failed_free_document_is_retried_instead_of_cached_for_paid_mode(self):
         source = self._source()

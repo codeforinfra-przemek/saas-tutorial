@@ -388,13 +388,16 @@ classification, completeness, deductions and the final score/pass gate; the
 model supplies bounded semantic-fit, support, contradiction and safety
 judgments.
 
-Checker contract `1.1.0` keeps semantic acceptance separate from source
+Checker contract `1.2.0` keeps semantic acceptance separate from source
 corroboration. A directly supported claim can therefore be `accepted` while its
 field remains `needs_corroboration`. Multi-valued fields with both supported and
 unresolved values use `partial`, so accepted evidence keeps partial quality
-credit. For document inventory, a page that only names a document can establish
-the stated title or existence, but receives `mentioned_not_obtained` until the
-actual current document is fetched and parsed.
+credit. A local field-contract guard prevents physical store descriptions such
+as "furnished and equipped" from satisfying `offer.unit_formats`; that field
+requires evidence of single-unit, multi-unit, area/master/subfranchise, renewal,
+transfer, or resale structure. For document inventory, a page that only names a
+document can establish the stated title or existence, but receives
+`mentioned_not_obtained` until the actual current document is fetched and parsed.
 
 Every unresolved field produces one Resolver-ready follow-up containing an
 action, known candidate/retry/re-extraction source IDs, unresolved and supporting
@@ -412,6 +415,12 @@ requires all critical fields, no unresolved contradiction or high/critical
 unsafe item, and a score at or above the Planner threshold before it can
 recommend `human_review`. A pass means ready for human review, never safe for
 automatic production import.
+
+`selected_scope_ready` applies the quality, critical-field, contradiction and
+safety gates to the tasks already evaluated without pretending the whole plan is
+complete. When that gate passes while plan tasks remain, Checker returns
+`recommended_next_action=research_next_batch`. This prevents an already
+satisfactory selected batch from being sent through repeated gap repair.
 
 Iteration 3 writes `check-r003-free.json` and `check-r003.json` beside the exact
 Extractor artifact. Results are immutable and the target is reserved before a
@@ -466,6 +475,15 @@ overruns and retains the deterministic executable strategy as an explicit
 fallback. Iteration 5 writes `resolution-r005-free.json` and
 `resolution-r005.json` immutably beside the Checker artifact.
 
+Resolver also accepts `research_next_batch`. In that mode it selects the next
+known sources from `unevaluated_source_ids` first, bounded by
+`--max-source-actions`. Once those are exhausted it selects the next plan-ordered
+slice from `unevaluated_task_ids`, bounded by both `--max-follow-ups` and
+`--max-search-tasks`, and emits mandatory `search_new_source` work. Remaining
+sources or plan tasks are recorded as deferred scope work. Executor then uses its
+immutable merge path to add the new task, source, document, claim and usage state
+to the exact predecessor artifacts.
+
 `retry_retrieval` is a plan for the next Extractor round, not proof of a completed
 download. Likewise, `extract_known_source` means the source is already known to
 Searcher but has not yet been processed in the selected extraction scope. A new
@@ -518,6 +536,8 @@ cap. It writes the corresponding artifacts without `-free` and prints the exact
 next Checker command. `execution-r006.json` is the audit manifest: it records
 batch outcomes, retry/cache decisions, preserved predecessor states, pending
 human work, child-agent token usage, and exact hashes for every input and output.
+Cache warnings distinguish a same-iteration free retrieval artifact from the
+exact predecessor artifact reused by Executor.
 
 Run Checker on the paid merged extraction:
 
@@ -527,10 +547,11 @@ Run Checker on the paid merged extraction:
   --iteration 6
 ```
 
-If Checker still returns `resolve_gaps`, create another Resolver/Executor round.
-If it passes the selected batch but reports `unevaluated_tasks`, research the next
-plan batch before Normalizer. Normalizer is allowed only after the required plan
-scope has passed or a human explicitly accepts documented gaps.
+If Checker returns `resolve_gaps`, create another Resolver/Executor repair round.
+If it returns `research_next_batch`, run Resolver against that Checker artifact;
+Resolver schedules and Executor merges the next bounded plan batch. Normalizer
+is allowed only after the required plan scope has passed or a human explicitly
+accepts documented gaps.
 
 ## Token and cost accounting
 

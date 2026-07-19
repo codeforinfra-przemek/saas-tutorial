@@ -53,7 +53,7 @@ from ..schemas import (
 
 
 DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "checker_system_v2.md"
+    Path(__file__).resolve().parent.parent / "prompts" / "checker_system_v3.md"
 )
 DEFAULT_MAX_CLAIMS = 100
 DEFAULT_MAX_EVIDENCE_CHARS = 100_000
@@ -178,6 +178,50 @@ def _claim_source_ids(
     return _deduplicate(
         [citation_source_by_id[citation_id] for citation_id in claim.citation_ids]
     )
+
+
+_UNIT_FORMAT_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bsingle[\s-]?unit\b",
+        r"\bmulti[\s-]?unit\b",
+        r"\barea[\s-]?development\b",
+        r"\bmaster[\s-]?franchi[sz]e\b",
+        r"\bsub[\s-]?franchi[sz]e\b",
+        r"\bone[\s-]+store\b",
+        r"\bmultiple[\s-]+stores?\b",
+        r"\bnew[\s-]+(?:unit|store)\b",
+        r"\bexisting[\s-]+store\b",
+        r"\brenewal\b",
+        r"\btransfer\b",
+        r"\bresale\b",
+        r"\bpojedyncz\w*[\s-]+sklep\w*\b",
+        r"\bjed(?:en|nego)[\s-]+sklep\w*\b",
+        r"\bkilk\w*[\s-]+sklep\w*\b",
+        r"\bwiel\w*[\s-]+sklep\w*\b",
+        r"\bmulti[\s-]?franczy\w*\b",
+        r"\bfranczy\w*[\s-]+master\b",
+        r"\bmaster[\s-]+franczy\w*\b",
+        r"\bsubfranczy\w*\b",
+        r"\bobszar\w*[\s-]+rozwoj\w*\b",
+        r"\bnow\w*[\s-]+sklep\w*\b",
+        r"\bistniej\w*[\s-]+sklep\w*\b",
+        r"\bodsprzeda\w*\b",
+        r"\bprzej[eę]ci\w*\b",
+        r"\bcesj\w*\b",
+        r"\bodnowieni\w*\b",
+        r"\bprzedłużeni\w*\b",
+    )
+)
+
+
+def _passes_local_field_semantics(claim: RawExtractionClaim) -> bool:
+    """Enforce narrow catalog meanings that cannot safely rely on model labels."""
+
+    if claim.target_field != "offer.unit_formats":
+        return True
+    normalized = " ".join(claim.value_text.split())
+    return any(pattern.search(normalized) for pattern in _UNIT_FORMAT_PATTERNS)
 
 
 def _not_reviewed_decisions(
@@ -472,16 +516,19 @@ class CheckerAgent:
             item.severity in {CheckerSeverity.HIGH, CheckerSeverity.CRITICAL}
             for item in unsafe_items
         )
-        passed = (
+        selected_scope_ready = (
             self.llm is not None
             and not failed_attempts
             and score_breakdown.quality_score
             >= plan.stop_conditions.quality_threshold
-            and scope_complete
             and not critical_missing_fields
-            and not unevaluated_critical_fields
             and not contradictions
             and not blocking_unsafe
+        )
+        passed = (
+            selected_scope_ready
+            and scope_complete
+            and not unevaluated_critical_fields
         )
         if self.llm is None:
             next_action = CheckerNextAction.RUN_PAID_CHECKER
@@ -489,6 +536,11 @@ class CheckerAgent:
             next_action = CheckerNextAction.RETRY_CHECKER
         elif passed:
             next_action = CheckerNextAction.HUMAN_REVIEW
+        elif (
+            selected_scope_ready
+            and (unevaluated_task_ids or unevaluated_source_ids)
+        ):
+            next_action = CheckerNextAction.RESEARCH_NEXT_BATCH
         else:
             next_action = CheckerNextAction.RESOLVE_GAPS
 
@@ -533,6 +585,7 @@ class CheckerAgent:
             unevaluated_task_ids=unevaluated_task_ids,
             unevaluated_source_ids=unevaluated_source_ids,
             scope_complete=scope_complete,
+            selected_scope_ready=selected_scope_ready,
             source_assessments=source_assessments,
             claim_decisions=decisions,
             contradictions=contradictions,
@@ -785,19 +838,41 @@ class CheckerAgent:
                 and set(item.issue_codes).issubset(corroboration_only_issues)
             ):
                 verdict = CheckerVerdict.ACCEPTED
+            claim = claim_by_id[item.claim_id]
+            semantic_fit = item.semantic_fit.value
+            source_support = item.source_support.value
+            issue_codes = list(item.issue_codes)
+            rationale = item.rationale
+            if verdict == CheckerVerdict.ACCEPTED and not _passes_local_field_semantics(
+                claim
+            ):
+                verdict = CheckerVerdict.REJECTED
+                semantic_fit = CheckerSemanticFit.MISMATCH
+                issue_codes = _deduplicate(
+                    [
+                        *(code.value for code in issue_codes),
+                        CheckerIssueCode.UNSUPPORTED_FIELD_MAPPING.value,
+                    ]
+                )
+                rationale = (
+                    "Local field-contract guard rejected the mapping: "
+                    "offer.unit_formats requires evidence of single-unit, multi-unit, "
+                    "area/master/subfranchise, renewal, transfer, or resale structure; "
+                    "store furnishing or equipment alone is insufficient."
+                )
             decisions.append(
                 CheckerClaimDecision(
                     claim_id=item.claim_id,
-                    task_id=claim_by_id[item.claim_id].task_id,
-                    target_field=claim_by_id[item.claim_id].target_field,
+                    task_id=claim.task_id,
+                    target_field=claim.target_field,
                     source_ids=_claim_source_ids(
-                        claim_by_id[item.claim_id], citation_source_by_id
+                        claim, citation_source_by_id
                     ),
                     verdict=verdict,
-                    semantic_fit=item.semantic_fit.value,
-                    source_support=item.source_support.value,
-                    issue_codes=item.issue_codes,
-                    rationale=item.rationale,
+                    semantic_fit=semantic_fit,
+                    source_support=source_support,
+                    issue_codes=issue_codes,
+                    rationale=rationale,
                 )
             )
         decision_by_id = {item.claim_id: item for item in decisions}

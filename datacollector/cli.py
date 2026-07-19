@@ -1045,6 +1045,7 @@ def _run_extract(args: argparse.Namespace) -> int:
                 ),
                 max_api_calls=args.max_api_calls,
                 cached_documents=cached_documents,
+                cached_document_origin="the same-iteration free Extractor artifact",
             )
         except ExtractorProviderError as exc:
             if not exc.usages and not exc.failed_attempts:
@@ -1409,6 +1410,7 @@ def _run_check(args: argparse.Namespace) -> int:
         "unevaluated_tasks": len(results.unevaluated_task_ids),
         "unevaluated_sources": len(results.unevaluated_source_ids),
         "scope_complete": results.scope_complete,
+        "selected_scope_ready": results.selected_scope_ready,
         "claim_verdicts": claim_verdicts,
         "field_statuses": field_statuses,
         "task_statuses": task_statuses,
