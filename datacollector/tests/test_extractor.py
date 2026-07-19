@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 from unittest import TestCase
 from uuid import uuid4
 
-from datacollector.agents.extractor import ExtractorAgent, ExtractorValidationError
+from datacollector.agents.extractor import (
+    ExtractorAgent,
+    ExtractorValidationError,
+    _build_passages,
+)
 from datacollector.agents.planner import PlannerAgent
 from datacollector.catalog import load_question_catalog
 from datacollector.documents import FetchedDocument, FetchStatus
@@ -31,6 +35,7 @@ from datacollector.schemas import (
     SearchSourceOrigin,
     SearchTaskResult,
     SearchTaskStatus,
+    SourceDocument,
     SourceType,
     TokenUsage,
 )
@@ -557,6 +562,155 @@ class ExtractorAgentTests(TestCase):
             paid_results.documents[0].parse_status,
             DocumentParseStatus.PARSED,
         )
+
+    def test_terminal_free_anti_bot_result_is_reused_without_paid_refetch(self):
+        source = self._source()
+        search_results = self._search_results([source])
+        content = b"Imperva anti-bot challenge"
+        anti_bot = FetchedDocument(
+            source_id=source.source_id,
+            requested_url=source.canonical_url,
+            final_url=source.canonical_url,
+            status=FetchStatus.ANTI_BOT,
+            fetched_at=NOW,
+            http_status=200,
+            media_type="text/html",
+            content=content,
+            byte_count=len(content),
+            content_sha256=hashlib.sha256(content).hexdigest(),
+            error_code="anti_bot_page",
+        )
+        free_results, _ = self._run(
+            [source],
+            fetcher=FakeFetcher({source.source_id: anti_bot}),
+            search_results=search_results,
+        )
+        never_fetcher = NeverFetcher()
+
+        paid_results, _ = self._run(
+            [source],
+            fetcher=never_fetcher,
+            llm=FakeExtractorLLM(self._successful_generation),
+            search_results=search_results,
+            cached_documents=free_results.documents,
+        )
+
+        self.assertEqual(never_fetcher.calls, [])
+        self.assertFalse(paid_results.network_executed)
+        self.assertFalse(paid_results.provider_executed)
+        self.assertEqual(paid_results.documents, free_results.documents)
+        self.assertTrue(
+            any(
+                "Reused 1 terminal retrieval result" in warning
+                for warning in paid_results.warnings
+            )
+        )
+
+    def test_passage_ranking_handles_polish_inflection_and_drops_boilerplate(self):
+        source = self._source()
+        task = self.task.model_copy(
+            update={
+                "title": "Current document inventory",
+                "question": "Which franchise agreements and documents are available?",
+                "acceptance_criteria": "Identify each agreement and document.",
+                "target_fields": [
+                    "documents.inventory",
+                    "franchisor.legal_name",
+                ],
+                "search_queries": ["Żabka umowa franczyzy PDF"],
+            }
+        )
+        text = (
+            "Żabka Menu\n\n"
+            "Wyrażam zgodę na przetwarzanie przez Żabka Polska sp. z o.o. "
+            "moich danych osobowych i przesyłanie newslettera.\n\n"
+            "Franczyzobiorca podpisuje ze spółką umowę współpracy dotyczącą "
+            "prowadzenia sklepu Żabka. Dokument umowy określa zasady franczyzy."
+        )
+        content = text.encode()
+        document = SourceDocument(
+            document_id="document-1111111111111111",
+            source_id=source.source_id,
+            canonical_url=source.canonical_url,
+            final_url=source.canonical_url,
+            task_ids=[task.task_id],
+            retrieval_status=DocumentRetrievalStatus.FETCHED,
+            parse_status=DocumentParseStatus.PARSED,
+            collected_at=NOW,
+            http_status=200,
+            media_type="text/html",
+            content_bytes=len(content),
+            content_sha256=hashlib.sha256(content).hexdigest(),
+            text=text,
+            text_chars=len(text),
+            processed_chars=len(text),
+            text_sha256=hashlib.sha256(text.encode()).hexdigest(),
+            parser="html.parser",
+        )
+
+        passages = _build_passages(
+            document,
+            [task],
+            max_passages_per_task=6,
+        )
+
+        self.assertEqual(len(passages), 1)
+        self.assertIn("umowę współpracy", passages[0].text)
+        self.assertIn("umow", passages[0].matched_terms)
+        self.assertNotIn("Wyrażam zgodę", passages[0].text)
+        self.assertNotIn("Menu", passages[0].text)
+
+    def test_passage_ranking_keeps_short_table_labels_with_their_values(self):
+        source = self._source()
+        task = self.task.model_copy(
+            update={
+                "target_fields": ["franchisor.parent_entities"],
+                "search_queries": ["Example akcjonariusze struktura właścicielska"],
+            }
+        )
+        text = (
+            "Akcjonariusz\n\n"
+            "Heket Topco S.a r.l.\n\n"
+            "377 364 050\n\n"
+            "37,624%\n\n"
+            "Pozostali\n\n"
+            "62,376%\n\n"
+            "Polityka prywatności\n\n"
+            "Zarządzaj cookies"
+        )
+        content = text.encode()
+        document = SourceDocument(
+            document_id="document-2222222222222222",
+            source_id=source.source_id,
+            canonical_url=source.canonical_url,
+            final_url=source.canonical_url,
+            task_ids=[task.task_id],
+            retrieval_status=DocumentRetrievalStatus.FETCHED,
+            parse_status=DocumentParseStatus.PARSED,
+            collected_at=NOW,
+            http_status=200,
+            media_type="text/html",
+            content_bytes=len(content),
+            content_sha256=hashlib.sha256(content).hexdigest(),
+            text=text,
+            text_chars=len(text),
+            processed_chars=len(text),
+            text_sha256=hashlib.sha256(text.encode()).hexdigest(),
+            parser="html.parser",
+        )
+
+        passages = _build_passages(
+            document,
+            [task],
+            max_passages_per_task=6,
+        )
+
+        table_passage = next(
+            passage for passage in passages if "Heket Topco" in passage.text
+        )
+        self.assertIn("Akcjonariusz", table_passage.text)
+        self.assertIn("37,624%", table_passage.text)
+        self.assertNotIn("Polityka prywatności", table_passage.text)
 
     def test_partial_document_and_search_backlog_remain_explicit(self):
         source = self._source()

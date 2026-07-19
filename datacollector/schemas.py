@@ -27,7 +27,7 @@ PROMPT_VERSION = "planner-system-v2"
 SEARCHER_SCHEMA_VERSION = "1.1.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v3"
 EXTRACTOR_SCHEMA_VERSION = "1.0.0"
-EXTRACTOR_PROMPT_VERSION = "extractor-system-v1"
+EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
 
 
 class ClosedModel(BaseModel):

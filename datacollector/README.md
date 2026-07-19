@@ -274,10 +274,18 @@ When a compatible `extractions-r003-free.json` exists beside the Searcher
 artifact, paid mode automatically reuses its stored document text after
 validating lineage, source mappings, raw snapshots and content hashes, then rebuilds the
 passages deterministically with the requested limit. This prevents a second
-fetch and makes the free/paid comparison use identical source text. If no
-compatible successfully parsed free snapshot exists, paid mode performs the same
-safe deterministic retrieval first; failed or inaccessible free fetches are not
-mistaken for reusable document content.
+fetch and makes the free/paid comparison use identical source text. Terminal
+free results such as anti-bot, access-denied, not-found and unsupported content
+are also reused so the immediately following paid comparison does not repeat a
+request that is unlikely to succeed. Transient failures such as timeouts,
+network errors and rate limits are retried. Use a new iteration when you want to
+retry a terminal result.
+
+Passage ranking folds diacritics, applies conservative Polish inflection
+matching (for example `umowa`/`umowę`), downranks navigation and privacy/contact
+boilerplate for unrelated tasks, weights document-specific terms above repeated
+brand words, and limits repeated match patterns. Tasks with no positively
+matched passage do not consume a semantic provider call for that source.
 
 For each selected source, paid Extractor sends only the minimal mapped task
 fields and locally grounded `EvidencePassage` objects through the Responses API

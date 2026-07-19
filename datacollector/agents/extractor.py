@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
-from collections import defaultdict
+import unicodedata
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
@@ -36,7 +38,7 @@ from ..schemas import (
 
 
 DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "extractor_system_v1.md"
+    Path(__file__).resolve().parent.parent / "prompts" / "extractor_system_v2.md"
 )
 DEFAULT_MAX_DOCUMENT_BYTES = 40 * 1024 * 1024
 DEFAULT_MAX_DOCUMENT_CHARS = 250_000
@@ -63,6 +65,10 @@ _UNSUPPORTED = {
     FetchStatus.OCR_REQUIRED,
     FetchStatus.UNSUPPORTED_MEDIA_TYPE,
 }
+_TERMINAL_CACHE_ERROR_CODES = {
+    "access_denied",
+    "anti_bot_page",
+}
 _WORD = re.compile(r"[^\W_]+", re.UNICODE)
 _PASSAGE_SEPARATOR = re.compile(r"(?:\n[ \t]*\n+|\f)")
 _STOP_WORDS = {
@@ -74,9 +80,6 @@ _STOP_WORDS = {
     "czy",
     "dla",
     "from",
-    "franchise",
-    "franczyza",
-    "franczyzy",
     "how",
     "ich",
     "jest",
@@ -97,6 +100,78 @@ _STOP_WORDS = {
     "which",
     "with",
     "zakresie",
+}
+_POLISH_SUFFIXES = (
+    "owego",
+    "owej",
+    "ami",
+    "ach",
+    "ego",
+    "emu",
+    "owie",
+    "owa",
+    "owe",
+    "owy",
+    "ie",
+    "om",
+    "ow",
+    "a",
+    "e",
+    "y",
+)
+_PRIVACY_BOILERPLATE_MARKERS = (
+    "administrator danych",
+    "adres e mail",
+    "adres e-mail",
+    "danych osobowych",
+    "inspektor ochrony danych",
+    "polityka prywatnosci",
+    "przetwarzanie danych",
+    "wycofanie zgody",
+    "wyrazam zgode",
+    "zgode na kierowanie",
+)
+_NAVIGATION_BOILERPLATE_MARKERS = (
+    "automaty vendingowe",
+    "menu",
+    "newsletter",
+    "zaakceptuj cookies",
+)
+_FIELD_TERM_HINTS = {
+    "franchisor.": (
+        "franczyzodawca",
+        "operator",
+        "spółka",
+        "umowa",
+        "współpraca",
+    ),
+    "franchisor.registration_id": (
+        "KRS",
+        "NIP",
+        "REGON",
+        "rejestr",
+    ),
+    "franchisor.parent_entities": (
+        "akcje",
+        "akcjonariusz",
+        "głosy",
+        "grupa",
+        "udział",
+        "właściciel",
+    ),
+    "documents.": (
+        "dokument",
+        "umowa",
+        "regulamin",
+        "prospekt",
+        "raport",
+    ),
+    "offer.": (
+        "oferta",
+        "model",
+        "umowa",
+        "współpraca",
+    ),
 }
 
 
@@ -120,6 +195,41 @@ def _stable_id(prefix: str, *parts: object) -> str:
     material = "\x1f".join(str(part) for part in parts)
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
     return f"{prefix}-{digest}"
+
+
+def _fold_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.casefold())
+    folded = "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
+    )
+    return folded.translate(str.maketrans({"ł": "l"}))
+
+
+def _normalize_word(value: str) -> str:
+    """Fold diacritics and conservatively reduce common Polish inflections."""
+
+    word = _fold_text(value)
+    if len(word) < 5:
+        return word
+    for suffix in _POLISH_SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+            return word[: -len(suffix)]
+    if word.endswith("s") and len(word) >= 6:
+        return word[:-1]
+    return word
+
+
+_NORMALIZED_STOP_WORDS = {_normalize_word(word) for word in _STOP_WORDS}
+
+
+def _normalized_words(value: str) -> set[str]:
+    return {
+        normalized
+        for word in _WORD.findall(value)
+        if len(normalized := _normalize_word(word)) >= 3
+    }
 
 
 def _document_id(
@@ -165,13 +275,7 @@ def _select_pdf_text(
         return "", [], False
     terms = set().union(*(_task_terms(task) for task in tasks)) if tasks else set()
     scores = {
-        index: len(
-            terms
-            & {
-                word.casefold()
-                for word in _WORD.findall(page_text[index])
-            }
-        )
+        index: len(terms & _normalized_words(page_text[index]))
         for index in nonempty_indices
     }
     ranked = sorted(
@@ -464,11 +568,45 @@ def _task_terms(task: ResearchTask) -> set[str]:
             *task.search_queries,
         )
     ).replace("_", " ")
-    return {
-        word.casefold()
+    terms = {
+        normalized
         for word in _WORD.findall(material)
-        if len(word) >= 3 and word.casefold() not in _STOP_WORDS
+        if len(normalized := _normalize_word(word)) >= 3
+        and normalized not in _NORMALIZED_STOP_WORDS
     }
+    for field_prefix, hints in _FIELD_TERM_HINTS.items():
+        if any(field.startswith(field_prefix) for field in task.target_fields):
+            terms.update(_normalize_word(hint) for hint in hints)
+    return terms
+
+
+def _task_allows_privacy_evidence(task: ResearchTask) -> bool:
+    return any(
+        "privacy" in field.casefold() or "personal_data" in field.casefold()
+        for field in task.target_fields
+    )
+
+
+def _boilerplate_penalty(text: str, task: ResearchTask) -> float:
+    folded = _fold_text(text)
+    penalty = 0.0
+    if not _task_allows_privacy_evidence(task) and any(
+        marker in folded for marker in _PRIVACY_BOILERPLATE_MARKERS
+    ):
+        penalty += 100.0
+    if any(
+        marker in folded for marker in _NAVIGATION_BOILERPLATE_MARKERS
+    ):
+        penalty += 100.0
+    if (
+        len(text) <= 60
+        and not any(character.isdigit() for character in text)
+        and ":" not in text
+    ):
+        penalty += 6.0
+    if text.rstrip().endswith("?"):
+        penalty += 100.0
+    return penalty
 
 
 def _trimmed_range(text: str, start: int, end: int) -> tuple[int, int] | None:
@@ -476,10 +614,16 @@ def _trimmed_range(text: str, start: int, end: int) -> tuple[int, int] | None:
         start += 1
     while end > start and text[end - 1].isspace():
         end -= 1
-    return (start, end) if end - start >= 10 else None
+    return (start, end) if end > start else None
 
 
-def _split_range(text: str, start: int, end: int, *, maximum: int = 5_500) -> list[tuple[int, int]]:
+def _split_range(
+    text: str,
+    start: int,
+    end: int,
+    *,
+    maximum: int = 5_500,
+) -> list[tuple[int, int]]:
     chunks: list[tuple[int, int]] = []
     cursor = start
     while cursor < end:
@@ -507,7 +651,48 @@ def _candidate_ranges(text: str) -> list[tuple[int, int]]:
     trimmed = _trimmed_range(text, cursor, len(text))
     if trimmed is not None:
         ranges.extend(_split_range(text, *trimmed))
-    return ranges
+
+    # HTML table cells and definition-list values are commonly separated into
+    # many tiny blocks. Keep the atomic blocks, but also add bounded contextual
+    # windows so labels such as KRS/Shareholder remain attached to their values.
+    contextual: list[tuple[int, int]] = []
+    window_start: int | None = None
+    window_end: int | None = None
+    for start, end in ranges:
+        is_short = end - start <= 200
+        folded_range = _fold_text(text[start:end])
+        is_boilerplate_boundary = any(
+            marker in folded_range
+            for marker in (
+                *_PRIVACY_BOILERPLATE_MARKERS,
+                *_NAVIGATION_BOILERPLATE_MARKERS,
+            )
+        )
+        crosses_page = (
+            window_end is not None and "\f" in text[window_end:start]
+        )
+        exceeds_window = (
+            window_start is not None and end - window_start > 600
+        )
+        if (
+            not is_short
+            or is_boilerplate_boundary
+            or crosses_page
+            or exceeds_window
+        ):
+            if window_start is not None and window_end is not None:
+                contextual.append((window_start, window_end))
+            window_start = None
+            window_end = None
+        if is_short and not is_boilerplate_boundary:
+            if window_start is None:
+                window_start = start
+            window_end = end
+        elif end - start > 200:
+            continue
+    if window_start is not None and window_end is not None:
+        contextual.append((window_start, window_end))
+    return sorted(set([*ranges, *contextual]))
 
 
 def _build_passages(
@@ -519,21 +704,53 @@ def _build_passages(
     if document.parse_status not in _PARSED_STATUSES:
         return []
     ranges = _candidate_ranges(document.text)
+    range_words = [
+        _normalized_words(document.text[start:end]) for start, end in ranges
+    ]
+    document_frequency = Counter(term for words in range_words for term in words)
+    range_count = max(len(ranges), 1)
     passages: list[EvidencePassage] = []
     for task in tasks:
         if task.task_id not in document.task_ids:
             continue
         terms = _task_terms(task)
-        ranked: list[tuple[int, int, int, set[str]]] = []
-        for start, end in ranges:
-            words = {word.casefold() for word in _WORD.findall(document.text[start:end])}
+        ranked: list[tuple[float, int, int, set[str]]] = []
+        for (start, end), words in zip(ranges, range_words, strict=True):
+            if end - start < 10:
+                continue
             matched = terms & words
-            ranked.append((len(matched), start, end, matched))
-        matched_ranked = [item for item in ranked if item[0] > 0]
-        chosen = sorted(
-            matched_ranked or ranked,
-            key=lambda item: (-item[0], item[1]),
-        )[:max_passages_per_task]
+            relevance = sum(
+                1.0
+                + math.log(
+                    (range_count + 1)
+                    / (document_frequency[term] + 1)
+                )
+                for term in matched
+            )
+            score = relevance - _boilerplate_penalty(
+                document.text[start:end], task
+            )
+            if matched and score > 0:
+                ranked.append((score, start, end, matched))
+        ordered = sorted(ranked, key=lambda item: (-item[0], item[1]))
+        chosen: list[tuple[float, int, int, set[str]]] = []
+        signature_counts: Counter[tuple[str, ...]] = Counter()
+        seen_texts: set[str] = set()
+        for item in ordered:
+            signature = tuple(sorted(item[3]))
+            normalized_text = " ".join(
+                _fold_text(document.text[item[1] : item[2]]).split()
+            )
+            if (
+                signature_counts[signature] >= 2
+                or normalized_text in seen_texts
+            ):
+                continue
+            chosen.append(item)
+            signature_counts[signature] += 1
+            seen_texts.add(normalized_text)
+            if len(chosen) >= max_passages_per_task:
+                break
         for _, start, end, matched in chosen:
             passage_id = _stable_id(
                 "passage", document.document_id, task.task_id, start, end
@@ -762,10 +979,22 @@ class ExtractorAgent:
                     f"({document.retrieval_status.value}/{document.parse_status.value}; "
                     f"{document.error_code or 'no_error_code'})."
                 )
-        if cache:
+        cached_parsed_count = sum(
+            document.parse_status in _PARSED_STATUSES
+            for document in cache.values()
+        )
+        cached_terminal_count = len(cache) - cached_parsed_count
+        if cached_parsed_count:
             warnings.append(
-                f"Reused {len(cache)} matching document(s) from a prior free "
+                f"Reused {cached_parsed_count} matching document(s) from a prior free "
                 "Extractor artifact; no network request was repeated for them."
+            )
+        if cached_terminal_count:
+            warnings.append(
+                f"Reused {cached_terminal_count} terminal retrieval result(s) from "
+                "a prior free Extractor artifact; anti-bot/access-denied/not-found/"
+                "unsupported sources were not fetched again. Use a new iteration "
+                "to retry them."
             )
 
         source_by_id = {source.source_id: source for source in selected_sources}
@@ -1104,12 +1333,24 @@ class ExtractorAgent:
                     document.error_code,
                 ),
             )
+            parsed_reusable = (
+                document.retrieval_status == DocumentRetrievalStatus.FETCHED
+                and document.parse_status in _PARSED_STATUSES
+            )
+            terminal_reusable = (
+                document.retrieval_status == DocumentRetrievalStatus.NOT_FOUND
+                or (
+                    document.retrieval_status
+                    == DocumentRetrievalStatus.NOT_ACCESSIBLE
+                    and document.error_code in _TERMINAL_CACHE_ERROR_CODES
+                )
+                or document.parse_status == DocumentParseStatus.UNSUPPORTED
+            )
             if (
                 document.document_id != expected_id
                 or document.canonical_url != source.canonical_url
                 or document.task_ids != source.task_ids
-                or document.retrieval_status != DocumentRetrievalStatus.FETCHED
-                or document.parse_status not in _PARSED_STATUSES
+                or not (parsed_reusable or terminal_reusable)
                 or document.text_chars > max_document_chars
                 or (document.content_bytes or 0) > max_document_bytes
             ):

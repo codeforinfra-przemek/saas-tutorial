@@ -717,6 +717,7 @@ def _run_extract(args: argparse.Namespace) -> int:
 
         cached_documents = []
         cache_source_ids: set[str] = set()
+        cache_terminal_source_ids: set[str] = set()
         if not args.offline:
             free_filename = extraction_results_filename_for(iteration, free=True)
             cache_candidates = [result_directory / free_filename]
@@ -740,6 +741,17 @@ def _run_extract(args: argparse.Namespace) -> int:
                         for document in cached_documents
                         if document.retrieval_status.value == "fetched"
                         and document.parse_status.value in {"parsed", "partial"}
+                    }
+                    cache_terminal_source_ids = {
+                        document.source_id
+                        for document in cached_documents
+                        if document.retrieval_status.value == "not_found"
+                        or (
+                            document.retrieval_status.value == "not_accessible"
+                            and document.error_code
+                            in {"access_denied", "anti_bot_page"}
+                        )
+                        or document.parse_status.value == "unsupported"
                     }
                     break
 
@@ -865,6 +877,9 @@ def _run_extract(args: argparse.Namespace) -> int:
         attempt.call_index for attempt in results.failed_attempts
     ]
     selected_cache_ids = set(results.selected_source_ids) & cache_source_ids
+    selected_terminal_cache_ids = (
+        set(results.selected_source_ids) & cache_terminal_source_ids
+    )
     summary = {
         "extraction_id": results.extraction_id,
         "plan_run_id": results.plan_run_id,
@@ -880,6 +895,7 @@ def _run_extract(args: argparse.Namespace) -> int:
         "network_executed": results.network_executed,
         "provider_executed": results.provider_executed,
         "reused_free_documents": len(selected_cache_ids),
+        "reused_free_terminal_results": len(selected_terminal_cache_ids),
         "document_retrieval_statuses": retrieval_statuses,
         "document_parse_statuses": parse_statuses,
         "evidence_passages": len(results.evidence_passages),
