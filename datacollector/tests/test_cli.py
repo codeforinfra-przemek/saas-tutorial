@@ -1,16 +1,233 @@
+import hashlib
 import json
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
+from datacollector.agents.planner import PlannerAgent
+from datacollector.agents.searcher import SearcherAgent
+from datacollector.catalog import load_question_catalog
 from datacollector.cli import main
 from datacollector.config import OpenAISettings
+from datacollector.documents import FetchedDocument, FetchStatus
+from datacollector.llm.protocol import (
+    ExtractorGeneration,
+    ExtractorProviderError,
+    ProviderSearchSource,
+    SearcherGeneration,
+)
 from datacollector.llm.openai_searcher_client import SearcherProviderError
-from datacollector.llm.pricing import build_web_search_tool_usage
-from datacollector.schemas import AgentIterationUsage, TokenUsage
+from datacollector.llm.pricing import (
+    build_web_search_tool_usage,
+    estimate_standard_token_cost,
+)
+from datacollector.schemas import (
+    AgentIterationUsage,
+    ExtractionAttemptFailure,
+    ExtractionConfidence,
+    ExtractorClaimDraft,
+    ExtractorDraft,
+    PlannerInput,
+    SearchAction,
+    SearchTaskStatus,
+    SearcherDraft,
+    SearcherSourceDraft,
+    SearcherTaskDraft,
+    SourceType,
+    TokenUsage,
+)
+from datacollector.storage.json_store import load_extraction_results
+from datacollector.storage.json_store import (
+    load_research_plan,
+    save_research_plan,
+    save_search_results,
+)
+
+
+CLI_DOCUMENT_VALUE = "Example Polska sp. z o.o."
+CLI_DOCUMENT_TEXT = (
+    "Brand identity and official franchise website. The exact legal franchisor "
+    f"is {CLI_DOCUMENT_VALUE}, registered as the operator in Poland."
+)
+
+
+class CliFixtureSearcher:
+    model_name = "gpt-5.6-terra"
+
+    def generate(
+        self,
+        plan,
+        tasks,
+        system_prompt,
+        *,
+        iteration,
+        call_index,
+        max_search_calls,
+        min_queries_per_task,
+    ):
+        del plan, system_prompt, max_search_calls, min_queries_per_task
+        task = tasks[0]
+        query = task.search_queries[0]
+        url = "https://example.com/franchise"
+        return SearcherGeneration(
+            draft=SearcherDraft(
+                warnings=[],
+                sources=[
+                    SearcherSourceDraft(
+                        url=url,
+                        title="Official franchise page",
+                        source_type=SourceType.OFFICIAL,
+                        task_ids=[task.task_id],
+                        relevance_note=(
+                            "Official page relevant to legal identity target fields."
+                        ),
+                    )
+                ],
+                task_results=[
+                    SearcherTaskDraft(
+                        task_id=task.task_id,
+                        status=SearchTaskStatus.PARTIAL,
+                        attempted_queries=[query],
+                        source_urls=[url],
+                        unresolved_targets=["Official registry extract"],
+                        notes="One provider-grounded source candidate.",
+                    )
+                ],
+            ),
+            usage=AgentIterationUsage(
+                agent="searcher",
+                iteration=iteration,
+                call_index=call_index,
+                scope_task_ids=[task.task_id],
+                requested_model=self.model_name,
+                resolved_model=self.model_name,
+                tokens=TokenUsage(
+                    input_tokens=100,
+                    output_tokens=20,
+                    total_tokens=120,
+                ),
+                tool_usage=[build_web_search_tool_usage({"search": 1})],
+            ),
+            actions=[
+                SearchAction(
+                    action_id="ws_cli_fixture",
+                    call_index=call_index,
+                    scope_task_ids=[task.task_id],
+                    action_type="search",
+                    status="completed",
+                    queries=[query],
+                    source_urls=[url],
+                )
+            ],
+            provider_sources=[
+                ProviderSearchSource(
+                    url=url,
+                    title="Official franchise page",
+                )
+            ],
+        )
+
+
+class RecordingDocumentFetcher:
+    def __init__(self):
+        self.calls = []
+
+    def fetch(self, url, *, source_id=""):
+        self.calls.append((url, source_id))
+        content = CLI_DOCUMENT_TEXT.encode("utf-8")
+        return FetchedDocument(
+            source_id=source_id,
+            requested_url=url,
+            final_url=url,
+            status=FetchStatus.FETCHED,
+            fetched_at=datetime.now(timezone.utc),
+            http_status=200,
+            media_type="text/html",
+            content=content,
+            text=CLI_DOCUMENT_TEXT,
+            title="Official franchise page",
+            byte_count=len(content),
+            content_sha256=hashlib.sha256(content).hexdigest(),
+            text_sha256=hashlib.sha256(content).hexdigest(),
+        )
+
+
+class CliFixtureExtractor:
+    model_name = "gpt-5.6-terra"
+
+    def __init__(self):
+        self.calls = []
+
+    def generate(
+        self,
+        plan,
+        source,
+        document,
+        tasks,
+        passages,
+        system_prompt,
+        *,
+        iteration,
+        call_index,
+    ):
+        self.calls.append(
+            (
+                plan,
+                source,
+                document,
+                tasks,
+                passages,
+                system_prompt,
+                iteration,
+                call_index,
+            )
+        )
+        task = next(task for task in tasks if task.task_id in source.task_ids)
+        passage = next(
+            passage for passage in passages if passage.task_id == task.task_id
+        )
+        tokens = TokenUsage(
+            input_tokens=100,
+            output_tokens=20,
+            total_tokens=120,
+        )
+        usage = AgentIterationUsage(
+            agent="extractor",
+            iteration=iteration,
+            call_index=call_index,
+            scope_task_ids=[task.task_id],
+            scope_source_ids=[source.source_id],
+            requested_model=self.model_name,
+            resolved_model=self.model_name,
+            service_tier="default",
+            tokens=tokens,
+            cost_estimate=estimate_standard_token_cost(
+                self.model_name,
+                tokens,
+                service_tier="default",
+            ),
+        )
+        return ExtractorGeneration(
+            draft=ExtractorDraft(
+                claims=[
+                    ExtractorClaimDraft(
+                        task_id=task.task_id,
+                        target_field=task.target_fields[0],
+                        passage_id=passage.passage_id,
+                        value_text=CLI_DOCUMENT_VALUE,
+                        evidence_quote=CLI_DOCUMENT_VALUE,
+                        confidence=ExtractionConfidence.HIGH,
+                    )
+                ],
+                warnings=[],
+            ),
+            usage=usage,
+            source_id=source.source_id,
+        )
 
 
 class FailingPaidSearcher:
@@ -90,6 +307,28 @@ class MissingTokenUsageSearcher:
 
 
 class CollectorCliTests(TestCase):
+    def create_extractor_cli_fixture(self, output_directory):
+        plan = PlannerAgent(load_question_catalog()).create_plan(
+            PlannerInput(
+                brand_name="Example",
+                target_country="PL",
+                depth="catalog",
+            )
+        )
+        plan_path = save_research_plan(plan, output_directory)
+        loaded_plan, plan_sha256 = load_research_plan(plan_path)
+        search_results = SearcherAgent(CliFixtureSearcher()).create_search_results(
+            loaded_plan,
+            plan_sha256=plan_sha256,
+            plan_reference=str(plan_path.resolve()),
+            iteration=1,
+            task_limit=1,
+            max_search_calls=1,
+            min_queries_per_task=1,
+        )
+        sources_path = save_search_results(search_results, plan_path)
+        return plan_path, sources_path
+
     def test_offline_plan_command_creates_artifact_without_api(self):
         with TemporaryDirectory() as temporary_directory:
             stdout = StringIO()
@@ -358,3 +597,302 @@ class CollectorCliTests(TestCase):
                 failure["tool_usage"][0]["estimated_cost_usd"],
                 "0.01",
             )
+
+    def test_free_extract_creates_immutable_artifact_without_openai_usage(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, sources_path = self.create_extractor_cli_fixture(
+                temporary_directory
+            )
+            fetcher = RecordingDocumentFetcher()
+            stdout = StringIO()
+            with (
+                patch(
+                    "datacollector.cli.DocumentFetcher",
+                    return_value=fetcher,
+                ),
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    side_effect=AssertionError(
+                        "Free Extractor must not load OpenAI settings."
+                    ),
+                ),
+                redirect_stdout(stdout),
+            ):
+                exit_code = main(
+                    [
+                        "extract",
+                        "--sources",
+                        str(sources_path),
+                        "--free",
+                        "--limit-sources",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads(stdout.getvalue())
+            extraction_path = Path(summary["extractions_path"])
+            artifact = json.loads(extraction_path.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(extraction_path.name, "extractions-free.json")
+            self.assertEqual(extraction_path.parent, sources_path.parent)
+            self.assertEqual(summary["generated_by"], "deterministic")
+            self.assertTrue(summary["network_executed"])
+            self.assertFalse(summary["provider_executed"])
+            self.assertGreater(summary["evidence_passages"], 0)
+            self.assertEqual(summary["citations"], 0)
+            self.assertEqual(summary["raw_claims"], 0)
+            self.assertEqual(summary["agent_usage"], [])
+            self.assertEqual(summary["usage_totals"]["total_tokens"], 0)
+            self.assertEqual(
+                summary["usage_totals"]["estimated_cost_usd"],
+                "0",
+            )
+            self.assertEqual(len(fetcher.calls), 1)
+            self.assertTrue(artifact["network_executed"])
+            self.assertEqual(artifact["agent_usage"], [])
+            self.assertEqual(artifact["claims"], [])
+            self.assertEqual(artifact["citations"], [])
+            document = artifact["documents"][0]
+            self.assertIsNotNone(document["content_path"])
+            raw_path = extraction_path.parent / document["content_path"]
+            raw_content = raw_path.read_bytes()
+            self.assertEqual(len(raw_content), document["content_bytes"])
+            self.assertEqual(
+                hashlib.sha256(raw_content).hexdigest(),
+                document["content_sha256"],
+            )
+
+            stderr = StringIO()
+            with (
+                patch(
+                    "datacollector.cli.DocumentFetcher",
+                    return_value=RecordingDocumentFetcher(),
+                ),
+                redirect_stderr(stderr),
+            ):
+                duplicate_exit_code = main(
+                    [
+                        "extract",
+                        "--sources",
+                        str(sources_path),
+                        "--free",
+                        "--limit-sources",
+                        "1",
+                    ]
+                )
+
+            self.assertEqual(duplicate_exit_code, 2)
+            self.assertIn("will not be overwritten", stderr.getvalue())
+            self.assertFalse(
+                (sources_path.parent / ".extractions-free.json.lock").exists()
+            )
+
+            raw_path.write_bytes(b"x" * len(raw_content))
+            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+                load_extraction_results(extraction_path)
+
+    def test_paid_extract_reuses_free_documents_and_writes_grounded_claim(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, sources_path = self.create_extractor_cli_fixture(
+                temporary_directory
+            )
+            free_fetcher = RecordingDocumentFetcher()
+            with (
+                patch(
+                    "datacollector.cli.DocumentFetcher",
+                    return_value=free_fetcher,
+                ),
+                redirect_stdout(StringIO()),
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "extract",
+                            "--sources",
+                            str(sources_path),
+                            "--free",
+                            "--limit-sources",
+                            "1",
+                        ]
+                    ),
+                    0,
+                )
+            self.assertEqual(len(free_fetcher.calls), 1)
+
+            paid_fetcher = RecordingDocumentFetcher()
+            extractor = CliFixtureExtractor()
+            stdout = StringIO()
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAIExtractorClient",
+                    return_value=extractor,
+                ),
+                patch(
+                    "datacollector.cli.DocumentFetcher",
+                    return_value=paid_fetcher,
+                ),
+                redirect_stdout(stdout),
+            ):
+                exit_code = main(
+                    [
+                        "extract",
+                        "--sources",
+                        str(sources_path),
+                        "--limit-sources",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads(stdout.getvalue())
+            extraction_path = Path(summary["extractions_path"])
+            artifact = json.loads(extraction_path.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(extraction_path.name, "extractions.json")
+            self.assertEqual(summary["generated_by"], "openai")
+            self.assertFalse(summary["network_executed"])
+            self.assertTrue(summary["provider_executed"])
+            self.assertEqual(summary["reused_free_documents"], 1)
+            self.assertEqual(summary["raw_claims"], 1)
+            self.assertEqual(len(summary["agent_usage"]), 1)
+            self.assertEqual(summary["agent_usage"][0]["agent"], "extractor")
+            self.assertEqual(summary["usage_totals"]["total_tokens"], 120)
+            self.assertEqual(
+                summary["usage_totals"]["estimated_cost_usd"],
+                "0.00055000",
+            )
+            self.assertEqual(paid_fetcher.calls, [])
+            self.assertEqual(len(extractor.calls), 1)
+            self.assertEqual(artifact["generated_by"], "openai")
+            self.assertFalse(artifact["network_executed"])
+            self.assertEqual(len(artifact["agent_usage"]), 1)
+            self.assertEqual(len(artifact["claims"]), 1)
+            self.assertEqual(
+                artifact["claims"][0]["value_text"],
+                CLI_DOCUMENT_VALUE,
+            )
+            self.assertEqual(
+                artifact["claims"][0]["verification_status"],
+                "unverified",
+            )
+            self.assertEqual(
+                artifact["citations"][0]["quote"],
+                CLI_DOCUMENT_VALUE,
+            )
+
+    def test_paid_extract_saves_usage_when_final_artifact_write_fails(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, sources_path = self.create_extractor_cli_fixture(
+                temporary_directory
+            )
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAIExtractorClient",
+                    return_value=CliFixtureExtractor(),
+                ),
+                patch(
+                    "datacollector.cli.DocumentFetcher",
+                    return_value=RecordingDocumentFetcher(),
+                ),
+                patch(
+                    "datacollector.cli.save_extraction_results",
+                    side_effect=OSError("fixture disk failure"),
+                ),
+                redirect_stderr(StringIO()),
+            ):
+                exit_code = main(
+                    [
+                        "extract",
+                        "--sources",
+                        str(sources_path),
+                        "--limit-sources",
+                        "1",
+                    ]
+                )
+
+            failures = list((sources_path.parent / "attempts").glob("*.json"))
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(len(failures), 1)
+            failure = json.loads(failures[0].read_text(encoding="utf-8"))
+            self.assertEqual(failure["error_code"], "artifact_write_failed")
+            self.assertIsNotNone(failure["usage"])
+            self.assertEqual(len(failure["scope_source_ids"]), 1)
+            self.assertFalse((sources_path.parent / "extractions.json").exists())
+            self.assertFalse(
+                (sources_path.parent / ".extractions.json.lock").exists()
+            )
+
+    def test_paid_extract_saves_unknown_usage_attempt_on_fatal_error(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, sources_path = self.create_extractor_cli_fixture(
+                temporary_directory
+            )
+            sources_payload = json.loads(sources_path.read_text(encoding="utf-8"))
+            source_id = sources_payload["sources"][0]["source_id"]
+            task_id = sources_payload["selected_task_ids"][0]
+            fatal_error = ExtractorProviderError(
+                "Fixture fatal post-processing error.",
+                code="postprocessing_error",
+                failed_attempts=[
+                    ExtractionAttemptFailure(
+                        call_index=1,
+                        source_id=source_id,
+                        scope_task_ids=[task_id],
+                        error_code="usage_unavailable",
+                        usage_recorded=False,
+                        token_usage_unknown=True,
+                    )
+                ],
+            )
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAIExtractorClient",
+                    return_value=CliFixtureExtractor(),
+                ),
+                patch(
+                    "datacollector.cli.ExtractorAgent.create_extraction_results",
+                    side_effect=fatal_error,
+                ),
+                redirect_stderr(StringIO()),
+            ):
+                exit_code = main(
+                    [
+                        "extract",
+                        "--sources",
+                        str(sources_path),
+                        "--limit-sources",
+                        "1",
+                    ]
+                )
+
+            failures = list((sources_path.parent / "attempts").glob("*.json"))
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(len(failures), 1)
+            failure = json.loads(failures[0].read_text(encoding="utf-8"))
+            self.assertIsNone(failure["usage"])
+            self.assertTrue(failure["token_usage_unknown"])
+            self.assertEqual(failure["scope_source_ids"], [source_id])

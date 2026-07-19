@@ -2,3 +2,6 @@ openai>=2.46,<3
 pydantic>=2.13,<3
 python-dotenv>=1.2,<2
 PyYAML>=6,<7
+pypdf>=6,<7
+urllib3>=2.5,<3
+charset-normalizer>=3.4,<4

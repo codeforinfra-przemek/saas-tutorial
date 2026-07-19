@@ -17,6 +17,7 @@ def build_agent_usage(
     iteration: int,
     call_index: int = 1,
     scope_task_ids: list[str] | None = None,
+    scope_source_ids: list[str] | None = None,
     tool_usage: list[ToolUsage] | None = None,
 ) -> AgentIterationUsage:
     provider_usage = getattr(response, "usage", None)
@@ -53,6 +54,7 @@ def build_agent_usage(
         iteration=iteration,
         call_index=call_index,
         scope_task_ids=scope_task_ids or [],
+        scope_source_ids=scope_source_ids or [],
         requested_model=settings.model,
         resolved_model=resolved_model,
         response_id=getattr(response, "id", None),

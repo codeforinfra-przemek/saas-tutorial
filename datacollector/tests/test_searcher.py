@@ -8,6 +8,7 @@ from datacollector.agents.planner import PlannerAgent
 from datacollector.agents.searcher import (
     SearcherAgent,
     SearcherValidationError,
+    _candidate_domain,
     _is_unrelated_promotional_source,
     _refine_source_type,
 )
@@ -578,6 +579,16 @@ class SearcherAgentTests(TestCase):
                 "https://example.com/franczyza/konkurs-plakat/",
                 [self.plan.tasks[1]],
             )
+        )
+
+    def test_polish_government_publishers_are_distinct_candidate_domains(self):
+        self.assertEqual(
+            _candidate_domain("https://uokik.gov.pl/konkurencja"),
+            "uokik.gov.pl",
+        )
+        self.assertEqual(
+            _candidate_domain("https://isap.sejm.gov.pl/isap.nsf/test"),
+            "sejm.gov.pl",
         )
 
     def test_free_searcher_seeds_only_known_brand_url_not_framework_references(self):

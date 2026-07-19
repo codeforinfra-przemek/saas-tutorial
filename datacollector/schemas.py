@@ -1,10 +1,13 @@
-"""Versioned contracts shared by the Planner and future loop agents."""
+"""Versioned contracts shared by the franchise research loop agents."""
 
 from __future__ import annotations
 
+import hashlib
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
+from pathlib import PurePosixPath
 from string import Formatter
 from typing import Literal
 from uuid import UUID
@@ -23,6 +26,8 @@ SCHEMA_VERSION = "1.2.0"
 PROMPT_VERSION = "planner-system-v2"
 SEARCHER_SCHEMA_VERSION = "1.1.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v3"
+EXTRACTOR_SCHEMA_VERSION = "1.0.0"
+EXTRACTOR_PROMPT_VERSION = "extractor-system-v1"
 
 
 class ClosedModel(BaseModel):
@@ -455,6 +460,7 @@ class AgentIterationUsage(ClosedModel):
     iteration: int = Field(ge=1)
     call_index: int = Field(default=1, ge=1)
     scope_task_ids: list[str] = Field(default_factory=list)
+    scope_source_ids: list[str] = Field(default_factory=list)
     provider: Literal["openai"] = "openai"
     requested_model: str = Field(min_length=1)
     resolved_model: str = Field(min_length=1)
@@ -469,6 +475,8 @@ class AgentIterationUsage(ClosedModel):
     def validate_usage_scope(self) -> "AgentIterationUsage":
         if len(self.scope_task_ids) != len(set(self.scope_task_ids)):
             raise ValueError("Usage scope_task_ids values must be unique.")
+        if len(self.scope_source_ids) != len(set(self.scope_source_ids)):
+            raise ValueError("Usage scope_source_ids values must be unique.")
         if self.cost_estimate is not None:
             recorded_tool_cost = sum(
                 (item.estimated_cost_usd for item in self.tool_usage),
@@ -493,6 +501,7 @@ class AgentFailureArtifact(ClosedModel):
     iteration: int | None = Field(default=None, ge=1)
     call_index: int | None = Field(default=None, ge=1)
     scope_task_ids: list[str] = Field(default_factory=list)
+    scope_source_ids: list[str] = Field(default_factory=list)
     provider: Literal["openai"] = "openai"
     requested_model: str | None = None
     usage: AgentIterationUsage | None = None
@@ -528,6 +537,15 @@ class AgentFailureArtifact(ClosedModel):
             )
         if len(self.scope_task_ids) != len(set(self.scope_task_ids)):
             raise ValueError("Failure artifact task scope must be unique.")
+        if len(self.scope_source_ids) != len(set(self.scope_source_ids)):
+            raise ValueError("Failure artifact source scope must be unique.")
+        if any(
+            not re.fullmatch(r"source-[a-f0-9]{16}", source_id)
+            for source_id in self.scope_source_ids
+        ):
+            raise ValueError("Failure artifact source scope has an invalid ID.")
+        if self.agent == "extractor" and len(self.scope_source_ids) != 1:
+            raise ValueError("Extractor failure artifacts require one source ID.")
         billed_tool_calls = sum(item.calls for item in self.tool_usage)
         if billed_tool_calls > self.observed_tool_calls:
             raise ValueError(
@@ -548,6 +566,7 @@ class AgentFailureArtifact(ClosedModel):
                 or self.iteration != self.usage.iteration
                 or self.call_index != self.usage.call_index
                 or self.scope_task_ids != self.usage.scope_task_ids
+                or self.scope_source_ids != self.usage.scope_source_ids
                 or self.provider != self.usage.provider
                 or self.requested_model != self.usage.requested_model
             ):
@@ -1271,5 +1290,681 @@ class SearchResults(ClosedModel):
                 raise ValueError(
                     "Successful actions and observed failed tool calls exceed "
                     "the configured global tool-call cap."
+                )
+        return self
+
+
+class DocumentRetrievalStatus(StrEnum):
+    FETCHED = "fetched"
+    NOT_FOUND = "not_found"
+    NOT_ACCESSIBLE = "not_accessible"
+    FAILED = "failed"
+
+
+class DocumentParseStatus(StrEnum):
+    PARSED = "parsed"
+    PARTIAL = "partial"
+    EMPTY = "empty"
+    UNSUPPORTED = "unsupported"
+    FAILED = "failed"
+    NOT_ATTEMPTED = "not_attempted"
+
+
+class FieldExtractionStatus(StrEnum):
+    EXTRACTED = "extracted"
+    NOT_DISCLOSED = "not_disclosed"
+    NOT_APPLICABLE = "not_applicable"
+    NOT_FOUND = "not_found"
+    NOT_ACCESSIBLE = "not_accessible"
+    NOT_PROCESSED = "not_processed"
+
+
+class ExtractionTaskStatus(StrEnum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    NO_EVIDENCE = "no_evidence"
+    NO_ACCESSIBLE_CONTENT = "no_accessible_content"
+    CONTENT_ONLY = "content_only"
+    NOT_PROCESSED = "not_processed"
+
+
+class ExtractionConfidence(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class ExtractionMethod(StrEnum):
+    OPENAI = "openai"
+
+
+class ExtractorClaimDraft(ClosedModel):
+    """One model-proposed raw claim before deterministic grounding checks."""
+
+    task_id: str
+    target_field: str
+    passage_id: str
+    value_text: str = Field(min_length=1, max_length=2000)
+    evidence_quote: str = Field(min_length=10, max_length=2000)
+    asserted_by_text: str | None = Field(default=None, max_length=500)
+    as_of_text: str | None = Field(default=None, max_length=500)
+    unit_text: str | None = Field(default=None, max_length=200)
+    currency_text: str | None = Field(default=None, max_length=100)
+    publisher_text: str | None = Field(default=None, max_length=500)
+    publication_date_text: str | None = Field(default=None, max_length=200)
+    effective_date_text: str | None = Field(default=None, max_length=200)
+    confidence: ExtractionConfidence
+    notes: str = Field(default="", max_length=1000)
+
+
+class ExtractorDraft(ClosedModel):
+    """Structured provider output; lineage and evidence IDs remain local."""
+
+    claims: list[ExtractorClaimDraft] = Field(default_factory=list, max_length=100)
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+
+
+class SourceDocument(ClosedModel):
+    document_id: str = Field(pattern=r"^document-[a-f0-9]{16}$")
+    source_id: str = Field(pattern=r"^source-[a-f0-9]{16}$")
+    canonical_url: str = Field(min_length=8, max_length=4000)
+    final_url: str | None = Field(default=None, max_length=4000)
+    redirect_chain: list[str] = Field(default_factory=list, max_length=10)
+    task_ids: list[str] = Field(default_factory=list)
+    retrieval_status: DocumentRetrievalStatus
+    parse_status: DocumentParseStatus
+    collected_at: datetime | None = None
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    media_type: str | None = Field(default=None, max_length=200)
+    content_bytes: int | None = Field(default=None, ge=0)
+    content_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    content_path: str | None = Field(default=None, max_length=1000)
+    title: str = Field(default="", max_length=1000)
+    text: str = Field(default="", max_length=250_000)
+    text_chars: int = Field(default=0, ge=0)
+    processed_chars: int = Field(default=0, ge=0)
+    text_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    text_truncated: bool = False
+    parser: str | None = Field(default=None, max_length=100)
+    page_count: int | None = Field(default=None, ge=0)
+    parsed_pages: int | None = Field(default=None, ge=0)
+    selected_page_numbers: list[int] = Field(default_factory=list)
+    resolution_method: str = Field(default="direct", max_length=100)
+    resolver_metadata: dict[str, str] = Field(default_factory=dict)
+    error_code: str | None = Field(
+        default=None, pattern=r"^[a-z][a-z0-9_-]*$"
+    )
+    error_message: str | None = Field(default=None, max_length=500)
+
+    @field_validator("content_path")
+    @classmethod
+    def validate_content_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        path = PurePosixPath(value)
+        if path.is_absolute() or not value or ".." in path.parts:
+            raise ValueError("Document content_path must be a safe relative path.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_document(self) -> "SourceDocument":
+        if len(self.task_ids) != len(set(self.task_ids)):
+            raise ValueError("Source document task IDs must be unique.")
+        if len(self.redirect_chain) != len(set(self.redirect_chain)):
+            raise ValueError("Source document redirect chain cannot contain loops.")
+        if len(self.resolver_metadata) > 30:
+            raise ValueError("Source document resolver metadata is too large.")
+        if len(self.selected_page_numbers) != len(set(self.selected_page_numbers)):
+            raise ValueError("Selected PDF page numbers must be unique.")
+        if self.selected_page_numbers != sorted(self.selected_page_numbers):
+            raise ValueError("Selected PDF page numbers must be ordered.")
+        if any(page < 1 for page in self.selected_page_numbers):
+            raise ValueError("Selected PDF page numbers must be positive.")
+        if self.text_chars != len(self.text):
+            raise ValueError("Source document text_chars must match stored text.")
+        if self.processed_chars > self.text_chars:
+            raise ValueError("processed_chars cannot exceed text_chars.")
+        parsed = self.parse_status in {
+            DocumentParseStatus.PARSED,
+            DocumentParseStatus.PARTIAL,
+        }
+        if parsed:
+            if (
+                self.retrieval_status != DocumentRetrievalStatus.FETCHED
+                or not self.text
+                or self.text_sha256 is None
+                or self.parser is None
+            ):
+                raise ValueError(
+                    "Parsed documents require fetched content, text, hash and parser."
+                )
+            expected_text_hash = hashlib.sha256(
+                self.text.encode("utf-8")
+            ).hexdigest()
+            if self.text_sha256 != expected_text_hash:
+                raise ValueError("Source document text SHA-256 does not match text.")
+            if (self.parse_status == DocumentParseStatus.PARTIAL) != (
+                self.text_truncated
+            ):
+                raise ValueError("Partial parse status must match text_truncated.")
+        elif self.text or self.text_chars or self.text_sha256 is not None:
+            raise ValueError("Unparsed documents cannot contain extracted text.")
+        if self.retrieval_status == DocumentRetrievalStatus.FETCHED:
+            if (
+                self.final_url is None
+                or self.collected_at is None
+                or self.http_status is None
+                or not 200 <= self.http_status < 300
+                or self.media_type is None
+                or self.content_bytes is None
+                or self.content_sha256 is None
+            ):
+                raise ValueError(
+                    "Fetched documents require URL, HTTP and content metadata."
+                )
+        elif parsed:
+            raise ValueError("A non-fetched document cannot be parsed.")
+        if self.parsed_pages is not None and self.page_count is not None:
+            if self.parsed_pages > self.page_count:
+                raise ValueError("parsed_pages cannot exceed page_count.")
+        if self.page_count is not None and any(
+            page > self.page_count for page in self.selected_page_numbers
+        ):
+            raise ValueError("Selected PDF page exceeds page_count.")
+        if self.selected_page_numbers and self.media_type != "application/pdf":
+            raise ValueError("Only PDF documents may record selected page numbers.")
+        return self
+
+
+class EvidencePassage(ClosedModel):
+    passage_id: str = Field(pattern=r"^passage-[a-f0-9]{16}$")
+    document_id: str = Field(pattern=r"^document-[a-f0-9]{16}$")
+    source_id: str = Field(pattern=r"^source-[a-f0-9]{16}$")
+    task_id: str
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+    locator: str = Field(min_length=1, max_length=500)
+    text: str = Field(min_length=10, max_length=6000)
+    matched_terms: list[str] = Field(default_factory=list, max_length=50)
+
+
+class ExtractionCitation(ClosedModel):
+    citation_id: str = Field(pattern=r"^citation-[a-f0-9]{16}$")
+    passage_id: str = Field(pattern=r"^passage-[a-f0-9]{16}$")
+    document_id: str = Field(pattern=r"^document-[a-f0-9]{16}$")
+    source_id: str = Field(pattern=r"^source-[a-f0-9]{16}$")
+    text_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    quote: str = Field(min_length=10, max_length=2000)
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+    locator: str = Field(min_length=1, max_length=500)
+
+
+class RawExtractionClaim(ClosedModel):
+    claim_id: str = Field(pattern=r"^claim-[a-f0-9]{16}$")
+    task_id: str
+    target_field: str
+    value_text: str = Field(min_length=1, max_length=2000)
+    citation_ids: list[str] = Field(min_length=1, max_length=20)
+    asserted_by_text: str | None = Field(default=None, max_length=500)
+    as_of_text: str | None = Field(default=None, max_length=500)
+    unit_text: str | None = Field(default=None, max_length=200)
+    currency_text: str | None = Field(default=None, max_length=100)
+    publisher_text: str | None = Field(default=None, max_length=500)
+    publication_date_text: str | None = Field(default=None, max_length=200)
+    effective_date_text: str | None = Field(default=None, max_length=200)
+    confidence: ExtractionConfidence
+    verification_status: Literal["unverified"] = "unverified"
+    extraction_method: ExtractionMethod = ExtractionMethod.OPENAI
+    notes: str = Field(default="", max_length=1000)
+
+
+class FieldExtractionResult(ClosedModel):
+    task_id: str
+    target_field: str
+    status: FieldExtractionStatus
+    claim_ids: list[str] = Field(default_factory=list)
+    source_ids_considered: list[str] = Field(default_factory=list)
+    notes: str = Field(default="", max_length=1000)
+
+
+class ExtractionTaskResult(ClosedModel):
+    task_id: str
+    catalog_question_id: str
+    status: ExtractionTaskStatus
+    source_ids: list[str] = Field(default_factory=list)
+    document_ids: list[str] = Field(default_factory=list)
+    passage_ids: list[str] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
+    field_results: list[FieldExtractionResult] = Field(min_length=1)
+    unresolved_targets: list[str] = Field(default_factory=list)
+    inherited_search_unresolved_targets: list[str] = Field(default_factory=list)
+    coverage_gaps: list[str] = Field(default_factory=list)
+    notes: str = Field(default="", max_length=1000)
+
+
+class ExtractionLimits(ClosedModel):
+    source_limit: int | None = Field(default=None, ge=1)
+    requested_source_ids: list[str] = Field(default_factory=list)
+    max_document_bytes: int = Field(ge=1024)
+    max_document_chars: int = Field(ge=1000, le=250_000)
+    max_pdf_scan_chars: int = Field(default=2_000_000, ge=10_000, le=5_000_000)
+    max_passages_per_task: int = Field(ge=1, le=50)
+    max_evidence_chars_per_call: int = Field(
+        default=100_000, ge=10_000, le=500_000
+    )
+    max_api_calls: int = Field(ge=1, le=100)
+
+
+class ExtractionAttemptFailure(ClosedModel):
+    call_index: int = Field(ge=1)
+    source_id: str = Field(pattern=r"^source-[a-f0-9]{16}$")
+    scope_task_ids: list[str] = Field(min_length=1)
+    error_code: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    usage_recorded: bool
+    token_usage_unknown: bool = False
+
+
+class ExtractionResults(ClosedModel):
+    """Auditable raw extraction artifact consumed later by Checker."""
+
+    schema_version: Literal["1.0.0"] = EXTRACTOR_SCHEMA_VERSION
+    prompt_version: str = EXTRACTOR_PROMPT_VERSION
+    extraction_id: str
+    plan_run_id: str
+    search_id: str
+    plan_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    search_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    plan_reference: str = Field(min_length=1)
+    search_reference: str = Field(min_length=1)
+    created_at: datetime
+    iteration: int = Field(ge=1)
+    generated_by: Literal["deterministic", "openai"]
+    model: str | None
+    brand_name: str
+    target_country: str = Field(pattern=r"^[A-Z]{2}$")
+    depth: ResearchDepth
+    network_executed: bool
+    provider_executed: bool
+    limits: ExtractionLimits
+    selected_task_ids: list[str] = Field(min_length=1)
+    selected_source_ids: list[str] = Field(min_length=1)
+    unselected_source_ids: list[str]
+    documents: list[SourceDocument] = Field(min_length=1)
+    evidence_passages: list[EvidencePassage]
+    citations: list[ExtractionCitation]
+    claims: list[RawExtractionClaim]
+    task_results: list[ExtractionTaskResult] = Field(min_length=1)
+    warnings: list[str]
+    compliance_rules: list[str]
+    agent_usage: list[AgentIterationUsage] = Field(default_factory=list)
+    failed_attempts: list[ExtractionAttemptFailure] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_extraction_results(self) -> "ExtractionResults":
+        for value, field_name in (
+            (self.extraction_id, "extraction_id"),
+            (self.plan_run_id, "plan_run_id"),
+            (self.search_id, "search_id"),
+        ):
+            try:
+                parsed = UUID(value)
+            except (ValueError, AttributeError) as exc:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.") from exc
+            if parsed.version != 4:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.")
+        if self.generated_by == "deterministic" and (
+            self.model is not None
+            or self.provider_executed
+            or self.agent_usage
+            or self.failed_attempts
+            or self.claims
+            or self.citations
+        ):
+            raise ValueError(
+                "Deterministic Extractor cannot contain provider facts or claims."
+            )
+        for values, field_name in (
+            (self.selected_task_ids, "selected_task_ids"),
+            (self.selected_source_ids, "selected_source_ids"),
+            (self.unselected_source_ids, "unselected_source_ids"),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"{field_name} values must be unique.")
+        if set(self.selected_source_ids) & set(self.unselected_source_ids):
+            raise ValueError("Selected and unselected extraction sources overlap.")
+
+        document_ids = [item.document_id for item in self.documents]
+        document_source_ids = [item.source_id for item in self.documents]
+        if document_source_ids != self.selected_source_ids:
+            raise ValueError(
+                "Extraction documents must exactly follow selected_source_ids."
+            )
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("Extraction document IDs must be unique.")
+        document_by_id = {item.document_id: item for item in self.documents}
+        document_by_source = {item.source_id: item for item in self.documents}
+        known_tasks = set(self.selected_task_ids)
+        if any(not set(item.task_ids).issubset(known_tasks) for item in self.documents):
+            raise ValueError("Document task mappings exceed selected tasks.")
+
+        passage_ids = [item.passage_id for item in self.evidence_passages]
+        if len(passage_ids) != len(set(passage_ids)):
+            raise ValueError("Evidence passage IDs must be unique.")
+        passage_by_id = {item.passage_id: item for item in self.evidence_passages}
+        for passage in self.evidence_passages:
+            document = document_by_id.get(passage.document_id)
+            if (
+                document is None
+                or document.source_id != passage.source_id
+                or passage.task_id not in document.task_ids
+                or document.parse_status
+                not in {DocumentParseStatus.PARSED, DocumentParseStatus.PARTIAL}
+                or passage.end_char <= passage.start_char
+                or document.text[passage.start_char : passage.end_char]
+                != passage.text
+            ):
+                raise ValueError("Evidence passage is not grounded in its document.")
+            if len(passage.matched_terms) != len(set(passage.matched_terms)):
+                raise ValueError("Evidence passage matched terms must be unique.")
+
+        citation_ids = [item.citation_id for item in self.citations]
+        if len(citation_ids) != len(set(citation_ids)):
+            raise ValueError("Extraction citation IDs must be unique.")
+        citation_by_id = {item.citation_id: item for item in self.citations}
+        for citation in self.citations:
+            document = document_by_id.get(citation.document_id)
+            passage = passage_by_id.get(citation.passage_id)
+            if (
+                document is None
+                or passage is None
+                or passage.document_id != citation.document_id
+                or passage.source_id != citation.source_id
+                or document.source_id != citation.source_id
+                or document.text_sha256 != citation.text_sha256
+                or citation.end_char <= citation.start_char
+                or citation.start_char < passage.start_char
+                or citation.end_char > passage.end_char
+                or document.text[citation.start_char : citation.end_char]
+                != citation.quote
+            ):
+                raise ValueError("Extraction citation is not grounded in source text.")
+
+        claim_ids = [item.claim_id for item in self.claims]
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("Raw extraction claim IDs must be unique.")
+        claim_by_id = {item.claim_id: item for item in self.claims}
+        for claim in self.claims:
+            if claim.task_id not in known_tasks:
+                raise ValueError("Raw extraction claim references unknown task.")
+            if len(claim.citation_ids) != len(set(claim.citation_ids)):
+                raise ValueError("Raw claim citation IDs must be unique.")
+            if not set(claim.citation_ids).issubset(citation_by_id):
+                raise ValueError("Raw extraction claim references unknown citations.")
+            claim_citations = [citation_by_id[item] for item in claim.citation_ids]
+            if any(
+                claim.task_id
+                not in document_by_source[citation.source_id].task_ids
+                for citation in claim_citations
+            ):
+                raise ValueError("Raw claim citation source is not mapped to task.")
+            if any(
+                passage_by_id[citation.passage_id].task_id != claim.task_id
+                for citation in claim_citations
+            ):
+                raise ValueError("Raw claim citation passage is mapped to another task.")
+            if not any(
+                claim.value_text in citation.quote for citation in claim_citations
+            ):
+                raise ValueError("Raw claim value must occur in a citation quote.")
+
+        if [item.task_id for item in self.task_results] != self.selected_task_ids:
+            raise ValueError(
+                "Extraction task_results must follow selected_task_ids exactly."
+            )
+        result_by_task = {item.task_id: item for item in self.task_results}
+        for result in self.task_results:
+            for values, field_name in (
+                (result.source_ids, "source_ids"),
+                (result.document_ids, "document_ids"),
+                (result.passage_ids, "passage_ids"),
+                (result.claim_ids, "claim_ids"),
+                (result.unresolved_targets, "unresolved_targets"),
+                (
+                    result.inherited_search_unresolved_targets,
+                    "inherited_search_unresolved_targets",
+                ),
+                (result.coverage_gaps, "coverage_gaps"),
+            ):
+                if len(values) != len(set(values)):
+                    raise ValueError(
+                        f"Extraction task {field_name} values must be unique."
+                    )
+            if not set(result.source_ids).issubset(self.selected_source_ids):
+                raise ValueError("Extraction task references unknown source IDs.")
+            if not set(result.document_ids).issubset(document_by_id):
+                raise ValueError("Extraction task references unknown document IDs.")
+            if not set(result.passage_ids).issubset(passage_by_id):
+                raise ValueError("Extraction task references unknown passage IDs.")
+            if not set(result.claim_ids).issubset(claim_by_id):
+                raise ValueError("Extraction task references unknown claim IDs.")
+            expected_documents = [
+                document
+                for document in self.documents
+                if result.task_id in document.task_ids
+            ]
+            expected_source_ids = [item.source_id for item in expected_documents]
+            expected_document_ids = [item.document_id for item in expected_documents]
+            expected_passage_ids = [
+                item.passage_id
+                for item in self.evidence_passages
+                if item.task_id == result.task_id
+            ]
+            expected_claim_ids = [
+                item.claim_id
+                for item in self.claims
+                if item.task_id == result.task_id
+            ]
+            if (
+                result.source_ids != expected_source_ids
+                or result.document_ids != expected_document_ids
+                or result.passage_ids != expected_passage_ids
+                or result.claim_ids != expected_claim_ids
+            ):
+                raise ValueError(
+                    "Extraction task source, document, passage and claim mappings "
+                    "must be exact and symmetric."
+                )
+            if any(
+                document_by_id[item].source_id not in result.source_ids
+                for item in result.document_ids
+            ):
+                raise ValueError("Task documents must belong to its source set.")
+            if any(
+                passage_by_id[item].task_id != result.task_id
+                for item in result.passage_ids
+            ):
+                raise ValueError("Task passage mapping is not symmetric.")
+            if any(claim_by_id[item].task_id != result.task_id for item in result.claim_ids):
+                raise ValueError("Task claim mapping is not symmetric.")
+            field_names = [item.target_field for item in result.field_results]
+            if len(field_names) != len(set(field_names)):
+                raise ValueError("Task field extraction results must be unique.")
+            for field_result in result.field_results:
+                if field_result.task_id != result.task_id:
+                    raise ValueError("Field extraction result has wrong task ID.")
+                if len(field_result.claim_ids) != len(set(field_result.claim_ids)):
+                    raise ValueError("Field result claim IDs must be unique.")
+                if len(field_result.source_ids_considered) != len(
+                    set(field_result.source_ids_considered)
+                ):
+                    raise ValueError("Field result source IDs must be unique.")
+                if not set(field_result.claim_ids).issubset(claim_by_id):
+                    raise ValueError("Field result references unknown raw claims.")
+                if not set(field_result.source_ids_considered).issubset(
+                    result.source_ids
+                ):
+                    raise ValueError("Field result references unconsidered task sources.")
+                if field_result.source_ids_considered != result.source_ids:
+                    raise ValueError(
+                        "Field result must record every selected source mapped to task."
+                    )
+                field_claims = [claim_by_id[item] for item in field_result.claim_ids]
+                if any(
+                    claim.target_field != field_result.target_field
+                    for claim in field_claims
+                ):
+                    raise ValueError("Field result claim mappings are inconsistent.")
+                expected_field_claim_ids = [
+                    claim.claim_id
+                    for claim in self.claims
+                    if claim.task_id == result.task_id
+                    and claim.target_field == field_result.target_field
+                ]
+                if field_result.claim_ids != expected_field_claim_ids:
+                    raise ValueError(
+                        "Field result must exactly contain its global raw claims."
+                    )
+                if field_result.status in {
+                    FieldExtractionStatus.EXTRACTED,
+                    FieldExtractionStatus.NOT_DISCLOSED,
+                    FieldExtractionStatus.NOT_APPLICABLE,
+                } and not field_result.claim_ids:
+                    raise ValueError("Extracted field status requires raw claims.")
+                if field_result.status in {
+                    FieldExtractionStatus.NOT_FOUND,
+                    FieldExtractionStatus.NOT_ACCESSIBLE,
+                    FieldExtractionStatus.NOT_PROCESSED,
+                } and field_result.claim_ids:
+                    raise ValueError("Non-extracted field status cannot have claims.")
+            closed_field_statuses = {
+                FieldExtractionStatus.EXTRACTED,
+                FieldExtractionStatus.NOT_DISCLOSED,
+                FieldExtractionStatus.NOT_APPLICABLE,
+            }
+            closed_count = sum(
+                field.status in closed_field_statuses
+                for field in result.field_results
+            )
+            if result.status == ExtractionTaskStatus.COMPLETE and closed_count != len(
+                result.field_results
+            ):
+                raise ValueError("Complete extraction task requires all fields closed.")
+            if result.status == ExtractionTaskStatus.PARTIAL and not (
+                0 < closed_count < len(result.field_results)
+            ):
+                raise ValueError(
+                    "Partial extraction task requires both closed and open fields."
+                )
+
+        for claim in self.claims:
+            target_fields = {
+                item.target_field
+                for item in result_by_task[claim.task_id].field_results
+            }
+            if claim.target_field not in target_fields:
+                raise ValueError("Raw extraction claim targets an unknown plan field.")
+
+        usage_keys = [
+            (item.agent, item.iteration, item.call_index)
+            for item in self.agent_usage
+        ]
+        if len(usage_keys) != len(set(usage_keys)):
+            raise ValueError("Extractor usage entries must be unique.")
+        if any(
+            item.agent != "extractor"
+            or item.iteration != self.iteration
+            or not set(item.scope_task_ids).issubset(known_tasks)
+            or len(item.scope_source_ids) != 1
+            or item.scope_source_ids[0] not in self.selected_source_ids
+            for item in self.agent_usage
+        ):
+            raise ValueError("Extractor usage has inconsistent agent scope.")
+        usage_by_call_index = {
+            item.call_index: item for item in self.agent_usage
+        }
+        usage_call_indices = {item.call_index for item in self.agent_usage}
+        if len(self.failed_attempts) != len(
+            {item.call_index for item in self.failed_attempts}
+        ):
+            raise ValueError("Extractor failed call indices must be unique.")
+        for failure in self.failed_attempts:
+            if (
+                failure.source_id not in self.selected_source_ids
+                or not set(failure.scope_task_ids).issubset(known_tasks)
+                or failure.usage_recorded
+                != (failure.call_index in usage_call_indices)
+                or failure.token_usage_unknown == failure.usage_recorded
+            ):
+                raise ValueError("Extractor failure ledger is inconsistent.")
+            if failure.usage_recorded and usage_by_call_index[
+                failure.call_index
+            ].scope_source_ids != [failure.source_id]:
+                raise ValueError("Extractor failure usage has wrong source scope.")
+
+        logical_call_indices = usage_call_indices | {
+            item.call_index for item in self.failed_attempts
+        }
+        if len(logical_call_indices) > self.limits.max_api_calls:
+            raise ValueError("Extractor logical calls exceed max_api_calls.")
+        if logical_call_indices and sorted(logical_call_indices) != list(
+            range(1, len(logical_call_indices) + 1)
+        ):
+            raise ValueError("Extractor logical call indices must be contiguous.")
+
+        failed_call_indices = {
+            item.call_index for item in self.failed_attempts
+        }
+        successful_usage = [
+            usage
+            for usage in self.agent_usage
+            if usage.call_index not in failed_call_indices
+        ]
+        closed_field_statuses = {
+            FieldExtractionStatus.EXTRACTED,
+            FieldExtractionStatus.NOT_DISCLOSED,
+            FieldExtractionStatus.NOT_APPLICABLE,
+        }
+        for result in self.task_results:
+            accessible = any(
+                document_by_id[document_id].parse_status
+                in {DocumentParseStatus.PARSED, DocumentParseStatus.PARTIAL}
+                for document_id in result.document_ids
+            )
+            closed_count = sum(
+                field.status in closed_field_statuses
+                for field in result.field_results
+            )
+            semantic_success = any(
+                result.task_id in usage.scope_task_ids
+                and usage.scope_source_ids[0] in result.source_ids
+                for usage in successful_usage
+            )
+            if not accessible:
+                expected_status = ExtractionTaskStatus.NO_ACCESSIBLE_CONTENT
+            elif self.generated_by == "deterministic":
+                expected_status = ExtractionTaskStatus.CONTENT_ONLY
+            elif closed_count == len(result.field_results):
+                expected_status = ExtractionTaskStatus.COMPLETE
+            elif closed_count:
+                expected_status = ExtractionTaskStatus.PARTIAL
+            elif semantic_success:
+                expected_status = ExtractionTaskStatus.NO_EVIDENCE
+            else:
+                expected_status = ExtractionTaskStatus.NOT_PROCESSED
+            if result.status != expected_status:
+                raise ValueError(
+                    "Extraction task status does not match deterministic evidence "
+                    "and provider-attempt state."
+                )
+
+        if self.generated_by == "openai":
+            if self.model is None or not self.model.strip():
+                raise ValueError("OpenAI Extractor must declare its model.")
+            if self.provider_executed != bool(
+                self.agent_usage or self.failed_attempts
+            ):
+                raise ValueError(
+                    "Extractor provider_executed must match recorded provider attempts."
                 )
         return self

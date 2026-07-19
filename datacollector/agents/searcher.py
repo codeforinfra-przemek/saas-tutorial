@@ -70,6 +70,7 @@ MULTI_LABEL_PUBLIC_SUFFIXES = {
     "com.tr",
     "edu.pl",
     "gov.au",
+    "gov.pl",
     "gov.uk",
     "net.au",
     "net.pl",

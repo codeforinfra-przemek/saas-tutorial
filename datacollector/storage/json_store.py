@@ -4,16 +4,64 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from ..schemas import AgentFailureArtifact, ResearchPlan, SearchResults
+from ..schemas import (
+    AgentFailureArtifact,
+    ExtractionResults,
+    ResearchPlan,
+    SearchResults,
+)
 
 
 DEFAULT_RUNS_DIR = Path(__file__).resolve().parent.parent / "data" / "runs"
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Durably persist a directory entry created by an atomic publish."""
+
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(directory, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _write_immutable_text(path: Path, rendered: str) -> None:
+    """Publish complete text atomically without replacing an existing artifact."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        output = os.fdopen(descriptor, "w", encoding="utf-8")
+        descriptor = -1
+        with output:
+            output.write(rendered)
+            output.flush()
+            os.fsync(output.fileno())
+
+        # A same-filesystem hard link is an atomic no-replace publish: it either
+        # creates the final name for the complete, fsynced inode or raises
+        # FileExistsError while leaving the existing artifact untouched.
+        os.link(temporary_path, path)
+        temporary_path.unlink()
+        _fsync_directory(path.parent)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary_path.unlink(missing_ok=True)
 
 
 def slugify(value: str) -> str:
@@ -35,10 +83,10 @@ def save_research_plan(
     run_directory.mkdir(parents=True, exist_ok=False)
     filename = "plan-free.json" if plan.generated_by == "offline" else "plan.json"
     plan_path = run_directory / filename
-    plan_path.write_text(
+    _write_immutable_text(
+        plan_path,
         json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, indent=2)
         + "\n",
-        encoding="utf-8",
     )
     return plan_path
 
@@ -50,6 +98,15 @@ def load_research_plan(path: Path | str) -> tuple[ResearchPlan, str]:
     raw_plan = plan_path.read_bytes()
     plan = ResearchPlan.model_validate_json(raw_plan)
     return plan, hashlib.sha256(raw_plan).hexdigest()
+
+
+def load_search_results(path: Path | str) -> tuple[SearchResults, str]:
+    """Load Searcher output and return its exact input-byte SHA-256."""
+
+    search_path = Path(path)
+    raw_search = search_path.read_bytes()
+    results = SearchResults.model_validate_json(raw_search)
+    return results, hashlib.sha256(raw_search).hexdigest()
 
 
 def search_results_filename_for(iteration: int, *, offline: bool) -> str:
@@ -84,8 +141,78 @@ def save_search_results(
         )
         + "\n"
     )
-    with result_path.open("x", encoding="utf-8") as output:
-        output.write(rendered)
+    _write_immutable_text(result_path, rendered)
+    return result_path
+
+
+def extraction_results_filename_for(iteration: int, *, free: bool) -> str:
+    stem = "extractions" if iteration == 1 else f"extractions-r{iteration:03d}"
+    if free:
+        stem = f"{stem}-free"
+    return f"{stem}.json"
+
+
+def extraction_results_filename(results: ExtractionResults) -> str:
+    return extraction_results_filename_for(
+        results.iteration,
+        free=results.generated_by == "deterministic",
+    )
+
+
+def load_extraction_results(
+    path: Path | str,
+) -> tuple[ExtractionResults, str]:
+    extraction_path = Path(path)
+    raw_extraction = extraction_path.read_bytes()
+    results = ExtractionResults.model_validate_json(raw_extraction)
+    reference_root = extraction_path.parent.resolve()
+    for document in results.documents:
+        if document.content_path is None:
+            continue
+        content_path = (reference_root / document.content_path).resolve()
+        if not content_path.is_relative_to(reference_root):
+            raise ValueError(
+                f"Raw-document path escapes result directory: {document.content_path}"
+            )
+        try:
+            content = content_path.read_bytes()
+        except OSError as exc:
+            raise ValueError(
+                f"Raw-document snapshot is unavailable: {document.content_path}"
+            ) from exc
+        if document.content_bytes is not None and len(content) != document.content_bytes:
+            raise ValueError(
+                f"Raw-document byte count mismatch: {document.content_path}"
+            )
+        if (
+            document.content_sha256 is None
+            or hashlib.sha256(content).hexdigest() != document.content_sha256
+        ):
+            raise ValueError(
+                f"Raw-document SHA-256 mismatch: {document.content_path}"
+            )
+    return results, hashlib.sha256(raw_extraction).hexdigest()
+
+
+def save_extraction_results(
+    results: ExtractionResults,
+    search_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> Path:
+    """Save beside explicit Searcher output and never silently overwrite."""
+
+    directory = Path(output_dir) if output_dir is not None else Path(search_path).parent
+    directory.mkdir(parents=True, exist_ok=True)
+    result_path = directory / extraction_results_filename(results)
+    rendered = (
+        json.dumps(
+            results.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    _write_immutable_text(result_path, rendered)
     return result_path
 
 
@@ -98,7 +225,7 @@ def reserve_artifact(path: Path | str) -> Iterator[Path]:
     lock_path = artifact_path.with_name(f".{artifact_path.name}.lock")
     if artifact_path.exists():
         raise FileExistsError(
-            f"Search artifact already exists and will not be overwritten: "
+            f"Artifact already exists and will not be overwritten: "
             f"{artifact_path}"
         )
     try:
@@ -106,12 +233,12 @@ def reserve_artifact(path: Path | str) -> Iterator[Path]:
             lock.write(f"reserved_for={artifact_path.name}\n")
     except FileExistsError:
         raise FileExistsError(
-            f"Search artifact is already reserved by another process: {artifact_path}"
+            f"Artifact is already reserved by another process: {artifact_path}"
         ) from None
     try:
         if artifact_path.exists():
             raise FileExistsError(
-                f"Search artifact already exists and will not be overwritten: "
+                f"Artifact already exists and will not be overwritten: "
                 f"{artifact_path}"
             )
         yield artifact_path
@@ -151,6 +278,5 @@ def save_agent_failure(
         )
         + "\n"
     )
-    with failure_path.open("x", encoding="utf-8") as output:
-        output.write(rendered)
+    _write_immutable_text(failure_path, rendered)
     return failure_path
