@@ -1,4 +1,4 @@
-# Franchise AI research loop — Planner + Searcher + Extractor
+# Franchise AI research loop — Planner + Searcher + Extractor + Checker
 
 This is a standalone, local worker for auditable franchise research. It is kept
 outside Django intentionally: long-running and paid agent work must not execute
@@ -11,7 +11,7 @@ Planner → Searcher → Extractor → Checker ↔ Resolver
         → Normalizer → human review → Importer
 ```
 
-Planner, Searcher and Extractor are implemented. Planner combines:
+Planner, Searcher, Extractor and Checker are implemented. Planner combines:
 
 - a deterministic, versioned question catalog covering all 23 FTC FDD Items;
 - additional commercial, risk, state-law and unit-level due-diligence questions;
@@ -24,6 +24,10 @@ Searcher consumes one explicit plan and discovers source candidates; it does not
 extract or normalize facts. Extractor safely retrieves selected public documents,
 creates exact evidence passages and, in paid mode, maps them to raw claims. It
 does not verify, reconcile or normalize those claims.
+Checker consumes that exact lineage, applies deterministic source, grounding and
+coverage rules, and optionally asks OpenAI for one bounded semantic review. It
+produces quality decisions and follow-up work; it still does not normalize or
+write production data.
 
 ## Setup
 
@@ -326,6 +330,75 @@ call. JSON publication is atomic and immutable. If a paid result cannot be
 published after provider calls, every known usage entry and every unknown-usage
 attempt is written best-effort to the `attempts/` ledger.
 
+## Run Checker: deterministic gate, then paid semantic review
+
+Point both Checker variants at the exact same paid Extractor artifact. The
+Checker loads the referenced Planner and Searcher artifacts automatically and
+validates their IDs, exact resolved references and SHA-256 lineage. Optional
+`--plan` and `--sources` let automation supply those same explicit input paths;
+they do not permit artifact relocation or bypass lineage validation.
+
+Run the free deterministic Checker first:
+
+```bash
+.venv/bin/python -m datacollector check \
+  --extractions datacollector/data/runs/zabka/<run>/extractions-r003.json \
+  --free \
+  --iteration 3 \
+  --max-claims 100 \
+  --max-evidence-chars 100000
+```
+
+This is a real local quality pass, not a dry-run. It checks immutable lineage,
+claim/citation grounding, source roles, task and field coverage, inaccessible or
+unprocessed inputs, critical gaps and the configured plan threshold. It creates
+source assessments, field/task results and deterministic Resolver follow-ups.
+Semantic verdicts remain explicitly `not_reviewed`, so the free result cannot
+pass the complete quality gate and normally recommends `run_paid_checker`. It
+makes no OpenAI call and has zero provider token cost.
+
+Then run the paid Checker against the same Extractor path:
+
+```bash
+.venv/bin/python -m datacollector check \
+  --extractions datacollector/data/runs/zabka/<run>/extractions-r003.json \
+  --iteration 3 \
+  --max-claims 100 \
+  --max-evidence-chars 100000
+```
+
+Use `--model <model-name>` when Checker should use a different model from the
+global `OPENAI_MODEL`; the selected model and its usage remain recorded in the
+artifact.
+
+Paid mode sends only the selected tasks, source metadata, raw claims, exact
+citation quotes and upstream coverage summaries through one Responses API
+Structured Outputs request. It does not browse, retrieve raw documents, use
+tools, normalize values or accept instructions embedded in source text. The
+local agent remains authoritative for lineage, scope, exact grounding, source
+classification, completeness, deductions and the final score/pass gate; the
+model supplies bounded semantic-fit, support, contradiction and safety
+judgments.
+
+The defaults impose a hard preflight ceiling of 100 claims and 100,000 quoted
+evidence characters. Checker refuses an artifact above either ceiling instead of
+silently truncating its semantic-review scope; raise the limits deliberately
+after inspecting the extraction. `unevaluated_task_ids` and
+`unevaluated_source_ids` expose scope that the upstream Searcher or Extractor did
+not select, make `scope_complete=false`, and cannot silently pass. Checker also
+requires all critical fields, no unresolved contradiction or high/critical
+unsafe item, and a score at or above the Planner threshold before it can
+recommend `human_review`. A pass means ready for human review, never safe for
+automatic production import.
+
+Iteration 3 writes `check-r003-free.json` and `check-r003.json` beside the exact
+Extractor artifact. Results are immutable and the target is reserved before a
+paid call. The OpenAI client disables SDK retries and Checker allows at most one
+provider request per run. If that call is unusable, or its final artifact cannot
+be used, known usage (or an explicit unknown-token attempt) is retained in the
+Checker artifact. If that final artifact cannot be published, the same attempt
+facts are written best-effort to the run's `attempts/` ledger.
+
 ## Token and cost accounting
 
 Every successful OpenAI call records one `agent_usage` entry in the artifact
@@ -360,6 +433,14 @@ cache and output tokens. Incomplete or unusable charged responses retain their
 known usage in the failure ledger; if token usage is unavailable, the attempt is
 marked unknown instead of being reported as free. Deterministic extraction has
 an empty provider ledger and zero token cost.
+
+Checker records at most one `agent_usage` entry with the exact reviewed task and
+source scope. It has no separately billed web-search tool call, so the estimate
+contains model tokens only. The CLI summary reports the claim verdicts, field and
+task statuses, scope completeness, deductions, final score, pass decision,
+recommended next action and the same per-call and total token/cost ledger stored
+in the artifact. Deterministic checking keeps that provider ledger empty and its
+estimated cost at zero.
 
 For GPT-5.6, Planner disables the default implicit cache breakpoint. A one-off,
 brand-specific planning payload would otherwise incur cache-write charges without

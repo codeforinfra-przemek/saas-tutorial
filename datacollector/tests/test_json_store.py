@@ -1,10 +1,28 @@
+import hashlib
+import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
 from datacollector.storage import json_store
+
+
+class FixtureCheckerResults:
+    def __init__(self, *, iteration: int, generated_by: str) -> None:
+        self.iteration = iteration
+        self.generated_by = generated_by
+
+    def model_dump(self, *, mode: str):
+        if mode != "json":
+            raise AssertionError("Checker artifacts must use JSON-mode serialization.")
+        return {
+            "iteration": self.iteration,
+            "generated_by": self.generated_by,
+            "brand_name": "Żabka",
+        }
 
 
 class ImmutableWriteTests(TestCase):
@@ -62,3 +80,90 @@ class ImmutableWriteTests(TestCase):
 
             self.assertFalse(target.exists())
             self.assertEqual(list(target.parent.glob(".artifact.json.*.tmp")), [])
+
+
+class CheckerStorageTests(TestCase):
+    def test_checker_filename_variants_are_singular_and_iteration_aware(self):
+        self.assertEqual(
+            json_store.checker_results_filename_for(1, free=False),
+            "check.json",
+        )
+        self.assertEqual(
+            json_store.checker_results_filename_for(1, free=True),
+            "check-free.json",
+        )
+        self.assertEqual(
+            json_store.checker_results_filename_for(4, free=False),
+            "check-r004.json",
+        )
+        self.assertEqual(
+            json_store.checker_results_filename_for(4, free=True),
+            "check-r004-free.json",
+        )
+        self.assertEqual(
+            json_store.checker_results_filename(
+                SimpleNamespace(iteration=7, generated_by="deterministic")
+            ),
+            "check-r007-free.json",
+        )
+        self.assertEqual(
+            json_store.checker_results_filename(
+                SimpleNamespace(iteration=7, generated_by="openai")
+            ),
+            "check-r007.json",
+        )
+
+    def test_checker_save_is_immutable_and_load_returns_exact_byte_hash(self):
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            extraction_path = directory / "extractions-r004.json"
+            results = FixtureCheckerResults(
+                iteration=4,
+                generated_by="deterministic",
+            )
+
+            checker_path = json_store.save_checker_results(
+                results,
+                extraction_path,
+            )
+            raw_checker = checker_path.read_bytes()
+
+            self.assertEqual(checker_path, directory / "check-r004-free.json")
+            self.assertTrue(raw_checker.endswith(b"\n"))
+            self.assertEqual(
+                json.loads(raw_checker)["brand_name"],
+                "Żabka",
+            )
+
+            with self.assertRaises(FileExistsError):
+                json_store.save_checker_results(results, extraction_path)
+            self.assertEqual(checker_path.read_bytes(), raw_checker)
+
+            validated = object()
+            with patch.object(
+                json_store.CheckerResults,
+                "model_validate_json",
+                return_value=validated,
+            ) as validate:
+                loaded, digest = json_store.load_checker_results(checker_path)
+
+            self.assertIs(loaded, validated)
+            self.assertEqual(digest, hashlib.sha256(raw_checker).hexdigest())
+            validate.assert_called_once_with(raw_checker)
+
+    def test_checker_save_honors_explicit_output_directory(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            output_directory = root / "checks"
+            results = FixtureCheckerResults(
+                iteration=1,
+                generated_by="openai",
+            )
+
+            checker_path = json_store.save_checker_results(
+                results,
+                root / "inputs" / "extractions.json",
+                output_dir=output_directory,
+            )
+
+            self.assertEqual(checker_path, output_directory / "check.json")

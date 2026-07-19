@@ -15,6 +15,8 @@ from datacollector.cli import main
 from datacollector.config import OpenAISettings
 from datacollector.documents import FetchedDocument, FetchStatus
 from datacollector.llm.protocol import (
+    CheckerGeneration,
+    CheckerProviderError,
     ExtractorGeneration,
     ExtractorProviderError,
     ProviderSearchSource,
@@ -27,6 +29,11 @@ from datacollector.llm.pricing import (
 )
 from datacollector.schemas import (
     AgentIterationUsage,
+    CheckerClaimDecisionDraft,
+    CheckerDraft,
+    CheckerModelSemanticFit,
+    CheckerModelSourceSupport,
+    CheckerModelVerdict,
     ExtractionAttemptFailure,
     ExtractionConfidence,
     ExtractorClaimDraft,
@@ -40,8 +47,9 @@ from datacollector.schemas import (
     SourceType,
     TokenUsage,
 )
-from datacollector.storage.json_store import load_extraction_results
 from datacollector.storage.json_store import (
+    load_checker_results,
+    load_extraction_results,
     load_research_plan,
     save_research_plan,
     save_search_results,
@@ -230,6 +238,118 @@ class CliFixtureExtractor:
         )
 
 
+class CliFixtureChecker:
+    model_name = "gpt-5.6-terra"
+
+    def __init__(self):
+        self.calls = []
+
+    def generate(
+        self,
+        plan,
+        search_results,
+        extraction_results,
+        tasks,
+        sources,
+        system_prompt,
+        *,
+        iteration,
+        call_index,
+    ):
+        self.calls.append(
+            (
+                plan,
+                search_results,
+                extraction_results,
+                tasks,
+                sources,
+                system_prompt,
+                iteration,
+                call_index,
+            )
+        )
+        tokens = TokenUsage(
+            input_tokens=100,
+            output_tokens=20,
+            total_tokens=120,
+        )
+        usage = AgentIterationUsage(
+            agent="checker",
+            iteration=iteration,
+            call_index=call_index,
+            scope_task_ids=[task.task_id for task in tasks],
+            scope_source_ids=[source.source_id for source in sources],
+            requested_model=self.model_name,
+            resolved_model=self.model_name,
+            service_tier="default",
+            tokens=tokens,
+            cost_estimate=estimate_standard_token_cost(
+                self.model_name,
+                tokens,
+                service_tier="default",
+            ),
+        )
+        return CheckerGeneration(
+            draft=CheckerDraft(
+                decisions=[
+                    CheckerClaimDecisionDraft(
+                        claim_id=claim.claim_id,
+                        verdict=CheckerModelVerdict.ACCEPTED,
+                        semantic_fit=CheckerModelSemanticFit.DIRECT,
+                        source_support=CheckerModelSourceSupport.SUFFICIENT,
+                        rationale=(
+                            "The value is a direct semantic match for the field."
+                        ),
+                    )
+                    for claim in extraction_results.claims
+                ]
+            ),
+            usage=usage,
+        )
+
+
+class FailingCliChecker(CliFixtureChecker):
+    def generate(
+        self,
+        plan,
+        search_results,
+        extraction_results,
+        tasks,
+        sources,
+        system_prompt,
+        *,
+        iteration,
+        call_index,
+    ):
+        del plan, search_results, extraction_results, system_prompt
+        tokens = TokenUsage(
+            input_tokens=100,
+            output_tokens=20,
+            total_tokens=120,
+        )
+        usage = AgentIterationUsage(
+            agent="checker",
+            iteration=iteration,
+            call_index=call_index,
+            scope_task_ids=[task.task_id for task in tasks],
+            scope_source_ids=[source.source_id for source in sources],
+            requested_model=self.model_name,
+            resolved_model=self.model_name,
+            service_tier="default",
+            tokens=tokens,
+            cost_estimate=estimate_standard_token_cost(
+                self.model_name,
+                tokens,
+                service_tier="default",
+            ),
+        )
+        raise CheckerProviderError(
+            "Paid Checker response was unusable.",
+            code="missing_structured_output",
+            usage=usage,
+        )
+
+
 class FailingPaidSearcher:
     model_name = "gpt-5.6-terra"
 
@@ -328,6 +448,47 @@ class CollectorCliTests(TestCase):
         )
         sources_path = save_search_results(search_results, plan_path)
         return plan_path, sources_path
+
+    def create_checker_cli_fixture(self, output_directory):
+        plan_path, sources_path = self.create_extractor_cli_fixture(
+            output_directory
+        )
+        stdout = StringIO()
+        with (
+            patch.object(
+                OpenAISettings,
+                "from_env",
+                return_value=OpenAISettings(
+                    api_key="test",
+                    model="gpt-5.6-terra",
+                ),
+            ),
+            patch(
+                "datacollector.cli.OpenAIExtractorClient",
+                return_value=CliFixtureExtractor(),
+            ),
+            patch(
+                "datacollector.cli.DocumentFetcher",
+                return_value=RecordingDocumentFetcher(),
+            ),
+            redirect_stdout(stdout),
+        ):
+            self.assertEqual(
+                main(
+                    [
+                        "extract",
+                        "--sources",
+                        str(sources_path),
+                        "--limit-sources",
+                        "1",
+                    ]
+                ),
+                0,
+            )
+        extraction_path = Path(
+            json.loads(stdout.getvalue())["extractions_path"]
+        )
+        return plan_path, sources_path, extraction_path
 
     def test_offline_plan_command_creates_artifact_without_api(self):
         with TemporaryDirectory() as temporary_directory:
@@ -896,3 +1057,226 @@ class CollectorCliTests(TestCase):
             self.assertIsNone(failure["usage"])
             self.assertTrue(failure["token_usage_unknown"])
             self.assertEqual(failure["scope_source_ids"], [source_id])
+
+    def test_free_check_uses_extractor_lineage_without_openai(self):
+        with TemporaryDirectory() as temporary_directory:
+            plan_path, sources_path, extraction_path = (
+                self.create_checker_cli_fixture(temporary_directory)
+            )
+            stdout = StringIO()
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    side_effect=AssertionError(
+                        "Free Checker must not load OpenAI settings."
+                    ),
+                ),
+                redirect_stdout(stdout),
+            ):
+                exit_code = main(
+                    [
+                        "check",
+                        "--extractions",
+                        str(extraction_path),
+                        "--free",
+                    ]
+                )
+
+            summary = json.loads(stdout.getvalue())
+            check_path = Path(summary["check_path"])
+            results, check_sha256 = load_checker_results(check_path)
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(check_path.name, "check-free.json")
+            self.assertEqual(check_path.parent, extraction_path.parent)
+            self.assertEqual(summary["generated_by"], "deterministic")
+            self.assertFalse(summary["provider_executed"])
+            self.assertEqual(summary["claim_verdicts"], {"not_reviewed": 1})
+            self.assertIn("critical_missing_fields_count", summary)
+            self.assertIn("unevaluated_critical_fields_count", summary)
+            self.assertNotIn("unevaluated_critical_fields", summary)
+            self.assertFalse(summary["passed"])
+            self.assertEqual(
+                summary["recommended_next_action"],
+                "run_paid_checker",
+            )
+            self.assertEqual(summary["agent_usage"], [])
+            self.assertEqual(summary["usage_totals"]["total_tokens"], 0)
+            self.assertEqual(
+                summary["usage_totals"]["estimated_cost_usd"],
+                "0",
+            )
+            self.assertEqual(results.plan_reference, str(plan_path.resolve()))
+            self.assertEqual(
+                results.search_reference,
+                str(sources_path.resolve()),
+            )
+            self.assertEqual(
+                results.extraction_reference,
+                str(extraction_path.resolve()),
+            )
+            self.assertRegex(check_sha256, r"^[a-f0-9]{64}$")
+
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                duplicate_exit_code = main(
+                    [
+                        "check",
+                        "--extractions",
+                        str(extraction_path),
+                        "--free",
+                    ]
+                )
+            self.assertEqual(duplicate_exit_code, 2)
+            self.assertIn("will not be overwritten", stderr.getvalue())
+            self.assertFalse(
+                (extraction_path.parent / ".check-free.json.lock").exists()
+            )
+
+    def test_paid_check_writes_semantic_decision_and_usage(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, _, extraction_path = self.create_checker_cli_fixture(
+                temporary_directory
+            )
+            checker = CliFixtureChecker()
+            stdout = StringIO()
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAICheckerClient",
+                    return_value=checker,
+                ),
+                redirect_stdout(stdout),
+            ):
+                exit_code = main(
+                    [
+                        "check",
+                        "--extractions",
+                        str(extraction_path),
+                    ]
+                )
+
+            summary = json.loads(stdout.getvalue())
+            check_path = Path(summary["check_path"])
+            artifact = json.loads(check_path.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(check_path.name, "check.json")
+            self.assertEqual(summary["generated_by"], "openai")
+            self.assertTrue(summary["provider_executed"])
+            self.assertEqual(summary["selected_claims"], 1)
+            self.assertEqual(summary["claim_verdicts"], {"accepted": 1})
+            self.assertEqual(len(summary["agent_usage"]), 1)
+            self.assertEqual(summary["agent_usage"][0]["agent"], "checker")
+            self.assertEqual(summary["usage_totals"]["total_tokens"], 120)
+            self.assertEqual(
+                summary["usage_totals"]["estimated_cost_usd"],
+                "0.00055000",
+            )
+            self.assertEqual(len(checker.calls), 1)
+            self.assertEqual(
+                artifact["claim_decisions"][0]["verdict"],
+                "accepted",
+            )
+            self.assertEqual(len(artifact["agent_usage"]), 1)
+
+    def test_paid_check_preserves_failed_attempt_in_final_artifact(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, _, extraction_path = self.create_checker_cli_fixture(
+                temporary_directory
+            )
+            stdout = StringIO()
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAICheckerClient",
+                    return_value=FailingCliChecker(),
+                ),
+                redirect_stdout(stdout),
+            ):
+                exit_code = main(
+                    [
+                        "check",
+                        "--extractions",
+                        str(extraction_path),
+                    ]
+                )
+
+            summary = json.loads(stdout.getvalue())
+            artifact = json.loads(
+                Path(summary["check_path"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(summary["claim_verdicts"], {"not_reviewed": 1})
+            self.assertEqual(
+                summary["recommended_next_action"],
+                "retry_checker",
+            )
+            self.assertEqual(summary["usage_totals"]["total_tokens"], 120)
+            self.assertEqual(len(summary["failed_attempts"]), 1)
+            self.assertEqual(
+                artifact["failed_attempts"][0]["error_code"],
+                "missing_structured_output",
+            )
+            self.assertTrue(
+                artifact["failed_attempts"][0]["usage_recorded"]
+            )
+
+    def test_paid_check_saves_usage_when_final_artifact_write_fails(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, _, extraction_path = self.create_checker_cli_fixture(
+                temporary_directory
+            )
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAICheckerClient",
+                    return_value=CliFixtureChecker(),
+                ),
+                patch(
+                    "datacollector.cli.save_checker_results",
+                    side_effect=OSError("fixture disk failure"),
+                ),
+                redirect_stderr(StringIO()),
+            ):
+                exit_code = main(
+                    [
+                        "check",
+                        "--extractions",
+                        str(extraction_path),
+                    ]
+                )
+
+            failures = list(
+                (extraction_path.parent / "attempts").glob("checker-*.json")
+            )
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(len(failures), 1)
+            failure = json.loads(failures[0].read_text(encoding="utf-8"))
+            self.assertEqual(failure["error_code"], "artifact_write_failed")
+            self.assertEqual(failure["agent"], "checker")
+            self.assertIsNotNone(failure["usage"])
+            self.assertFalse((extraction_path.parent / "check.json").exists())
+            self.assertFalse(
+                (extraction_path.parent / ".check.json.lock").exists()
+            )

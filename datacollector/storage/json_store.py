@@ -14,6 +14,7 @@ from typing import Iterator
 
 from ..schemas import (
     AgentFailureArtifact,
+    CheckerResults,
     ExtractionResults,
     ResearchPlan,
     SearchResults,
@@ -204,6 +205,55 @@ def save_extraction_results(
     directory = Path(output_dir) if output_dir is not None else Path(search_path).parent
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / extraction_results_filename(results)
+    rendered = (
+        json.dumps(
+            results.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    _write_immutable_text(result_path, rendered)
+    return result_path
+
+
+def checker_results_filename_for(iteration: int, *, free: bool) -> str:
+    stem = "check" if iteration == 1 else f"check-r{iteration:03d}"
+    if free:
+        stem = f"{stem}-free"
+    return f"{stem}.json"
+
+
+def checker_results_filename(results: CheckerResults) -> str:
+    return checker_results_filename_for(
+        results.iteration,
+        free=results.generated_by == "deterministic",
+    )
+
+
+def load_checker_results(
+    path: Path | str,
+) -> tuple[CheckerResults, str]:
+    """Load Checker output and return its exact input-byte SHA-256."""
+
+    checker_path = Path(path)
+    raw_checker = checker_path.read_bytes()
+    results = CheckerResults.model_validate_json(raw_checker)
+    return results, hashlib.sha256(raw_checker).hexdigest()
+
+
+def save_checker_results(
+    results: CheckerResults,
+    extraction_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> Path:
+    """Save beside explicit Extractor output and never silently overwrite."""
+
+    directory = (
+        Path(output_dir) if output_dir is not None else Path(extraction_path).parent
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    result_path = directory / checker_results_filename(results)
     rendered = (
         json.dumps(
             results.model_dump(mode="json"),

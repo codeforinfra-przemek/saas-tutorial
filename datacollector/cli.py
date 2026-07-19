@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
+from .agents.checker import CheckerAgent, CheckerValidationError
 from .agents.extractor import ExtractorAgent, ExtractorValidationError
 from .agents.planner import PlannerAgent, PlannerValidationError
 from .agents.searcher import SearcherAgent, SearcherValidationError
@@ -20,15 +21,17 @@ from .catalog import CatalogError, load_question_catalog, select_questions
 from .config import ConfigurationError, OpenAISettings
 from .documents import DocumentFetcher, FetchPolicy
 from .llm.openai_client import OpenAIPlannerClient, PlannerProviderError
+from .llm.openai_checker_client import OpenAICheckerClient
 from .llm.openai_extractor_client import OpenAIExtractorClient
 from .llm.openai_searcher_client import (
     OpenAISearcherClient,
     SearcherProviderError,
 )
-from .llm.protocol import ExtractorProviderError
+from .llm.protocol import CheckerProviderError, ExtractorProviderError
 from .schemas import (
     AgentFailureArtifact,
     AgentIterationUsage,
+    CheckerAttemptFailure,
     ExtractionAttemptFailure,
     PlannerInput,
     ResearchDepth,
@@ -36,12 +39,14 @@ from .schemas import (
 )
 from .storage.json_store import (
     DEFAULT_RUNS_DIR,
+    checker_results_filename_for,
     extraction_results_filename_for,
     load_extraction_results,
     load_research_plan,
     load_search_results,
     reserve_artifact,
     save_agent_failure,
+    save_checker_results,
     save_extraction_results,
     save_research_plan,
     save_search_results,
@@ -72,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m datacollector",
         description=(
             "Auditable franchise research loop "
-            "(Planner + Searcher + Extractor MVP)."
+            "(Planner + Searcher + Extractor + Checker MVP)."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -308,6 +313,54 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         help="Artifact directory; defaults to the input Searcher artifact directory.",
+    )
+
+    check_parser = subparsers.add_parser(
+        "check",
+        help="Audit one exact Extractor artifact and create quality decisions.",
+    )
+    check_parser.add_argument(
+        "--extractions",
+        type=Path,
+        required=True,
+        help="Exact extractions.json or extractions-rNNN.json to consume.",
+    )
+    check_parser.add_argument(
+        "--plan",
+        type=Path,
+        help="Exact plan artifact; defaults to Extractor's plan_reference.",
+    )
+    check_parser.add_argument(
+        "--sources",
+        type=Path,
+        help="Exact Searcher artifact; defaults to Extractor's search_reference.",
+    )
+    check_parser.add_argument(
+        "--free",
+        "--offline",
+        dest="offline",
+        action="store_true",
+        help="Run deterministic structural and coverage checks without OpenAI.",
+    )
+    check_parser.add_argument(
+        "--iteration",
+        type=_positive_int,
+        help="Logical Checker iteration; defaults to the Extractor iteration.",
+    )
+    check_parser.add_argument(
+        "--max-claims",
+        type=_positive_int,
+        default=100,
+        help="Maximum raw claims reviewed in this iteration (default: 100).",
+    )
+    check_parser.add_argument(
+        "--max-evidence-chars",
+        type=_positive_int,
+        default=100_000,
+        help="Maximum quoted evidence characters sent to OpenAI (default: 100000).",
+    )
+    check_parser.add_argument(
+        "--model", help="Override OPENAI_MODEL for this Checker invocation."
     )
 
     return parser
@@ -924,6 +977,277 @@ def _run_extract(args: argparse.Namespace) -> int:
     return 0
 
 
+def _save_checker_failure_ledger(
+    *,
+    plan_run_id: str,
+    reference_path: Path,
+    iteration: int,
+    requested_model: str,
+    usages: list[AgentIterationUsage],
+    failed_attempts: list[CheckerAttemptFailure],
+    fallback_error_code: str,
+    fallback_scope_task_ids: list[str],
+    fallback_scope_source_ids: list[str],
+) -> tuple[list[Path], list[str]]:
+    """Best-effort persistence of the single bounded paid Checker call."""
+
+    usage_by_call = {usage.call_index: usage for usage in usages}
+    failure_by_call = {
+        failure.call_index: failure for failure in failed_attempts
+    }
+    call_indices = sorted(set(usage_by_call) | set(failure_by_call)) or [1]
+    paths: list[Path] = []
+    errors: list[str] = []
+    for call_index in call_indices:
+        usage = usage_by_call.get(call_index)
+        attempt = failure_by_call.get(call_index)
+        scope_task_ids = (
+            usage.scope_task_ids
+            if usage is not None
+            else attempt.scope_task_ids
+            if attempt is not None
+            else fallback_scope_task_ids
+        )
+        scope_source_ids = (
+            usage.scope_source_ids
+            if usage is not None
+            else attempt.scope_source_ids
+            if attempt is not None
+            else fallback_scope_source_ids
+        )
+        failure = AgentFailureArtifact(
+            failure_id=str(uuid4()),
+            plan_run_id=plan_run_id,
+            created_at=datetime.now(timezone.utc),
+            error_code=(
+                attempt.error_code
+                if attempt is not None
+                else fallback_error_code
+            ),
+            agent="checker",
+            iteration=usage.iteration if usage is not None else iteration,
+            call_index=call_index,
+            scope_task_ids=scope_task_ids,
+            scope_source_ids=scope_source_ids,
+            provider=usage.provider if usage is not None else "openai",
+            requested_model=(
+                usage.requested_model if usage is not None else requested_model
+            ),
+            usage=usage,
+            observed_tool_calls=(
+                sum(tool.calls for tool in usage.tool_usage)
+                if usage is not None
+                else 0
+            ),
+            tool_usage=usage.tool_usage if usage is not None else [],
+            token_usage_unknown=usage is None,
+        )
+        try:
+            paths.append(save_agent_failure(failure, reference_path))
+        except Exception as exc:
+            errors.append(f"call {call_index}: {type(exc).__name__}")
+    return paths, errors
+
+
+def _run_check(args: argparse.Namespace) -> int:
+    extraction_results, extraction_sha256 = load_extraction_results(
+        args.extractions
+    )
+    search_path = args.sources or Path(extraction_results.search_reference)
+    search_results, search_sha256 = load_search_results(search_path)
+    plan_path = args.plan or Path(extraction_results.plan_reference)
+    plan, plan_sha256 = load_research_plan(plan_path)
+    iteration = args.iteration or extraction_results.iteration
+    expected_path = args.extractions.parent / checker_results_filename_for(
+        iteration,
+        free=args.offline,
+    )
+
+    with reserve_artifact(expected_path):
+        llm = None
+        if not args.offline:
+            settings = OpenAISettings.from_env()
+            if args.model:
+                settings = replace(settings, model=args.model)
+            llm = OpenAICheckerClient(settings)
+
+        try:
+            results = CheckerAgent(llm).create_check_results(
+                plan,
+                search_results,
+                extraction_results,
+                plan_sha256=plan_sha256,
+                search_sha256=search_sha256,
+                extraction_sha256=extraction_sha256,
+                extraction_reference=str(args.extractions.resolve()),
+                plan_reference=str(plan_path.resolve()),
+                search_reference=str(search_path.resolve()),
+                iteration=iteration,
+                max_claims=args.max_claims,
+                max_evidence_chars=args.max_evidence_chars,
+            )
+        except CheckerProviderError as exc:
+            requested_model = (
+                llm.model_name if llm is not None else exc.requested_model
+            )
+            if requested_model is None:
+                raise
+            failure_paths, ledger_errors = _save_checker_failure_ledger(
+                plan_run_id=plan.run_id,
+                reference_path=args.extractions,
+                iteration=exc.iteration or iteration,
+                requested_model=requested_model,
+                usages=exc.usages,
+                failed_attempts=exc.failed_attempts,
+                fallback_error_code=exc.code,
+                fallback_scope_task_ids=(
+                    exc.scope_task_ids or extraction_results.selected_task_ids
+                ),
+                fallback_scope_source_ids=(
+                    exc.scope_source_ids or extraction_results.selected_source_ids
+                ),
+            )
+            ledger_note = (
+                f" Failure ledger: {', '.join(str(path) for path in failure_paths)}."
+                if failure_paths
+                else ""
+            )
+            if ledger_errors:
+                ledger_note += (
+                    " Some failure-ledger writes also failed: "
+                    f"{', '.join(ledger_errors)}."
+                )
+            raise CheckerProviderError(
+                f"{exc}{ledger_note}",
+                code=exc.code,
+                usages=exc.usages,
+                agent=exc.agent,
+                iteration=exc.iteration,
+                call_index=exc.call_index,
+                scope_task_ids=exc.scope_task_ids,
+                scope_source_ids=exc.scope_source_ids,
+                requested_model=exc.requested_model,
+                failed_attempts=exc.failed_attempts,
+            ) from None
+
+        try:
+            results_path = save_checker_results(results, args.extractions)
+        except Exception as exc:
+            if results.generated_by != "openai" or (
+                not results.agent_usage and not results.failed_attempts
+            ):
+                raise
+            failure_paths, ledger_errors = _save_checker_failure_ledger(
+                plan_run_id=plan.run_id,
+                reference_path=args.extractions,
+                iteration=results.iteration,
+                requested_model=results.model or "unknown",
+                usages=results.agent_usage,
+                failed_attempts=results.failed_attempts,
+                fallback_error_code="artifact_write_failed",
+                fallback_scope_task_ids=results.selected_task_ids,
+                fallback_scope_source_ids=results.selected_source_ids,
+            )
+            ledger_note = (
+                f" Failure ledger: {', '.join(str(path) for path in failure_paths)}."
+                if failure_paths
+                else ""
+            )
+            if ledger_errors:
+                ledger_note += (
+                    " Some failure-ledger writes also failed: "
+                    f"{', '.join(ledger_errors)}."
+                )
+            raise CheckerProviderError(
+                "Paid Checker completed its provider call but its final artifact "
+                f"could not be saved ({type(exc).__name__}).{ledger_note}",
+                code="artifact_write_failed",
+                usages=results.agent_usage,
+                iteration=results.iteration,
+                scope_task_ids=results.selected_task_ids,
+                scope_source_ids=results.selected_source_ids,
+                requested_model=results.model,
+                failed_attempts=results.failed_attempts,
+            ) from None
+
+    claim_verdicts: dict[str, int] = {}
+    for decision in results.claim_decisions:
+        verdict = decision.verdict.value
+        claim_verdicts[verdict] = claim_verdicts.get(verdict, 0) + 1
+    field_statuses: dict[str, int] = {}
+    task_statuses: dict[str, int] = {}
+    for task_result in results.task_results:
+        status = task_result.status.value
+        task_statuses[status] = task_statuses.get(status, 0) + 1
+        for field_result in task_result.field_results:
+            field_status = field_result.status.value
+            field_statuses[field_status] = (
+                field_statuses.get(field_status, 0) + 1
+            )
+    unsafe_severities: dict[str, int] = {}
+    for unsafe_item in results.unsafe_items:
+        severity = unsafe_item.severity.value
+        unsafe_severities[severity] = unsafe_severities.get(severity, 0) + 1
+    summary = {
+        "check_id": results.check_id,
+        "plan_run_id": results.plan_run_id,
+        "search_id": results.search_id,
+        "extraction_id": results.extraction_id,
+        "plan_sha256": results.plan_sha256,
+        "search_sha256": results.search_sha256,
+        "extraction_sha256": results.extraction_sha256,
+        "brand": results.brand_name,
+        "generated_by": results.generated_by,
+        "model": results.model,
+        "iteration": results.iteration,
+        "provider_executed": results.provider_executed,
+        "selected_tasks": len(results.selected_task_ids),
+        "selected_sources": len(results.selected_source_ids),
+        "selected_claims": len(results.selected_claim_ids),
+        "unevaluated_tasks": len(results.unevaluated_task_ids),
+        "unevaluated_sources": len(results.unevaluated_source_ids),
+        "scope_complete": results.scope_complete,
+        "claim_verdicts": claim_verdicts,
+        "field_statuses": field_statuses,
+        "task_statuses": task_statuses,
+        "contradictions": len(results.contradictions),
+        "unsafe_items": len(results.unsafe_items),
+        "unsafe_severities": unsafe_severities,
+        "critical_missing_fields_count": len(results.critical_missing_fields),
+        "critical_missing_fields": results.critical_missing_fields,
+        "unevaluated_critical_fields_count": len(
+            results.unevaluated_critical_fields
+        ),
+        "follow_up_tasks": len(results.follow_up_tasks),
+        "score_breakdown": results.score_breakdown.model_dump(mode="json"),
+        "quality_score": results.quality_score,
+        "quality_threshold": results.quality_threshold,
+        "passed": results.passed,
+        "recommended_next_action": results.recommended_next_action.value,
+        "failed_attempts": [
+            attempt.model_dump(mode="json")
+            for attempt in results.failed_attempts
+        ],
+        "warnings": results.warnings,
+        "agent_usage": [
+            _usage_summary(usage) for usage in results.agent_usage
+        ],
+        "usage_totals": _usage_totals(
+            results.agent_usage,
+            failed_call_indices=[
+                attempt.call_index for attempt in results.failed_attempts
+            ],
+            has_unknown_token_usage=any(
+                attempt.token_usage_unknown
+                for attempt in results.failed_attempts
+            ),
+        ),
+        "check_path": str(results_path),
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _run_questions(args: argparse.Namespace) -> int:
     catalog = load_question_catalog()
     planner_input = PlannerInput(
@@ -965,6 +1289,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_search(args)
         if args.command == "extract":
             return _run_extract(args)
+        if args.command == "check":
+            return _run_check(args)
         if args.command == "questions":
             return _run_questions(args)
     except (
@@ -972,6 +1298,8 @@ def main(argv: list[str] | None = None) -> int:
         ConfigurationError,
         PlannerProviderError,
         PlannerValidationError,
+        CheckerProviderError,
+        CheckerValidationError,
         ExtractorProviderError,
         ExtractorValidationError,
         SearcherProviderError,

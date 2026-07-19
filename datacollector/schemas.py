@@ -28,6 +28,9 @@ SEARCHER_SCHEMA_VERSION = "1.1.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v3"
 EXTRACTOR_SCHEMA_VERSION = "1.0.0"
 EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
+CHECKER_SCHEMA_VERSION = "1.0.0"
+CHECKER_PROMPT_VERSION = "checker-system-v1"
+CHECKER_SCORING_VERSION = "checker-scoring-v1"
 
 
 class ClosedModel(BaseModel):
@@ -1967,4 +1970,728 @@ class ExtractionResults(ClosedModel):
                 raise ValueError(
                     "Extractor provider_executed must match recorded provider attempts."
                 )
+        return self
+
+
+class CheckerModelVerdict(StrEnum):
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    NEEDS_REVIEW = "needs_review"
+
+
+class CheckerVerdict(StrEnum):
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    NEEDS_REVIEW = "needs_review"
+    NOT_REVIEWED = "not_reviewed"
+
+
+class CheckerModelSemanticFit(StrEnum):
+    DIRECT = "direct"
+    PARTIAL = "partial"
+    MISMATCH = "mismatch"
+
+
+class CheckerSemanticFit(StrEnum):
+    DIRECT = "direct"
+    PARTIAL = "partial"
+    MISMATCH = "mismatch"
+    NOT_REVIEWED = "not_reviewed"
+
+
+class CheckerModelSourceSupport(StrEnum):
+    SUFFICIENT = "sufficient"
+    NEEDS_CORROBORATION = "needs_corroboration"
+    UNSUITABLE = "unsuitable"
+
+
+class CheckerSourceSupport(StrEnum):
+    SUFFICIENT = "sufficient"
+    NEEDS_CORROBORATION = "needs_corroboration"
+    UNSUITABLE = "unsuitable"
+    NOT_REVIEWED = "not_reviewed"
+
+
+class CheckerIssueCode(StrEnum):
+    AMBIGUOUS_SCOPE = "ambiguous_scope"
+    CATEGORY_NOT_ITEM = "category_not_item"
+    CONFLICTING_VALUES = "conflicting_values"
+    INSUFFICIENT_CONTEXT = "insufficient_context"
+    INSUFFICIENT_SOURCES = "insufficient_sources"
+    INACCESSIBLE_SOURCE = "inaccessible_source"
+    KNOWN_UNSELECTED_SOURCE = "known_unselected_source"
+    MENTIONED_NOT_OBTAINED = "mentioned_not_obtained"
+    NEEDS_INDEPENDENT_CORROBORATION = "needs_independent_corroboration"
+    OPINION_NOT_LABELED = "opinion_not_labeled"
+    PERSONAL_DATA = "personal_data"
+    PREFERRED_SOURCE_MISSING = "preferred_source_missing"
+    SELF_DECLARATION_ONLY = "self_declaration_only"
+    SOURCE_ROLE_MISMATCH = "source_role_mismatch"
+    STALE_OR_UNDATED = "stale_or_undated"
+    UNPROCESSED_FIELD = "unprocessed_field"
+    UNSUPPORTED_CLAIM = "unsupported_claim"
+    UNSUPPORTED_FIELD_MAPPING = "unsupported_field_mapping"
+
+
+class CheckerContradictionKind(StrEnum):
+    CONFLICTING_VALUES = "conflicting_values"
+    SCOPE_MISMATCH = "scope_mismatch"
+    TEMPORAL_MISMATCH = "temporal_mismatch"
+
+
+class CheckerUnsafeCategory(StrEnum):
+    EXCESS_PERSONAL_DATA = "excess_personal_data"
+    OPINION_AS_FACT = "opinion_as_fact"
+    PROHIBITED_SOURCE_USE = "prohibited_source_use"
+    SENSITIVE_UNCORROBORATED = "sensitive_uncorroborated"
+
+
+class CheckerSeverity(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class SourceAuthorityClass(StrEnum):
+    PRIMARY_AUTHORITY = "primary_authority"
+    PRIMARY_SELF_REPORT = "primary_self_report"
+    INDEPENDENT_SECONDARY = "independent_secondary"
+    OPINION_OR_LEAD = "opinion_or_lead"
+    ROUTING_ONLY = "routing_only"
+    UNKNOWN = "unknown"
+
+
+class SourceIndependence(StrEnum):
+    FIRST_PARTY = "first_party"
+    INDEPENDENT = "independent"
+    MIXED_OR_UNKNOWN = "mixed_or_unknown"
+
+
+class CheckerFieldStatus(StrEnum):
+    VERIFIED = "verified"
+    NEEDS_CORROBORATION = "needs_corroboration"
+    NEEDS_REVIEW = "needs_review"
+    CONFLICTING = "conflicting"
+    REJECTED = "rejected"
+    MISSING = "missing"
+    NOT_ACCESSIBLE = "not_accessible"
+    NOT_REVIEWED = "not_reviewed"
+
+
+class CheckerTaskStatus(StrEnum):
+    VERIFIED = "verified"
+    PARTIAL = "partial"
+    CONFLICTING = "conflicting"
+    MISSING = "missing"
+    NOT_ACCESSIBLE = "not_accessible"
+    NOT_REVIEWED = "not_reviewed"
+
+
+class CheckerFollowUpReason(StrEnum):
+    MISSING_CLAIM = "missing_claim"
+    REJECTED_CLAIM = "rejected_claim"
+    NEEDS_SEMANTIC_REVIEW = "needs_semantic_review"
+    NEEDS_CORROBORATION = "needs_corroboration"
+    RESOLVE_CONTRADICTION = "resolve_contradiction"
+    SOURCE_NOT_ACCESSIBLE = "source_not_accessible"
+
+
+class CheckerNextAction(StrEnum):
+    RUN_PAID_CHECKER = "run_paid_checker"
+    RETRY_CHECKER = "retry_checker"
+    RESOLVE_GAPS = "resolve_gaps"
+    HUMAN_REVIEW = "human_review"
+
+
+class CheckerClaimDecisionDraft(ClosedModel):
+    claim_id: str = Field(pattern=r"^claim-[a-f0-9]{16}$")
+    verdict: CheckerModelVerdict
+    semantic_fit: CheckerModelSemanticFit
+    source_support: CheckerModelSourceSupport
+    issue_codes: list[CheckerIssueCode] = Field(default_factory=list, max_length=12)
+    rationale: str = Field(min_length=5, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "CheckerClaimDecisionDraft":
+        if len(self.issue_codes) != len(set(self.issue_codes)):
+            raise ValueError("Checker decision issue codes must be unique.")
+        if self.verdict == CheckerModelVerdict.ACCEPTED and (
+            self.semantic_fit == CheckerModelSemanticFit.MISMATCH
+            or self.source_support == CheckerModelSourceSupport.UNSUITABLE
+        ):
+            raise ValueError(
+                "An accepted Checker decision cannot be a semantic mismatch or "
+                "use unsuitable source support."
+            )
+        if self.verdict in {
+            CheckerModelVerdict.REJECTED,
+            CheckerModelVerdict.NEEDS_REVIEW,
+        } and not self.issue_codes:
+            raise ValueError(
+                "Rejected or needs-review Checker decisions require an issue code."
+            )
+        return self
+
+
+class CheckerContradictionDraft(ClosedModel):
+    target_field: str = Field(min_length=1, max_length=500)
+    claim_ids: list[str] = Field(min_length=2, max_length=20)
+    kind: CheckerContradictionKind
+    rationale: str = Field(min_length=5, max_length=1000)
+
+
+class CheckerUnsafeItemDraft(ClosedModel):
+    category: CheckerUnsafeCategory
+    severity: CheckerSeverity
+    claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    source_ids: list[str] = Field(default_factory=list, max_length=20)
+    rationale: str = Field(min_length=5, max_length=1000)
+
+
+class CheckerDraft(ClosedModel):
+    """Provider judgment before local completeness, lineage, and scoring checks."""
+
+    decisions: list[CheckerClaimDecisionDraft] = Field(
+        default_factory=list, max_length=500
+    )
+    contradictions: list[CheckerContradictionDraft] = Field(
+        default_factory=list, max_length=100
+    )
+    unsafe_items: list[CheckerUnsafeItemDraft] = Field(
+        default_factory=list, max_length=100
+    )
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_draft(self) -> "CheckerDraft":
+        claim_ids = [item.claim_id for item in self.decisions]
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("Checker draft decisions must have unique claim IDs.")
+        for contradiction in self.contradictions:
+            if len(contradiction.claim_ids) != len(set(contradiction.claim_ids)):
+                raise ValueError("Checker contradiction claim IDs must be unique.")
+        return self
+
+
+class CheckerSourceAssessment(ClosedModel):
+    source_id: str = Field(pattern=r"^source-[a-f0-9]{16}$")
+    document_id: str = Field(pattern=r"^document-[a-f0-9]{16}$")
+    source_type: SourceType
+    publisher_key: str = Field(min_length=1, max_length=500)
+    retrieval_status: DocumentRetrievalStatus
+    parse_status: DocumentParseStatus
+    authority_class: SourceAuthorityClass
+    independence: SourceIndependence
+    reliability_score: int = Field(ge=0, le=100)
+    caveats: list[str] = Field(default_factory=list, max_length=10)
+
+
+class CheckerClaimDecision(ClosedModel):
+    claim_id: str = Field(pattern=r"^claim-[a-f0-9]{16}$")
+    task_id: str
+    target_field: str
+    source_ids: list[str] = Field(min_length=1, max_length=20)
+    grounding_verified: Literal[True] = True
+    verdict: CheckerVerdict
+    semantic_fit: CheckerSemanticFit
+    source_support: CheckerSourceSupport
+    issue_codes: list[CheckerIssueCode] = Field(default_factory=list, max_length=12)
+    rationale: str = Field(default="", max_length=1000)
+
+
+class CheckerContradiction(ClosedModel):
+    contradiction_id: str = Field(pattern=r"^contradiction-[a-f0-9]{16}$")
+    task_id: str
+    target_field: str
+    claim_ids: list[str] = Field(min_length=2, max_length=20)
+    kind: CheckerContradictionKind
+    rationale: str = Field(min_length=5, max_length=1000)
+    resolved: Literal[False] = False
+
+
+class CheckerUnsafeItem(ClosedModel):
+    unsafe_item_id: str = Field(pattern=r"^unsafe-[a-f0-9]{16}$")
+    category: CheckerUnsafeCategory
+    severity: CheckerSeverity
+    claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    source_ids: list[str] = Field(default_factory=list, max_length=20)
+    rationale: str = Field(min_length=5, max_length=1000)
+
+
+class CheckerFieldResult(ClosedModel):
+    task_id: str
+    target_field: str
+    status: CheckerFieldStatus
+    raw_claim_ids: list[str] = Field(default_factory=list)
+    accepted_claim_ids: list[str] = Field(default_factory=list)
+    rejected_claim_ids: list[str] = Field(default_factory=list)
+    needs_review_claim_ids: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+    issue_codes: list[CheckerIssueCode] = Field(default_factory=list)
+    quality_points: Decimal = Field(ge=0, le=1)
+
+
+class CheckerFollowUpTask(ClosedModel):
+    follow_up_id: str = Field(pattern=r"^followup-[a-f0-9]{16}$")
+    task_id: str
+    target_field: str
+    priority: Priority
+    reason: CheckerFollowUpReason
+    question: str = Field(min_length=10, max_length=2000)
+    required_source_types: list[SourceType] = Field(default_factory=list, max_length=20)
+    related_claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    status: Literal["pending"] = "pending"
+
+
+class CheckerTaskResult(ClosedModel):
+    task_id: str
+    catalog_question_id: str
+    priority: Priority
+    requirement: Requirement
+    status: CheckerTaskStatus
+    field_results: list[CheckerFieldResult] = Field(min_length=1)
+    follow_up_ids: list[str] = Field(default_factory=list)
+
+
+class CheckerScoreBreakdown(ClosedModel):
+    scoring_version: Literal["checker-scoring-v1"] = CHECKER_SCORING_VERSION
+    raw_coverage_score: int = Field(ge=0, le=100)
+    verified_coverage_score: int = Field(ge=0, le=100)
+    semantic_acceptance_score: int | None = Field(default=None, ge=0, le=100)
+    source_quality_score: int | None = Field(default=None, ge=0, le=100)
+    whole_plan_coverage_score: int = Field(ge=0, le=100)
+    deduction_points: int = Field(default=0, ge=0, le=100)
+    quality_score: int = Field(ge=0, le=100)
+
+
+class CheckerLimits(ClosedModel):
+    max_claims: int = Field(ge=1, le=500)
+    max_evidence_chars: int = Field(ge=1_000, le=500_000)
+    max_api_calls: Literal[1] = 1
+
+
+class CheckerAttemptFailure(ClosedModel):
+    call_index: Literal[1] = 1
+    scope_task_ids: list[str] = Field(min_length=1)
+    scope_source_ids: list[str] = Field(default_factory=list)
+    error_code: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    usage_recorded: bool
+    token_usage_unknown: bool = False
+
+
+class CheckerResults(ClosedModel):
+    """Auditable quality decision consumed by Resolver and human review."""
+
+    schema_version: Literal["1.0.0"] = CHECKER_SCHEMA_VERSION
+    prompt_version: Literal["checker-system-v1"] = CHECKER_PROMPT_VERSION
+    check_id: str
+    plan_run_id: str
+    search_id: str
+    extraction_id: str
+    plan_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    search_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    extraction_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    plan_reference: str = Field(min_length=1)
+    search_reference: str = Field(min_length=1)
+    extraction_reference: str = Field(min_length=1)
+    created_at: datetime
+    iteration: int = Field(ge=1)
+    generated_by: Literal["deterministic", "openai"]
+    model: str | None
+    brand_name: str
+    target_country: str = Field(pattern=r"^[A-Z]{2}$")
+    depth: ResearchDepth
+    provider_executed: bool
+    quality_threshold: int = Field(ge=0, le=100)
+    limits: CheckerLimits
+    selected_task_ids: list[str] = Field(min_length=1)
+    selected_source_ids: list[str] = Field(min_length=1)
+    selected_claim_ids: list[str]
+    unevaluated_task_ids: list[str]
+    unevaluated_source_ids: list[str]
+    scope_complete: bool
+    source_assessments: list[CheckerSourceAssessment]
+    claim_decisions: list[CheckerClaimDecision]
+    contradictions: list[CheckerContradiction]
+    unsafe_items: list[CheckerUnsafeItem]
+    task_results: list[CheckerTaskResult] = Field(min_length=1)
+    critical_missing_fields: list[str]
+    unevaluated_critical_fields: list[str]
+    follow_up_tasks: list[CheckerFollowUpTask]
+    score_breakdown: CheckerScoreBreakdown
+    quality_score: int = Field(ge=0, le=100)
+    passed: bool
+    recommended_next_action: CheckerNextAction
+    warnings: list[str]
+    compliance_rules: list[str]
+    agent_usage: list[AgentIterationUsage] = Field(default_factory=list)
+    failed_attempts: list[CheckerAttemptFailure] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_checker_results(self) -> "CheckerResults":
+        for value, field_name in (
+            (self.check_id, "check_id"),
+            (self.plan_run_id, "plan_run_id"),
+            (self.search_id, "search_id"),
+            (self.extraction_id, "extraction_id"),
+        ):
+            try:
+                parsed = UUID(value)
+            except (ValueError, AttributeError) as exc:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.") from exc
+            if parsed.version != 4:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.")
+
+        for values, field_name in (
+            (self.selected_task_ids, "selected_task_ids"),
+            (self.selected_source_ids, "selected_source_ids"),
+            (self.selected_claim_ids, "selected_claim_ids"),
+            (self.unevaluated_task_ids, "unevaluated_task_ids"),
+            (self.unevaluated_source_ids, "unevaluated_source_ids"),
+            (self.critical_missing_fields, "critical_missing_fields"),
+            (self.unevaluated_critical_fields, "unevaluated_critical_fields"),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"Checker {field_name} values must be unique.")
+
+        if [item.source_id for item in self.source_assessments] != (
+            self.selected_source_ids
+        ):
+            raise ValueError("Checker source assessments must follow source order.")
+        if any(
+            len(item.caveats) != len(set(item.caveats))
+            for item in self.source_assessments
+        ):
+            raise ValueError("Checker source assessment caveats must be unique.")
+        document_ids = [item.document_id for item in self.source_assessments]
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("Checker source assessment document IDs must be unique.")
+        if set(self.selected_task_ids) & set(self.unevaluated_task_ids):
+            raise ValueError("Selected and unevaluated Checker tasks overlap.")
+        if set(self.selected_source_ids) & set(self.unevaluated_source_ids):
+            raise ValueError("Selected and unevaluated Checker sources overlap.")
+        expected_scope_complete = not (
+            self.unevaluated_task_ids or self.unevaluated_source_ids
+        )
+        if self.scope_complete != expected_scope_complete:
+            raise ValueError("Checker scope_complete is inconsistent with its scope.")
+        if [item.claim_id for item in self.claim_decisions] != self.selected_claim_ids:
+            raise ValueError("Checker decisions must cover claims in exact order.")
+        if len(self.selected_claim_ids) > self.limits.max_claims:
+            raise ValueError("Checker selected claims exceed max_claims.")
+
+        decision_by_id = {item.claim_id: item for item in self.claim_decisions}
+        known_tasks = set(self.selected_task_ids)
+        known_sources = set(self.selected_source_ids)
+        if any(
+            item.task_id not in known_tasks
+            or not set(item.source_ids).issubset(known_sources)
+            or len(item.source_ids) != len(set(item.source_ids))
+            or len(item.issue_codes) != len(set(item.issue_codes))
+            for item in self.claim_decisions
+        ):
+            raise ValueError("Checker claim decision scope is inconsistent.")
+
+        if self.generated_by == "deterministic":
+            if (
+                self.model is not None
+                or self.provider_executed
+                or self.agent_usage
+                or self.failed_attempts
+                or self.contradictions
+                or self.unsafe_items
+            ):
+                raise ValueError(
+                    "Deterministic Checker cannot contain provider judgments."
+                )
+            if any(
+                item.verdict != CheckerVerdict.NOT_REVIEWED
+                or item.semantic_fit != CheckerSemanticFit.NOT_REVIEWED
+                or item.source_support != CheckerSourceSupport.NOT_REVIEWED
+                for item in self.claim_decisions
+            ):
+                raise ValueError(
+                    "Deterministic Checker decisions must remain not_reviewed."
+                )
+        else:
+            if self.model is None or not self.model.strip():
+                raise ValueError("OpenAI Checker must declare its model.")
+            if self.provider_executed != bool(
+                self.agent_usage or self.failed_attempts
+            ):
+                raise ValueError(
+                    "Checker provider_executed must match recorded attempts."
+                )
+            if not self.failed_attempts and any(
+                item.verdict == CheckerVerdict.NOT_REVIEWED
+                for item in self.claim_decisions
+            ):
+                raise ValueError(
+                    "Successful paid Checker cannot leave claims unreviewed."
+                )
+            if self.failed_attempts and any(
+                item.verdict != CheckerVerdict.NOT_REVIEWED
+                or item.semantic_fit != CheckerSemanticFit.NOT_REVIEWED
+                or item.source_support != CheckerSourceSupport.NOT_REVIEWED
+                for item in self.claim_decisions
+            ):
+                raise ValueError(
+                    "A failed single-call Checker cannot retain partial judgments."
+                )
+            if (
+                self.selected_claim_ids
+                and not self.failed_attempts
+                and len(self.agent_usage) != 1
+            ):
+                raise ValueError(
+                    "Successful paid Checker claims require exactly one usage entry."
+                )
+
+        contradiction_ids = [item.contradiction_id for item in self.contradictions]
+        if len(contradiction_ids) != len(set(contradiction_ids)):
+            raise ValueError("Checker contradiction IDs must be unique.")
+        for item in self.contradictions:
+            if (
+                len(item.claim_ids) != len(set(item.claim_ids))
+                or not set(item.claim_ids).issubset(decision_by_id)
+            ):
+                raise ValueError("Checker contradiction claim scope is invalid.")
+            decisions = [decision_by_id[claim_id] for claim_id in item.claim_ids]
+            if any(
+                decision.task_id != item.task_id
+                or decision.target_field != item.target_field
+                for decision in decisions
+            ):
+                raise ValueError(
+                    "Checker contradiction claims must share task and field."
+                )
+
+        unsafe_ids = [item.unsafe_item_id for item in self.unsafe_items]
+        if len(unsafe_ids) != len(set(unsafe_ids)):
+            raise ValueError("Checker unsafe item IDs must be unique.")
+        if any(
+            not set(item.claim_ids).issubset(decision_by_id)
+            or not set(item.source_ids).issubset(known_sources)
+            or (not item.claim_ids and not item.source_ids)
+            or len(item.claim_ids) != len(set(item.claim_ids))
+            or len(item.source_ids) != len(set(item.source_ids))
+            for item in self.unsafe_items
+        ):
+            raise ValueError("Checker unsafe item scope is invalid.")
+
+        if [item.task_id for item in self.task_results] != self.selected_task_ids:
+            raise ValueError("Checker task results must follow task order.")
+        field_result_by_key: dict[tuple[str, str], CheckerFieldResult] = {}
+        for task_result in self.task_results:
+            fields = [item.target_field for item in task_result.field_results]
+            if len(fields) != len(set(fields)):
+                raise ValueError("Checker task field results must be unique.")
+            for field_result in task_result.field_results:
+                if field_result.task_id != task_result.task_id:
+                    raise ValueError("Checker field result has wrong task ID.")
+                key = (field_result.task_id, field_result.target_field)
+                field_result_by_key[key] = field_result
+                for values in (
+                    field_result.raw_claim_ids,
+                    field_result.accepted_claim_ids,
+                    field_result.rejected_claim_ids,
+                    field_result.needs_review_claim_ids,
+                    field_result.source_ids,
+                    field_result.issue_codes,
+                ):
+                    if len(values) != len(set(values)):
+                        raise ValueError("Checker field result lists must be unique.")
+                if not set(field_result.raw_claim_ids).issubset(decision_by_id):
+                    raise ValueError("Checker field references unknown raw claims.")
+                if not set(field_result.source_ids).issubset(known_sources):
+                    raise ValueError("Checker field references unknown sources.")
+                expected = [
+                    decision.claim_id
+                    for decision in self.claim_decisions
+                    if decision.task_id == field_result.task_id
+                    and decision.target_field == field_result.target_field
+                ]
+                if field_result.raw_claim_ids != expected:
+                    raise ValueError(
+                        "Checker field raw claims must match global decisions."
+                    )
+                expected_accepted = [
+                    claim_id
+                    for claim_id in expected
+                    if decision_by_id[claim_id].verdict
+                    == CheckerVerdict.ACCEPTED
+                ]
+                expected_rejected = [
+                    claim_id
+                    for claim_id in expected
+                    if decision_by_id[claim_id].verdict
+                    == CheckerVerdict.REJECTED
+                ]
+                expected_needs_review = [
+                    claim_id
+                    for claim_id in expected
+                    if decision_by_id[claim_id].verdict
+                    == CheckerVerdict.NEEDS_REVIEW
+                ]
+                if (
+                    field_result.accepted_claim_ids != expected_accepted
+                    or field_result.rejected_claim_ids != expected_rejected
+                    or field_result.needs_review_claim_ids
+                    != expected_needs_review
+                ):
+                    raise ValueError(
+                        "Checker field decision partitions are inconsistent."
+                    )
+                if self.generated_by == "deterministic" and (
+                    field_result.status == CheckerFieldStatus.VERIFIED
+                    or (
+                        expected
+                        and field_result.status
+                        != CheckerFieldStatus.NOT_REVIEWED
+                    )
+                ):
+                    raise ValueError(
+                        "Deterministic Checker cannot verify or semantically classify fields."
+                    )
+
+            statuses = [item.status for item in task_result.field_results]
+            if all(status == CheckerFieldStatus.VERIFIED for status in statuses):
+                expected_task_status = CheckerTaskStatus.VERIFIED
+            elif any(status == CheckerFieldStatus.CONFLICTING for status in statuses):
+                expected_task_status = CheckerTaskStatus.CONFLICTING
+            elif any(status == CheckerFieldStatus.NOT_REVIEWED for status in statuses):
+                expected_task_status = CheckerTaskStatus.NOT_REVIEWED
+            elif all(
+                status == CheckerFieldStatus.NOT_ACCESSIBLE for status in statuses
+            ):
+                expected_task_status = CheckerTaskStatus.NOT_ACCESSIBLE
+            elif all(
+                status
+                in {
+                    CheckerFieldStatus.MISSING,
+                    CheckerFieldStatus.REJECTED,
+                    CheckerFieldStatus.NOT_ACCESSIBLE,
+                }
+                for status in statuses
+            ):
+                expected_task_status = CheckerTaskStatus.MISSING
+            else:
+                expected_task_status = CheckerTaskStatus.PARTIAL
+            if task_result.status != expected_task_status:
+                raise ValueError("Checker task status is inconsistent with its fields.")
+
+        follow_up_ids = [item.follow_up_id for item in self.follow_up_tasks]
+        if len(follow_up_ids) != len(set(follow_up_ids)):
+            raise ValueError("Checker follow-up IDs must be unique.")
+        follow_up_by_id = {item.follow_up_id: item for item in self.follow_up_tasks}
+        follow_up_by_key: dict[tuple[str, str], CheckerFollowUpTask] = {}
+        for follow_up in self.follow_up_tasks:
+            if (
+                (follow_up.task_id, follow_up.target_field)
+                not in field_result_by_key
+                or not set(follow_up.related_claim_ids).issubset(decision_by_id)
+            ):
+                raise ValueError("Checker follow-up scope is invalid.")
+            key = (follow_up.task_id, follow_up.target_field)
+            if key in follow_up_by_key:
+                raise ValueError("Checker fields may have at most one follow-up.")
+            follow_up_by_key[key] = follow_up
+            if (
+                follow_up.related_claim_ids
+                != field_result_by_key[key].raw_claim_ids
+            ):
+                raise ValueError(
+                    "Checker follow-up claims must match its unresolved field."
+                )
+        unresolved_field_keys = {
+            key
+            for key, result in field_result_by_key.items()
+            if result.status != CheckerFieldStatus.VERIFIED
+        }
+        if set(follow_up_by_key) != unresolved_field_keys:
+            raise ValueError(
+                "Every unresolved Checker field requires exactly one follow-up."
+            )
+        for task_result in self.task_results:
+            expected_task_follow_ups = [
+                follow_up.follow_up_id
+                for follow_up in self.follow_up_tasks
+                if follow_up.task_id == task_result.task_id
+            ]
+            if (
+                len(task_result.follow_up_ids)
+                != len(set(task_result.follow_up_ids))
+                or task_result.follow_up_ids != expected_task_follow_ups
+                or any(
+                    follow_up_by_id[item].task_id != task_result.task_id
+                    for item in task_result.follow_up_ids
+                )
+            ):
+                raise ValueError("Checker task follow-up mapping is invalid.")
+
+        expected_critical_missing = [
+            field_result.target_field
+            for task_result in self.task_results
+            if task_result.priority == Priority.CRITICAL
+            for field_result in task_result.field_results
+            if field_result.status != CheckerFieldStatus.VERIFIED
+        ]
+        if self.critical_missing_fields != expected_critical_missing:
+            raise ValueError("Checker critical missing fields are inconsistent.")
+
+        if self.quality_score != self.score_breakdown.quality_score:
+            raise ValueError("Checker quality score must match score breakdown.")
+        blocking_unsafe = any(
+            item.severity in {CheckerSeverity.HIGH, CheckerSeverity.CRITICAL}
+            for item in self.unsafe_items
+        )
+        expected_passed = (
+            self.generated_by == "openai"
+            and not self.failed_attempts
+            and self.quality_score >= self.quality_threshold
+            and self.scope_complete
+            and not self.critical_missing_fields
+            and not self.unevaluated_critical_fields
+            and not self.contradictions
+            and not blocking_unsafe
+        )
+        if self.passed != expected_passed:
+            raise ValueError("Checker pass flag is inconsistent with quality gates.")
+
+        if len(self.agent_usage) > self.limits.max_api_calls:
+            raise ValueError("Checker usage exceeds max_api_calls.")
+        if any(
+            item.agent != "checker"
+            or item.iteration != self.iteration
+            or item.call_index != 1
+            or item.scope_task_ids != self.selected_task_ids
+            or item.scope_source_ids != self.selected_source_ids
+            or item.tool_usage
+            for item in self.agent_usage
+        ):
+            raise ValueError("Checker usage scope is inconsistent.")
+        if len(self.failed_attempts) > 1:
+            raise ValueError("Checker supports at most one provider attempt.")
+        if self.failed_attempts:
+            failure = self.failed_attempts[0]
+            usage_recorded = bool(self.agent_usage)
+            if (
+                failure.scope_task_ids != self.selected_task_ids
+                or failure.scope_source_ids != self.selected_source_ids
+                or failure.usage_recorded != usage_recorded
+                or failure.token_usage_unknown == usage_recorded
+            ):
+                raise ValueError("Checker failure ledger is inconsistent.")
+
+        if self.generated_by == "deterministic":
+            expected_action = CheckerNextAction.RUN_PAID_CHECKER
+        elif self.failed_attempts:
+            expected_action = CheckerNextAction.RETRY_CHECKER
+        elif self.passed:
+            expected_action = CheckerNextAction.HUMAN_REVIEW
+        else:
+            expected_action = CheckerNextAction.RESOLVE_GAPS
+        if self.recommended_next_action != expected_action:
+            raise ValueError("Checker recommended next action is inconsistent.")
         return self

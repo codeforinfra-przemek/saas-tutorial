@@ -8,14 +8,18 @@ from typing import Protocol
 from ..schemas import (
     AgentIterationUsage,
     CatalogQuestion,
+    CheckerAttemptFailure,
+    CheckerDraft,
     EvidencePassage,
     ExtractionAttemptFailure,
+    ExtractionResults,
     ExtractorDraft,
     PlannerDraft,
     PlannerInput,
     ResearchPlan,
     ResearchTask,
     SearchAction,
+    SearchResults,
     SearcherDraft,
     SearchSource,
     SourceDocument,
@@ -48,6 +52,12 @@ class ExtractorGeneration:
     draft: ExtractorDraft
     usage: AgentIterationUsage
     source_id: str
+
+
+@dataclass(frozen=True)
+class CheckerGeneration:
+    draft: CheckerDraft
+    usage: AgentIterationUsage
 
 
 class SearcherProviderError(RuntimeError):
@@ -148,6 +158,58 @@ class ExtractorProviderError(RuntimeError):
         self.failed_attempts = list(failed_attempts or [])
 
 
+class CheckerProviderError(RuntimeError):
+    """Raised when a paid Checker response cannot be used safely."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "provider_error",
+        usage: AgentIterationUsage | None = None,
+        usages: list[AgentIterationUsage] | None = None,
+        agent: str = "checker",
+        iteration: int | None = None,
+        call_index: int | None = None,
+        scope_task_ids: list[str] | None = None,
+        scope_source_ids: list[str] | None = None,
+        requested_model: str | None = None,
+        failed_attempts: list[CheckerAttemptFailure] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        collected_usages = list(usages or [])
+        if usage is not None and usage not in collected_usages:
+            collected_usages.append(usage)
+        self.usages = collected_usages
+        self.usage = usage or (collected_usages[-1] if collected_usages else None)
+        self.agent = agent
+        self.iteration = iteration or (
+            self.usage.iteration if self.usage is not None else None
+        )
+        self.call_index = call_index or (
+            self.usage.call_index if self.usage is not None else None
+        )
+        self.scope_task_ids = list(
+            scope_task_ids
+            if scope_task_ids is not None
+            else self.usage.scope_task_ids
+            if self.usage is not None
+            else []
+        )
+        self.scope_source_ids = list(
+            scope_source_ids
+            if scope_source_ids is not None
+            else self.usage.scope_source_ids
+            if self.usage is not None
+            else []
+        )
+        self.requested_model = requested_model or (
+            self.usage.requested_model if self.usage is not None else None
+        )
+        self.failed_attempts = list(failed_attempts or [])
+
+
 class PlannerLLM(Protocol):
     @property
     def model_name(self) -> str: ...
@@ -195,3 +257,21 @@ class ExtractorLLM(Protocol):
         iteration: int,
         call_index: int,
     ) -> ExtractorGeneration: ...
+
+
+class CheckerLLM(Protocol):
+    @property
+    def model_name(self) -> str: ...
+
+    def generate(
+        self,
+        plan: ResearchPlan,
+        search_results: SearchResults,
+        extraction_results: ExtractionResults,
+        tasks: list[ResearchTask],
+        sources: list[SearchSource],
+        system_prompt: str,
+        *,
+        iteration: int,
+        call_index: int,
+    ) -> CheckerGeneration: ...
