@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from .agents.checker import CheckerAgent, CheckerValidationError
 from .agents.extractor import ExtractorAgent, ExtractorValidationError
 from .agents.planner import PlannerAgent, PlannerValidationError
+from .agents.resolver import ResolverAgent, ResolverValidationError
 from .agents.searcher import SearcherAgent, SearcherValidationError
 from .catalog import CatalogError, load_question_catalog, select_questions
 from .config import ConfigurationError, OpenAISettings
@@ -23,11 +24,16 @@ from .documents import DocumentFetcher, FetchPolicy
 from .llm.openai_client import OpenAIPlannerClient, PlannerProviderError
 from .llm.openai_checker_client import OpenAICheckerClient
 from .llm.openai_extractor_client import OpenAIExtractorClient
+from .llm.openai_resolver_client import OpenAIResolverClient
 from .llm.openai_searcher_client import (
     OpenAISearcherClient,
     SearcherProviderError,
 )
-from .llm.protocol import CheckerProviderError, ExtractorProviderError
+from .llm.protocol import (
+    CheckerProviderError,
+    ExtractorProviderError,
+    ResolverProviderError,
+)
 from .schemas import (
     AgentFailureArtifact,
     AgentIterationUsage,
@@ -42,13 +48,16 @@ from .storage.json_store import (
     checker_results_filename_for,
     extraction_results_filename_for,
     load_extraction_results,
+    load_checker_results,
     load_research_plan,
+    resolver_results_filename_for,
     load_search_results,
     reserve_artifact,
     save_agent_failure,
     save_checker_results,
     save_extraction_results,
     save_research_plan,
+    save_resolver_results,
     save_search_results,
     search_results_filename_for,
 )
@@ -77,7 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m datacollector",
         description=(
             "Auditable franchise research loop "
-            "(Planner + Searcher + Extractor + Checker MVP)."
+            "(Planner + Searcher + Extractor + Checker + Resolver MVP)."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -361,6 +370,76 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check_parser.add_argument(
         "--model", help="Override OPENAI_MODEL for this Checker invocation."
+    )
+
+    resolve_parser = subparsers.add_parser(
+        "resolve",
+        help="Turn one paid Checker artifact into a bounded repair plan.",
+    )
+    resolve_parser.add_argument(
+        "--check",
+        type=Path,
+        required=True,
+        help="Exact paid check.json or check-rNNN.json to consume.",
+    )
+    resolve_parser.add_argument(
+        "--plan",
+        type=Path,
+        help="Exact plan artifact; defaults to Checker's plan_reference.",
+    )
+    resolve_parser.add_argument(
+        "--sources",
+        type=Path,
+        help="Exact Searcher artifact; defaults to Checker's search_reference.",
+    )
+    resolve_parser.add_argument(
+        "--extractions",
+        type=Path,
+        help="Exact Extractor artifact; defaults to Checker's extraction_reference.",
+    )
+    resolve_parser.add_argument(
+        "--free",
+        "--offline",
+        dest="offline",
+        action="store_true",
+        help="Build the repair strategy deterministically without OpenAI.",
+    )
+    resolve_parser.add_argument(
+        "--iteration",
+        type=_positive_int,
+        help="Logical Resolver iteration; defaults to the Checker iteration.",
+    )
+    resolve_parser.add_argument(
+        "--max-follow-ups",
+        type=_positive_int,
+        default=30,
+        help="Maximum Checker follow-ups planned in this run (default: 30).",
+    )
+    resolve_parser.add_argument(
+        "--max-source-actions",
+        type=_positive_int,
+        default=10,
+        help="Maximum unique known sources scheduled in this run (default: 10).",
+    )
+    resolve_parser.add_argument(
+        "--max-search-tasks",
+        type=_positive_int,
+        default=5,
+        help="Maximum tasks allowed to require a new search (default: 5).",
+    )
+    resolve_parser.add_argument(
+        "--max-queries-per-item",
+        type=_positive_int,
+        default=3,
+        help="Maximum retained queries per follow-up (default: 3).",
+    )
+    resolve_parser.add_argument(
+        "--model", help="Override OPENAI_MODEL for this Resolver invocation."
+    )
+    resolve_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Artifact directory; defaults to the input Checker directory.",
     )
 
     return parser
@@ -1248,6 +1327,169 @@ def _run_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _save_resolver_failure_ledger(results, reference_path: Path) -> Path:
+    """Preserve the single Resolver attempt if its final artifact cannot publish."""
+
+    usage = results.agent_usage[0] if results.agent_usage else None
+    attempt = results.failed_attempts[0] if results.failed_attempts else None
+    failure = AgentFailureArtifact(
+        failure_id=str(uuid4()),
+        plan_run_id=results.plan_run_id,
+        created_at=datetime.now(timezone.utc),
+        error_code=(
+            attempt.error_code if attempt is not None else "artifact_write_failed"
+        ),
+        agent="resolver",
+        iteration=results.iteration,
+        call_index=1,
+        scope_task_ids=(
+            usage.scope_task_ids
+            if usage is not None
+            else attempt.scope_task_ids
+            if attempt is not None
+            else []
+        ),
+        scope_source_ids=(
+            usage.scope_source_ids
+            if usage is not None
+            else attempt.scope_source_ids
+            if attempt is not None
+            else []
+        ),
+        provider=usage.provider if usage is not None else "openai",
+        requested_model=results.model,
+        usage=usage,
+        observed_tool_calls=0,
+        tool_usage=[],
+        token_usage_unknown=usage is None,
+    )
+    return save_agent_failure(failure, reference_path)
+
+
+def _run_resolve(args: argparse.Namespace) -> int:
+    checker_results, check_sha256 = load_checker_results(args.check)
+    extraction_path = args.extractions or Path(
+        checker_results.extraction_reference
+    )
+    extraction_results, extraction_sha256 = load_extraction_results(
+        extraction_path
+    )
+    search_path = args.sources or Path(checker_results.search_reference)
+    search_results, search_sha256 = load_search_results(search_path)
+    plan_path = args.plan or Path(checker_results.plan_reference)
+    plan, plan_sha256 = load_research_plan(plan_path)
+    iteration = args.iteration or checker_results.iteration
+    result_directory = args.output_dir or args.check.parent
+    expected_path = result_directory / resolver_results_filename_for(
+        iteration,
+        free=args.offline,
+    )
+
+    with reserve_artifact(expected_path):
+        llm = None
+        if not args.offline:
+            settings = OpenAISettings.from_env()
+            if args.model:
+                settings = replace(settings, model=args.model)
+            llm = OpenAIResolverClient(settings)
+        results = ResolverAgent(llm).create_resolution_results(
+            plan,
+            search_results,
+            extraction_results,
+            checker_results,
+            plan_sha256=plan_sha256,
+            search_sha256=search_sha256,
+            extraction_sha256=extraction_sha256,
+            check_sha256=check_sha256,
+            check_reference=str(args.check.resolve()),
+            plan_reference=str(plan_path.resolve()),
+            search_reference=str(search_path.resolve()),
+            extraction_reference=str(extraction_path.resolve()),
+            iteration=iteration,
+            max_follow_ups=args.max_follow_ups,
+            max_source_actions=args.max_source_actions,
+            max_search_tasks=args.max_search_tasks,
+            max_queries_per_item=args.max_queries_per_item,
+        )
+        try:
+            results_path = save_resolver_results(
+                results,
+                args.check,
+                output_dir=args.output_dir,
+            )
+        except Exception as exc:
+            if results.generated_by != "openai":
+                raise
+            ledger_note = ""
+            try:
+                failure_path = _save_resolver_failure_ledger(results, args.check)
+            except Exception as ledger_exc:
+                ledger_note = (
+                    " Resolver failure ledger also failed with "
+                    f"{type(ledger_exc).__name__}."
+                )
+            else:
+                ledger_note = f" Failure ledger: {failure_path}."
+            raise ResolverProviderError(
+                "Paid Resolver completed its provider attempt but its final "
+                f"artifact could not be saved ({type(exc).__name__}).{ledger_note}",
+                code="artifact_write_failed",
+                usage=(results.agent_usage[0] if results.agent_usage else None),
+                iteration=results.iteration,
+                scope_task_ids=list(
+                    dict.fromkeys(item.task_id for item in results.work_items)
+                ),
+                scope_source_ids=results.available_source_ids,
+                requested_model=results.model,
+                failed_attempts=results.failed_attempts,
+            ) from None
+
+    action_counts: dict[str, int] = {}
+    for item in results.work_items:
+        action = item.selected_action.value
+        action_counts[action] = action_counts.get(action, 0) + 1
+    summary = {
+        "resolution_id": results.resolution_id,
+        "check_id": results.check_id,
+        "check_sha256": results.check_sha256,
+        "brand": results.brand_name,
+        "generated_by": results.generated_by,
+        "strategy_source": results.strategy_source.value,
+        "model": results.model,
+        "iteration": results.iteration,
+        "provider_executed": results.provider_executed,
+        "selected_follow_ups": len(results.selected_follow_up_ids),
+        "deferred_follow_ups": len(results.deferred_follow_up_ids),
+        "work_item_actions": action_counts,
+        "execution_batches": len(results.execution_batches),
+        "execution_source_ids": results.execution_source_ids,
+        "search_task_ids": results.search_task_ids,
+        "ready_for_execution": results.ready_for_execution,
+        "recommended_next_action": results.recommended_next_action.value,
+        "failed_attempts": [
+            attempt.model_dump(mode="json")
+            for attempt in results.failed_attempts
+        ],
+        "warnings": results.warnings,
+        "agent_usage": [
+            _usage_summary(usage) for usage in results.agent_usage
+        ],
+        "usage_totals": _usage_totals(
+            results.agent_usage,
+            failed_call_indices=[
+                attempt.call_index for attempt in results.failed_attempts
+            ],
+            has_unknown_token_usage=any(
+                attempt.token_usage_unknown
+                for attempt in results.failed_attempts
+            ),
+        ),
+        "resolution_path": str(results_path),
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _run_questions(args: argparse.Namespace) -> int:
     catalog = load_question_catalog()
     planner_input = PlannerInput(
@@ -1291,6 +1533,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_extract(args)
         if args.command == "check":
             return _run_check(args)
+        if args.command == "resolve":
+            return _run_resolve(args)
         if args.command == "questions":
             return _run_questions(args)
     except (
@@ -1304,6 +1548,8 @@ def main(argv: list[str] | None = None) -> int:
         ExtractorValidationError,
         SearcherProviderError,
         SearcherValidationError,
+        ResolverProviderError,
+        ResolverValidationError,
         ValidationError,
         OSError,
     ) as exc:

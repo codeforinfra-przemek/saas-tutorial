@@ -1,4 +1,4 @@
-# Franchise AI research loop — Planner + Searcher + Extractor + Checker
+# Franchise AI research loop — Planner + Searcher + Extractor + Checker + Resolver
 
 This is a standalone, local worker for auditable franchise research. It is kept
 outside Django intentionally: long-running and paid agent work must not execute
@@ -11,7 +11,7 @@ Planner → Searcher → Extractor → Checker ↔ Resolver
         → Normalizer → human review → Importer
 ```
 
-Planner, Searcher, Extractor and Checker are implemented. Planner combines:
+Planner, Searcher, Extractor, Checker and Resolver are implemented. Planner combines:
 
 - a deterministic, versioned question catalog covering all 23 FTC FDD Items;
 - additional commercial, risk, state-law and unit-level due-diligence questions;
@@ -28,6 +28,9 @@ Checker consumes that exact lineage, applies deterministic source, grounding and
 coverage rules, and optionally asks OpenAI for one bounded semantic review. It
 produces quality decisions and follow-up work; it still does not normalize or
 write production data.
+Resolver consumes a successful paid Checker artifact and turns only its unresolved
+fields into bounded execution batches for the next Searcher/Extractor round. It
+plans retrieval and research; it never claims that planned work has already run.
 
 ## Setup
 
@@ -414,6 +417,57 @@ be used, known usage (or an explicit unknown-token attempt) is retained in the
 Checker artifact. If that final artifact cannot be published, the same attempt
 facts are written best-effort to the run's `attempts/` ledger.
 
+## Run Resolver: deterministic routing, then paid prioritization
+
+Point both Resolver variants at the same successful paid Checker artifact. A
+free Checker is intentionally rejected because its claims remain semantically
+`not_reviewed`, so it cannot provide reliable repair targets.
+
+Run deterministic Resolver first:
+
+```bash
+.venv/bin/python -m datacollector resolve \
+  --check datacollector/data/runs/zabka/<run>/check-r005.json \
+  --free \
+  --iteration 5 \
+  --max-follow-ups 30 \
+  --max-source-actions 10 \
+  --max-search-tasks 5
+```
+
+This makes no network or OpenAI request. It validates the complete
+Planner→Searcher→Extractor→Checker lineage and produces a real repair strategy.
+Known unprocessed sources are selected before blocked-source retries or new
+searches. A `mentioned_not_obtained` document cannot be resolved by merely
+re-extracting the page that mentioned it. Work is grouped into
+`extract_known_source`, `retry_retrieval`, `reextract_existing`,
+`search_new_source`, or `human_review` execution batches.
+
+Then run the optional paid prioritization against the exact same Checker input:
+
+```bash
+.venv/bin/python -m datacollector resolve \
+  --check datacollector/data/runs/zabka/<run>/check-r005.json \
+  --iteration 5 \
+  --max-follow-ups 30 \
+  --max-source-actions 10 \
+  --max-search-tasks 5
+```
+
+Paid Resolver makes one bounded Responses API Structured Outputs request without
+web-search, retrieval, or extraction tools. The model may reorder work, select
+from locally allowed actions and source IDs, and add narrow queries. Local code
+rejects invented IDs, incompatible actions, incomplete coverage, or budget
+overruns and retains the deterministic executable strategy as an explicit
+fallback. Iteration 5 writes `resolution-r005-free.json` and
+`resolution-r005.json` immutably beside the Checker artifact.
+
+`retry_retrieval` is a plan for the next Extractor round, not proof of a completed
+download. Likewise, `extract_known_source` means the source is already known to
+Searcher but has not yet been processed in the selected extraction scope. A new
+Checker pass is required after executing these batches; unresolved data cannot
+advance to Normalizer.
+
 ## Token and cost accounting
 
 Every successful OpenAI call records one `agent_usage` entry in the artifact
@@ -459,9 +513,14 @@ behind accepted claims; it is not a score for every selected source.
 Deterministic checking keeps that provider ledger empty and its estimated cost at
 zero.
 
-For GPT-5.6, Planner, Searcher, Extractor and Checker disable the default implicit
-cache breakpoint for their one-off, brand-specific calls. Those payloads would
-otherwise incur cache-write charges without guaranteeing a later cache hit.
+Resolver records at most one `agent_usage` entry and has no tool calls. Its free
+variant has zero provider cost. The paid variant pays only for strategy and uses
+Structured Outputs; if the response is unusable, usage is retained while the
+deterministic plan remains available as `deterministic_fallback`.
+
+For GPT-5.6, Planner, Searcher, Extractor, Checker and Resolver disable the default
+implicit cache breakpoint for their one-off, brand-specific calls. Those payloads
+would otherwise incur cache-write charges without guaranteeing a later cache hit.
 Provider-reported cache-write tokens are still recorded and priced if they occur.
 
 For a later logical Planner pass, label the iteration:

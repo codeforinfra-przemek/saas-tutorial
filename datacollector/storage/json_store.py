@@ -17,6 +17,7 @@ from ..schemas import (
     CheckerResults,
     ExtractionResults,
     ResearchPlan,
+    ResolverResults,
     SearchResults,
 )
 
@@ -254,6 +255,55 @@ def save_checker_results(
     )
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / checker_results_filename(results)
+    rendered = (
+        json.dumps(
+            results.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    _write_immutable_text(result_path, rendered)
+    return result_path
+
+
+def resolver_results_filename_for(iteration: int, *, free: bool) -> str:
+    stem = "resolution" if iteration == 1 else f"resolution-r{iteration:03d}"
+    if free:
+        stem = f"{stem}-free"
+    return f"{stem}.json"
+
+
+def resolver_results_filename(results: ResolverResults) -> str:
+    return resolver_results_filename_for(
+        results.iteration,
+        free=results.generated_by == "deterministic",
+    )
+
+
+def load_resolver_results(
+    path: Path | str,
+) -> tuple[ResolverResults, str]:
+    """Load Resolver output and return its exact input-byte SHA-256."""
+
+    resolver_path = Path(path)
+    raw_resolver = resolver_path.read_bytes()
+    results = ResolverResults.model_validate_json(raw_resolver)
+    return results, hashlib.sha256(raw_resolver).hexdigest()
+
+
+def save_resolver_results(
+    results: ResolverResults,
+    checker_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> Path:
+    """Save beside the explicit Checker output and never silently overwrite."""
+
+    directory = (
+        Path(output_dir) if output_dir is not None else Path(checker_path).parent
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    result_path = directory / resolver_results_filename(results)
     rendered = (
         json.dumps(
             results.model_dump(mode="json"),

@@ -31,6 +31,8 @@ EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
 CHECKER_SCHEMA_VERSION = "1.1.0"
 CHECKER_PROMPT_VERSION = "checker-system-v2"
 CHECKER_SCORING_VERSION = "checker-scoring-v2"
+RESOLVER_SCHEMA_VERSION = "1.0.0"
+RESOLVER_PROMPT_VERSION = "resolver-system-v1"
 
 
 class ClosedModel(BaseModel):
@@ -2778,4 +2780,362 @@ class CheckerResults(ClosedModel):
             expected_action = CheckerNextAction.RESOLVE_GAPS
         if self.recommended_next_action != expected_action:
             raise ValueError("Checker recommended next action is inconsistent.")
+        return self
+
+
+class ResolverAction(StrEnum):
+    EXTRACT_KNOWN_SOURCE = "extract_known_source"
+    RETRY_RETRIEVAL = "retry_retrieval"
+    REEXTRACT_EXISTING = "reextract_existing"
+    SEARCH_NEW_SOURCE = "search_new_source"
+    HUMAN_REVIEW = "human_review"
+
+
+class ResolverStrategySource(StrEnum):
+    DETERMINISTIC = "deterministic"
+    OPENAI = "openai"
+    DETERMINISTIC_FALLBACK = "deterministic_fallback"
+
+
+class ResolverNextAction(StrEnum):
+    EXECUTE_RESOLUTION = "execute_resolution"
+    HUMAN_REVIEW = "human_review"
+
+
+class ResolverItemDraft(ClosedModel):
+    follow_up_id: str = Field(pattern=r"^followup-[a-f0-9]{16}$")
+    selected_action: ResolverAction
+    selected_source_ids: list[str] = Field(default_factory=list, max_length=50)
+    derived_queries: list[str] = Field(default_factory=list, max_length=5)
+    sequence: int = Field(ge=1, le=500)
+    rationale: str = Field(min_length=5, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_resolver_item_draft(self) -> "ResolverItemDraft":
+        if len(self.selected_source_ids) != len(set(self.selected_source_ids)):
+            raise ValueError("Resolver draft source IDs must be unique.")
+        if len(self.derived_queries) != len(set(self.derived_queries)):
+            raise ValueError("Resolver draft queries must be unique.")
+        if any(
+            not query.strip() or len(query) > 500 or "\x00" in query
+            for query in self.derived_queries
+        ):
+            raise ValueError("Resolver draft queries must be bounded plain text.")
+        return self
+
+
+class ResolverDraft(ClosedModel):
+    items: list[ResolverItemDraft] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_resolver_draft(self) -> "ResolverDraft":
+        follow_up_ids = [item.follow_up_id for item in self.items]
+        sequences = [item.sequence for item in self.items]
+        if len(follow_up_ids) != len(set(follow_up_ids)):
+            raise ValueError("Resolver draft follow-up IDs must be unique.")
+        if len(sequences) != len(set(sequences)):
+            raise ValueError("Resolver draft sequences must be unique.")
+        if sorted(sequences) != list(range(1, len(sequences) + 1)):
+            raise ValueError("Resolver draft sequences must be contiguous from one.")
+        return self
+
+
+class ResolverWorkItem(ClosedModel):
+    resolution_item_id: str = Field(pattern=r"^resolution-item-[a-f0-9]{16}$")
+    follow_up_id: str = Field(pattern=r"^followup-[a-f0-9]{16}$")
+    task_id: str
+    target_field: str
+    priority: Priority
+    reason: CheckerFollowUpReason
+    sequence: int = Field(ge=1, le=500)
+    allowed_actions: list[ResolverAction] = Field(min_length=1, max_length=5)
+    selected_action: ResolverAction
+    selected_source_ids: list[str] = Field(default_factory=list, max_length=50)
+    fallback_source_ids: list[str] = Field(default_factory=list, max_length=100)
+    queries: list[str] = Field(default_factory=list, max_length=10)
+    related_claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    supporting_claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    minimum_additional_sources: int = Field(ge=0, le=20)
+    requires_independent_source: bool
+    completion_criteria: str = Field(min_length=10, max_length=2000)
+    rationale: str = Field(min_length=5, max_length=1000)
+    status: Literal["pending"] = "pending"
+
+    @model_validator(mode="after")
+    def validate_resolver_work_item(self) -> "ResolverWorkItem":
+        for values in (
+            self.allowed_actions,
+            self.selected_source_ids,
+            self.fallback_source_ids,
+            self.queries,
+            self.related_claim_ids,
+            self.supporting_claim_ids,
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError("Resolver work-item lists must be unique.")
+        if self.selected_action not in self.allowed_actions:
+            raise ValueError("Resolver selected action is not locally allowed.")
+        source_action = self.selected_action in {
+            ResolverAction.EXTRACT_KNOWN_SOURCE,
+            ResolverAction.RETRY_RETRIEVAL,
+            ResolverAction.REEXTRACT_EXISTING,
+        }
+        if source_action != bool(self.selected_source_ids):
+            raise ValueError(
+                "Resolver source actions require sources and other actions forbid them."
+            )
+        if (
+            self.selected_action == ResolverAction.SEARCH_NEW_SOURCE
+            and not self.queries
+        ):
+            raise ValueError("Resolver search actions require at least one query.")
+        if any(
+            not query.strip() or len(query) > 500 or "\x00" in query
+            for query in self.queries
+        ):
+            raise ValueError("Resolver queries must be bounded plain text.")
+        return self
+
+
+class ResolverExecutionBatch(ClosedModel):
+    batch_id: str = Field(pattern=r"^resolution-batch-[a-f0-9]{16}$")
+    action: ResolverAction
+    resolution_item_ids: list[str] = Field(min_length=1, max_length=100)
+    follow_up_ids: list[str] = Field(min_length=1, max_length=100)
+    task_ids: list[str] = Field(min_length=1, max_length=100)
+    source_ids: list[str] = Field(default_factory=list, max_length=100)
+    queries: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ResolverLimits(ClosedModel):
+    max_follow_ups: int = Field(ge=1, le=100)
+    max_source_actions: int = Field(ge=1, le=100)
+    max_search_tasks: int = Field(ge=1, le=100)
+    max_queries_per_item: int = Field(ge=1, le=10)
+    max_api_calls: Literal[1] = 1
+
+
+class ResolverAttemptFailure(ClosedModel):
+    call_index: Literal[1] = 1
+    scope_task_ids: list[str] = Field(min_length=1)
+    scope_source_ids: list[str] = Field(default_factory=list)
+    error_code: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    usage_recorded: bool
+    token_usage_unknown: bool = False
+
+
+class ResolverResults(ClosedModel):
+    """Bounded repair plan consumed by the next Searcher/Extractor round."""
+
+    schema_version: Literal["1.0.0"] = RESOLVER_SCHEMA_VERSION
+    prompt_version: Literal["resolver-system-v1"] = RESOLVER_PROMPT_VERSION
+    resolution_id: str
+    plan_run_id: str
+    search_id: str
+    extraction_id: str
+    check_id: str
+    plan_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    search_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    extraction_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    check_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    plan_reference: str = Field(min_length=1)
+    search_reference: str = Field(min_length=1)
+    extraction_reference: str = Field(min_length=1)
+    check_reference: str = Field(min_length=1)
+    created_at: datetime
+    iteration: int = Field(ge=1)
+    generated_by: Literal["deterministic", "openai"]
+    strategy_source: ResolverStrategySource
+    model: str | None
+    provider_executed: bool
+    brand_name: str
+    target_country: str = Field(pattern=r"^[A-Z]{2}$")
+    depth: ResearchDepth
+    limits: ResolverLimits
+    available_source_ids: list[str]
+    selected_follow_up_ids: list[str]
+    deferred_follow_up_ids: list[str]
+    work_items: list[ResolverWorkItem]
+    execution_batches: list[ResolverExecutionBatch]
+    execution_source_ids: list[str]
+    search_task_ids: list[str]
+    ready_for_execution: bool
+    recommended_next_action: ResolverNextAction
+    warnings: list[str]
+    compliance_rules: list[str]
+    agent_usage: list[AgentIterationUsage] = Field(default_factory=list)
+    failed_attempts: list[ResolverAttemptFailure] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_resolver_results(self) -> "ResolverResults":
+        for value, field_name in (
+            (self.resolution_id, "resolution_id"),
+            (self.plan_run_id, "plan_run_id"),
+            (self.search_id, "search_id"),
+            (self.extraction_id, "extraction_id"),
+            (self.check_id, "check_id"),
+        ):
+            try:
+                parsed = UUID(value)
+            except (ValueError, AttributeError) as exc:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.") from exc
+            if parsed.version != 4:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.")
+
+        for values, field_name in (
+            (self.available_source_ids, "available_source_ids"),
+            (self.selected_follow_up_ids, "selected_follow_up_ids"),
+            (self.deferred_follow_up_ids, "deferred_follow_up_ids"),
+            (self.execution_source_ids, "execution_source_ids"),
+            (self.search_task_ids, "search_task_ids"),
+            (self.warnings, "warnings"),
+            (self.compliance_rules, "compliance_rules"),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"Resolver {field_name} values must be unique.")
+        if set(self.selected_follow_up_ids) & set(self.deferred_follow_up_ids):
+            raise ValueError("Resolver selected and deferred follow-ups overlap.")
+        if any(
+            not re.fullmatch(r"source-[a-f0-9]{16}", source_id)
+            for source_id in self.available_source_ids
+        ):
+            raise ValueError("Resolver available source ID is invalid.")
+        if any(
+            not re.fullmatch(r"followup-[a-f0-9]{16}", follow_up_id)
+            for follow_up_id in [
+                *self.selected_follow_up_ids,
+                *self.deferred_follow_up_ids,
+            ]
+        ):
+            raise ValueError("Resolver follow-up ID is invalid.")
+        if [item.follow_up_id for item in self.work_items] != self.selected_follow_up_ids:
+            raise ValueError("Resolver work items must follow selected follow-up order.")
+        sequences = [item.sequence for item in self.work_items]
+        if sorted(sequences) != list(range(1, len(sequences) + 1)):
+            raise ValueError("Resolver work-item sequence is invalid.")
+        if len({item.resolution_item_id for item in self.work_items}) != len(
+            self.work_items
+        ):
+            raise ValueError("Resolver work-item IDs must be unique.")
+        if any(
+            not set([*item.selected_source_ids, *item.fallback_source_ids]).issubset(
+                self.available_source_ids
+            )
+            for item in self.work_items
+        ):
+            raise ValueError("Resolver work item references an unavailable source.")
+
+        item_by_id = {item.resolution_item_id: item for item in self.work_items}
+        batched_item_ids = [
+            item_id
+            for batch in self.execution_batches
+            for item_id in batch.resolution_item_ids
+        ]
+        if len(batched_item_ids) != len(set(batched_item_ids)) or set(
+            batched_item_ids
+        ) != set(item_by_id):
+            raise ValueError("Resolver batches must partition work items exactly.")
+        if len({batch.batch_id for batch in self.execution_batches}) != len(
+            self.execution_batches
+        ):
+            raise ValueError("Resolver batch IDs must be unique.")
+        for batch in self.execution_batches:
+            items = [item_by_id[item_id] for item_id in batch.resolution_item_ids]
+            if (
+                any(item.selected_action != batch.action for item in items)
+                or batch.follow_up_ids != [item.follow_up_id for item in items]
+                or batch.task_ids
+                != list(dict.fromkeys(item.task_id for item in items))
+                or batch.source_ids
+                != list(
+                    dict.fromkeys(
+                        source_id
+                        for item in items
+                        for source_id in item.selected_source_ids
+                    )
+                )
+                or batch.queries
+                != list(
+                    dict.fromkeys(query for item in items for query in item.queries)
+                )
+            ):
+                raise ValueError("Resolver batch does not match its work items.")
+        expected_execution_sources = list(
+            dict.fromkeys(
+                source_id
+                for item in self.work_items
+                for source_id in item.selected_source_ids
+            )
+        )
+        if self.execution_source_ids != expected_execution_sources:
+            raise ValueError("Resolver execution source summary is inconsistent.")
+        expected_search_tasks = list(
+            dict.fromkeys(
+                item.task_id
+                for item in self.work_items
+                if item.selected_action == ResolverAction.SEARCH_NEW_SOURCE
+            )
+        )
+        if self.search_task_ids != expected_search_tasks:
+            raise ValueError("Resolver search-task summary is inconsistent.")
+        if len(self.execution_source_ids) > self.limits.max_source_actions:
+            raise ValueError("Resolver exceeds max_source_actions.")
+        if len(self.search_task_ids) > self.limits.max_search_tasks:
+            raise ValueError("Resolver exceeds max_search_tasks.")
+        if len(self.work_items) > self.limits.max_follow_ups:
+            raise ValueError("Resolver exceeds max_follow_ups.")
+
+        if self.generated_by == "deterministic":
+            if (
+                self.model is not None
+                or self.provider_executed
+                or self.strategy_source != ResolverStrategySource.DETERMINISTIC
+                or self.agent_usage
+                or self.failed_attempts
+            ):
+                raise ValueError("Deterministic Resolver has invalid provider state.")
+        else:
+            if self.model is None or not self.model.strip() or not self.provider_executed:
+                raise ValueError("Paid Resolver must record its model and attempt.")
+            if len(self.agent_usage) > 1 or len(self.failed_attempts) > 1:
+                raise ValueError("Resolver supports at most one provider attempt.")
+            if bool(self.failed_attempts) == (
+                self.strategy_source == ResolverStrategySource.OPENAI
+            ):
+                raise ValueError("Resolver strategy source conflicts with provider result.")
+            if not self.failed_attempts and len(self.agent_usage) != 1:
+                raise ValueError("Successful paid Resolver requires one usage entry.")
+        expected_scope_task_ids = list(
+            dict.fromkeys(item.task_id for item in self.work_items)
+        )
+        if any(
+            usage.agent != "resolver"
+            or usage.iteration != self.iteration
+            or usage.call_index != 1
+            or usage.scope_task_ids != expected_scope_task_ids
+            or usage.scope_source_ids != self.available_source_ids
+            or usage.tool_usage
+            for usage in self.agent_usage
+        ):
+            raise ValueError("Resolver usage metadata is inconsistent.")
+        if self.failed_attempts:
+            failure = self.failed_attempts[0]
+            usage_recorded = bool(self.agent_usage)
+            if (
+                failure.scope_task_ids != expected_scope_task_ids
+                or failure.scope_source_ids != self.available_source_ids
+                or failure.usage_recorded != usage_recorded
+                or failure.token_usage_unknown == usage_recorded
+            ):
+                raise ValueError("Resolver failure ledger is inconsistent.")
+        expected_ready = bool(self.work_items)
+        if self.ready_for_execution != expected_ready:
+            raise ValueError("Resolver ready flag is inconsistent.")
+        expected_action = (
+            ResolverNextAction.EXECUTE_RESOLUTION
+            if expected_ready
+            else ResolverNextAction.HUMAN_REVIEW
+        )
+        if self.recommended_next_action != expected_action:
+            raise ValueError("Resolver next action is inconsistent.")
         return self

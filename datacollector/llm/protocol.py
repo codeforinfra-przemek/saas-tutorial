@@ -10,6 +10,7 @@ from ..schemas import (
     CatalogQuestion,
     CheckerAttemptFailure,
     CheckerDraft,
+    CheckerResults,
     EvidencePassage,
     ExtractionAttemptFailure,
     ExtractionResults,
@@ -18,6 +19,9 @@ from ..schemas import (
     PlannerInput,
     ResearchPlan,
     ResearchTask,
+    ResolverAttemptFailure,
+    ResolverDraft,
+    ResolverWorkItem,
     SearchAction,
     SearchResults,
     SearcherDraft,
@@ -57,6 +61,12 @@ class ExtractorGeneration:
 @dataclass(frozen=True)
 class CheckerGeneration:
     draft: CheckerDraft
+    usage: AgentIterationUsage
+
+
+@dataclass(frozen=True)
+class ResolverGeneration:
+    draft: ResolverDraft
     usage: AgentIterationUsage
 
 
@@ -210,6 +220,54 @@ class CheckerProviderError(RuntimeError):
         self.failed_attempts = list(failed_attempts or [])
 
 
+class ResolverProviderError(RuntimeError):
+    """Raised when a paid Resolver strategy response cannot be used safely."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "provider_error",
+        usage: AgentIterationUsage | None = None,
+        agent: str = "resolver",
+        iteration: int | None = None,
+        call_index: int | None = None,
+        scope_task_ids: list[str] | None = None,
+        scope_source_ids: list[str] | None = None,
+        requested_model: str | None = None,
+        failed_attempts: list[ResolverAttemptFailure] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.usage = usage
+        self.usages = [usage] if usage is not None else []
+        self.agent = agent
+        self.iteration = iteration or (
+            usage.iteration if usage is not None else None
+        )
+        self.call_index = call_index or (
+            usage.call_index if usage is not None else None
+        )
+        self.scope_task_ids = list(
+            scope_task_ids
+            if scope_task_ids is not None
+            else usage.scope_task_ids
+            if usage is not None
+            else []
+        )
+        self.scope_source_ids = list(
+            scope_source_ids
+            if scope_source_ids is not None
+            else usage.scope_source_ids
+            if usage is not None
+            else []
+        )
+        self.requested_model = requested_model or (
+            usage.requested_model if usage is not None else None
+        )
+        self.failed_attempts = list(failed_attempts or [])
+
+
 class PlannerLLM(Protocol):
     @property
     def model_name(self) -> str: ...
@@ -275,3 +333,20 @@ class CheckerLLM(Protocol):
         iteration: int,
         call_index: int,
     ) -> CheckerGeneration: ...
+
+
+class ResolverLLM(Protocol):
+    @property
+    def model_name(self) -> str: ...
+
+    def generate(
+        self,
+        plan: ResearchPlan,
+        search_results: SearchResults,
+        checker_results: CheckerResults,
+        work_items: list[ResolverWorkItem],
+        system_prompt: str,
+        *,
+        iteration: int,
+        call_index: int,
+    ) -> ResolverGeneration: ...

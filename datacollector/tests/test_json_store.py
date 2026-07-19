@@ -25,6 +25,21 @@ class FixtureCheckerResults:
         }
 
 
+class FixtureResolverResults:
+    def __init__(self, *, iteration: int, generated_by: str) -> None:
+        self.iteration = iteration
+        self.generated_by = generated_by
+
+    def model_dump(self, *, mode: str):
+        if mode != "json":
+            raise AssertionError("Resolver artifacts must use JSON-mode serialization.")
+        return {
+            "iteration": self.iteration,
+            "generated_by": self.generated_by,
+            "brand_name": "Żabka",
+        }
+
+
 class ImmutableWriteTests(TestCase):
     def test_publishes_complete_file_from_same_directory_and_fsyncs(self):
         with TemporaryDirectory() as temporary_directory:
@@ -167,3 +182,60 @@ class CheckerStorageTests(TestCase):
             )
 
             self.assertEqual(checker_path, output_directory / "check.json")
+
+
+class ResolverStorageTests(TestCase):
+    def test_resolver_filename_variants_are_iteration_aware(self):
+        self.assertEqual(
+            json_store.resolver_results_filename_for(1, free=False),
+            "resolution.json",
+        )
+        self.assertEqual(
+            json_store.resolver_results_filename_for(5, free=True),
+            "resolution-r005-free.json",
+        )
+        self.assertEqual(
+            json_store.resolver_results_filename(
+                SimpleNamespace(iteration=5, generated_by="openai")
+            ),
+            "resolution-r005.json",
+        )
+
+    def test_resolver_save_is_immutable_and_load_returns_exact_hash(self):
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            checker_path = directory / "check-r005.json"
+            results = FixtureResolverResults(
+                iteration=5,
+                generated_by="deterministic",
+            )
+
+            resolution_path = json_store.save_resolver_results(
+                results,
+                checker_path,
+            )
+            raw_resolution = resolution_path.read_bytes()
+
+            self.assertEqual(
+                resolution_path,
+                directory / "resolution-r005-free.json",
+            )
+            with self.assertRaises(FileExistsError):
+                json_store.save_resolver_results(results, checker_path)
+
+            validated = object()
+            with patch.object(
+                json_store.ResolverResults,
+                "model_validate_json",
+                return_value=validated,
+            ) as validate:
+                loaded, digest = json_store.load_resolver_results(
+                    resolution_path
+                )
+
+            self.assertIs(loaded, validated)
+            self.assertEqual(
+                digest,
+                hashlib.sha256(raw_resolution).hexdigest(),
+            )
+            validate.assert_called_once_with(raw_resolution)
