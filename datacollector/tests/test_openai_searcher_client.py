@@ -9,6 +9,7 @@ from datacollector.config import OpenAISettings
 from datacollector.llm.openai_searcher_client import (
     OpenAISearcherClient,
     SearcherProviderError,
+    _as_mapping,
 )
 from datacollector.schemas import PlannerInput, SearcherDraft
 
@@ -138,6 +139,11 @@ class OpenAISearcherClientTests(TestCase):
 
         request = fake_client.responses.kwargs
         self.assertEqual(request["tools"][0]["type"], "web_search")
+        self.assertEqual(request["tools"][0]["search_context_size"], "low")
+        self.assertEqual(
+            request["tools"][0]["filters"]["blocked_domains"],
+            ["arxiv.org", "quora.com", "reddit.com", "wikipedia.org"],
+        )
         self.assertTrue(request["tools"][0]["external_web_access"])
         self.assertEqual(
             request["tools"][0]["user_location"]["country"],
@@ -192,6 +198,41 @@ class OpenAISearcherClientTests(TestCase):
             generation.usage.cost_estimate.total_estimated_cost_usd,
             Decimal("0.01400000"),
         )
+
+    def test_sdk_mapping_does_not_serialize_structured_parsed_union(self):
+        class SDKLikeObject:
+            def __init__(self):
+                self.type = "message"
+                self.parsed = SearcherDraft(warnings=[], sources=[], task_results=[])
+
+            def model_dump(self, **kwargs):
+                raise AssertionError("full SDK serialization must not be used")
+
+        self.assertEqual(_as_mapping(SDKLikeObject())["type"], "message")
+
+    def test_empty_domain_block_list_omits_filters(self):
+        fake_client = FakeOpenAI(
+            SearcherDraft(warnings=[], sources=[], task_results=[])
+        )
+        client = OpenAISearcherClient(
+            OpenAISettings(
+                api_key="test",
+                web_search_blocked_domains=(),
+            ),
+            client=fake_client,
+        )
+
+        client.generate(
+            self.plan,
+            [self.plan.tasks[0]],
+            "Searcher system prompt",
+            iteration=1,
+            call_index=1,
+            max_search_calls=2,
+            min_queries_per_task=1,
+        )
+
+        self.assertNotIn("filters", fake_client.responses.kwargs["tools"][0])
 
     def test_missing_web_search_action_is_rejected(self):
         client = OpenAISearcherClient(

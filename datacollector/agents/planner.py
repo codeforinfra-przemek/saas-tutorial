@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from ..catalog import select_questions
 from ..llm.protocol import PlannerLLM
+from ..query_utils import normalize_search_queries
 from ..schemas import (
     PRIORITY_ORDER,
     AgentIterationUsage,
@@ -127,6 +128,7 @@ class PlannerAgent:
         existing_fields = set(planner_input.existing_fields)
         tasks: list[ResearchTask] = []
         filtered_guidance_query_count = 0
+        normalized_query_count = 0
 
         for section_id, question in selected:
             guidance = guidance_by_id.get(question.id)
@@ -144,9 +146,11 @@ class PlannerAgent:
             filtered_guidance_query_count += len(raw_guided_queries) - len(
                 guided_queries
             )
-            search_queries = _deduplicate(canonical_queries + guided_queries)[
-                : planner_input.max_queries_per_task
-            ]
+            search_queries, normalized_count = normalize_search_queries(
+                canonical_queries + guided_queries
+            )
+            normalized_query_count += normalized_count
+            search_queries = search_queries[: planner_input.max_queries_per_task]
             fields_to_verify = [
                 field for field in question.target_fields if field in existing_fields
             ]
@@ -215,6 +219,12 @@ class PlannerAgent:
                 "Removed "
                 f"{filtered_guidance_query_count} LLM guidance queries containing "
                 "unresolved placeholders; canonical executable queries remain."
+            )
+        if normalized_query_count:
+            planning_notes.append(
+                "Normalized "
+                f"{normalized_query_count} search queries containing duplicate "
+                "adjacent terms or duplicate query variants."
             )
         compliance_rules = [
             *self.catalog.source_policy.rules,

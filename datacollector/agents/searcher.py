@@ -18,6 +18,7 @@ from ..llm.protocol import (
     SearcherLLM,
     SearcherProviderError,
 )
+from ..query_utils import normalize_search_queries
 from ..schemas import (
     AgentIterationUsage,
     PRIORITY_ORDER,
@@ -40,7 +41,7 @@ from ..schemas import (
 
 
 DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "searcher_system_v2.md"
+    Path(__file__).resolve().parent.parent / "prompts" / "searcher_system_v3.md"
 )
 UNRESOLVED_QUERY_MARKER = re.compile(r"\{[^{}]+\}|\[[^\[\]]+\]|<[^<>]+>")
 TRACKING_QUERY_KEYS = {
@@ -75,6 +76,35 @@ MULTI_LABEL_PUBLIC_SUFFIXES = {
     "org.au",
     "org.pl",
     "org.uk",
+}
+PROMOTIONAL_URL_MARKERS = {
+    "contest",
+    "giveaway",
+    "konkurs",
+    "loteria",
+    "plakat",
+    "sweepstakes",
+}
+PROMOTIONAL_TASK_MARKERS = {
+    "advertising",
+    "campaign",
+    "contest",
+    "kampania",
+    "konkurs",
+    "marketing",
+    "promotion",
+    "promocj",
+    "reklam",
+}
+GOVERNMENT_HOST_LABELS = {
+    "admin",
+    "court",
+    "europa",
+    "gouv",
+    "government",
+    "gov",
+    "justice",
+    "state",
 }
 
 
@@ -182,14 +212,82 @@ def _candidate_domain(value: str) -> str:
     return ".".join(labels[-label_count:])
 
 
-def _sanitize_task(task: ResearchTask) -> tuple[ResearchTask, int]:
+def _sanitize_task(task: ResearchTask) -> tuple[ResearchTask, int, int]:
     queries = [
         query
         for query in task.search_queries
         if not UNRESOLVED_QUERY_MARKER.search(query)
     ]
     removed = len(task.search_queries) - len(queries)
-    return task.model_copy(update={"search_queries": queries}), removed
+    normalized_queries, normalized = normalize_search_queries(queries)
+    return (
+        task.model_copy(update={"search_queries": normalized_queries}),
+        removed,
+        normalized,
+    )
+
+
+def _is_unrelated_promotional_source(
+    url: str,
+    mapped_tasks: list[ResearchTask],
+) -> bool:
+    parsed = urlsplit(url)
+    url_words = set(re.findall(r"[a-z0-9ąćęłńóśźż]+", parsed.path.casefold()))
+    if not url_words.intersection(PROMOTIONAL_URL_MARKERS):
+        return False
+    task_text = " ".join(
+        value
+        for task in mapped_tasks
+        for value in (
+            task.title,
+            task.question,
+            task.acceptance_criteria,
+            *task.target_fields,
+        )
+    )
+    task_words = set(re.findall(r"[a-z0-9ąćęłńóśźż]+", task_text.casefold()))
+    return not task_words.intersection(PROMOTIONAL_TASK_MARKERS)
+
+
+def _refine_source_type(
+    source_type: SourceType,
+    relevance_note: str,
+    url: str = "",
+) -> SourceType:
+    note = relevance_note.casefold()
+    hostname_labels = set((urlsplit(url).hostname or "").casefold().split("."))
+    if source_type == SourceType.REGISTRY:
+        is_explicit_routing_lead = any(
+            marker in note
+            for marker in (
+                "aggregat",
+                "routing lead",
+                "third-party",
+                "third party",
+            )
+        )
+        is_probably_official_host = bool(
+            hostname_labels.intersection(GOVERNMENT_HOST_LABELS)
+        )
+        if is_explicit_routing_lead or (url and not is_probably_official_host):
+            return SourceType.ROUTING_LEAD
+    proposed_law_markers = (
+        "draft law",
+        "legislative project",
+        "legislative-project",
+        "projekt ustawy",
+        "proposed law",
+    )
+    url_path = urlsplit(url).path.casefold()
+    if source_type in {SourceType.GOVERNMENT, SourceType.LEGAL_DOCUMENT} and (
+        any(marker in note for marker in proposed_law_markers)
+        or any(
+            marker in url_path
+            for marker in ("draft-bill", "projekt-ustawy", "proposed-law")
+        )
+    ):
+        return SourceType.LEGISLATIVE_PROJECT
+    return source_type
 
 
 def _select_tasks(
@@ -418,10 +516,12 @@ class SearcherAgent:
             )
         sanitized: list[ResearchTask] = []
         removed_queries = 0
+        normalized_queries = 0
         for task in selected:
-            sanitized_task, removed = _sanitize_task(task)
+            sanitized_task, removed, normalized = _sanitize_task(task)
             sanitized.append(sanitized_task)
             removed_queries += removed
+            normalized_queries += normalized
         tasks_without_queries = [
             task.task_id for task in sanitized if not task.search_queries
         ]
@@ -438,6 +538,11 @@ class SearcherAgent:
             warnings.append(
                 f"Skipped {removed_queries} plan queries containing unresolved "
                 "placeholders."
+            )
+        if normalized_queries:
+            warnings.append(
+                f"Normalized {normalized_queries} plan queries containing "
+                "duplicate adjacent terms or duplicate query variants."
             )
 
         if self.llm is None:
@@ -798,6 +903,10 @@ class SearcherAgent:
         task_specific_queries: dict[str, list[str]] = {}
         task_action_ids: dict[str, list[str]] = {}
         attributed_query_keys: set[str] = set()
+        reported_task_ids_by_query: defaultdict[str, set[str]] = defaultdict(set)
+        for task_id, task_draft in task_drafts.items():
+            for query in task_draft.attempted_queries:
+                reported_task_ids_by_query[_query_key(query)].add(task_id)
         for task in tasks:
             planned_queries = set(task.search_queries)
             attempted: list[str] = []
@@ -806,8 +915,13 @@ class SearcherAgent:
                 action_matches_task = False
                 single_task_scope = action.scope_task_ids == [task.task_id]
                 for query in action.queries:
+                    uniquely_reported_for_task = reported_task_ids_by_query[
+                        _query_key(query)
+                    ] == {task.task_id}
                     if task.task_id in action.scope_task_ids and (
-                        query in planned_queries or single_task_scope
+                        query in planned_queries
+                        or single_task_scope
+                        or uniquely_reported_for_task
                     ):
                         attempted.append(query)
                         attributed_query_keys.add(_query_key(query))
@@ -835,6 +949,9 @@ class SearcherAgent:
         sources: list[SearchSource] = []
         unassigned_provider_sources = 0
         actionless_provider_sources = 0
+        promotional_provider_sources = 0
+        refined_source_types = 0
+        task_by_id = {task.task_id: task for task in tasks}
         for canonical, provider_source in provider_by_canonical.items():
             candidate_task_ids = [
                 task.task_id
@@ -864,6 +981,25 @@ class SearcherAgent:
                 actionless_provider_sources += 1
                 continue
             draft_source = draft_by_canonical.get(canonical)
+            mapped_tasks = [task_by_id[task_id] for task_id in mapped_task_ids]
+            if _is_unrelated_promotional_source(canonical, mapped_tasks):
+                promotional_provider_sources += 1
+                continue
+            relevance_note = (
+                draft_source.relevance_note if draft_source else ""
+            )
+            proposed_source_type = (
+                draft_source.source_type
+                if draft_source
+                else SourceType.UNKNOWN
+            )
+            source_type = _refine_source_type(
+                proposed_source_type,
+                relevance_note,
+                canonical,
+            )
+            if source_type != proposed_source_type:
+                refined_source_types += 1
             source_id = _source_id(canonical)
             sources.append(
                 SearchSource(
@@ -874,11 +1010,7 @@ class SearcherAgent:
                         provider_source.title
                         or (draft_source.title if draft_source else "")
                     ),
-                    source_type=(
-                        draft_source.source_type
-                        if draft_source
-                        else SourceType.UNKNOWN
-                    ),
+                    source_type=source_type,
                     origin=SearchSourceOrigin.OPENAI_WEB_SEARCH,
                     provider_observed=True,
                     task_ids=mapped_task_ids,
@@ -890,9 +1022,7 @@ class SearcherAgent:
                             if len(completed_action_by_id[action_id].queries) == 1
                         ]
                     ),
-                    relevance_note=(
-                        draft_source.relevance_note if draft_source else ""
-                    ),
+                    relevance_note=relevance_note,
                     discovered_at=discovered_at,
                 )
             )
@@ -906,6 +1036,17 @@ class SearcherAgent:
             warnings.append(
                 f"Excluded {actionless_provider_sources} mapped provider URLs "
                 "without action-level provenance."
+            )
+        if promotional_provider_sources:
+            warnings.append(
+                f"Excluded {promotional_provider_sources} promotional URL "
+                "candidates that did not match a selected task target."
+            )
+        if refined_source_types:
+            warnings.append(
+                f"Reclassified {refined_source_types} source candidates as "
+                "routing leads or legislative projects based on their own "
+                "routing metadata and source domains."
             )
 
         task_results: list[SearchTaskResult] = []

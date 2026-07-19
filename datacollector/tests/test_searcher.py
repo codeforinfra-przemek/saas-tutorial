@@ -5,7 +5,12 @@ from unittest import TestCase
 from pydantic import ValidationError
 
 from datacollector.agents.planner import PlannerAgent
-from datacollector.agents.searcher import SearcherAgent, SearcherValidationError
+from datacollector.agents.searcher import (
+    SearcherAgent,
+    SearcherValidationError,
+    _is_unrelated_promotional_source,
+    _refine_source_type,
+)
 from datacollector.catalog import load_question_catalog
 from datacollector.llm.protocol import (
     ProviderSearchSource,
@@ -443,6 +448,34 @@ class FakeBatchSearcherLLM:
         )
 
 
+class FakeAmbiguousBatchSearcherLLM(FakeBatchSearcherLLM):
+    def generate(self, *args, **kwargs):
+        generation = super().generate(*args, **kwargs)
+        derived_query = "custom query for the second task"
+        first_result = generation.draft.task_results[0].model_copy(
+            update={
+                "attempted_queries": [
+                    *generation.draft.task_results[0].attempted_queries,
+                    derived_query,
+                ]
+            }
+        )
+        draft = generation.draft.model_copy(
+            update={
+                "task_results": [
+                    first_result,
+                    generation.draft.task_results[1],
+                ]
+            }
+        )
+        return SearcherGeneration(
+            draft=draft,
+            usage=generation.usage,
+            actions=generation.actions,
+            provider_sources=generation.provider_sources,
+        )
+
+
 class SearcherAgentTests(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -474,6 +507,78 @@ class SearcherAgentTests(TestCase):
             all(not source.provider_observed for source in results.sources)
         )
         self.assertTrue(any("no network search" in item for item in results.warnings))
+
+    def test_existing_plan_queries_are_normalized_before_search(self):
+        first_task = self.plan.tasks[0].model_copy(
+            update={
+                "search_queries": [
+                    '"Żabka" "Żabka" company registry PL',
+                    "franchise law PL PL",
+                ]
+            }
+        )
+        plan = self.plan.model_copy(
+            update={"tasks": [first_task, *self.plan.tasks[1:]]}
+        )
+
+        results = SearcherAgent().create_search_results(
+            plan,
+            plan_sha256="b" * 64,
+            plan_reference="/tmp/old-plan.json",
+            task_limit=1,
+        )
+
+        self.assertEqual(
+            results.task_results[0].planned_queries,
+            ['"Żabka" company registry PL', "franchise law PL"],
+        )
+        self.assertTrue(
+            any("Normalized 2 plan queries" in warning for warning in results.warnings)
+        )
+
+    def test_routing_metadata_is_refined_conservatively(self):
+        self.assertEqual(
+            _refine_source_type(
+                SourceType.REGISTRY,
+                "Third-party registry aggregation routing lead.",
+            ),
+            SourceType.ROUTING_LEAD,
+        )
+        self.assertEqual(
+            _refine_source_type(
+                SourceType.GOVERNMENT,
+                "Official legislative-project page for a proposed law.",
+            ),
+            SourceType.LEGISLATIVE_PROJECT,
+        )
+        self.assertEqual(
+            _refine_source_type(SourceType.REGISTRY, "Official registry extract."),
+            SourceType.REGISTRY,
+        )
+        self.assertEqual(
+            _refine_source_type(
+                SourceType.REGISTRY,
+                "Entity record.",
+                "https://vrejestr.pl/krs/0000448819/zabka",
+            ),
+            SourceType.ROUTING_LEAD,
+        )
+        self.assertEqual(
+            _refine_source_type(
+                SourceType.REGISTRY,
+                "Official registry extract.",
+                "https://ekrs.ms.gov.pl/web/wyszukiwarka-krs/strona-glowna",
+            ),
+            SourceType.REGISTRY,
+        )
+
+    def test_unrelated_promotional_url_is_not_an_evidence_candidate(self):
+        self.assertTrue(
+            _is_unrelated_promotional_source(
+                "https://example.com/franczyza/konkurs-plakat/",
+                [self.plan.tasks[1]],
+            )
+        )
 
     def test_free_searcher_seeds_only_known_brand_url_not_framework_references(self):
         plan = PlannerAgent(load_question_catalog()).create_plan(
@@ -650,7 +755,7 @@ class SearcherAgentTests(TestCase):
         self.assertEqual(failure.tool_usage[0].calls, 1)
         self.assertEqual([usage.call_index for usage in results.agent_usage], [1])
 
-    def test_multi_task_derived_query_is_not_false_complete_provenance(self):
+    def test_uniquely_reported_derived_query_gets_task_provenance(self):
         results = SearcherAgent(FakeBatchSearcherLLM()).create_search_results(
             self.plan,
             plan_sha256="6" * 64,
@@ -659,12 +764,30 @@ class SearcherAgentTests(TestCase):
         )
 
         second = results.task_results[1]
-        self.assertEqual(second.attempted_queries, [])
+        self.assertEqual(
+            second.attempted_queries,
+            ["custom query for the second task"],
+        )
         self.assertEqual(second.query_coverage, SearchQueryCoverage.NONE)
         self.assertEqual(second.status, SearchTaskStatus.PARTIAL)
         self.assertIn("planned_query_attempts:0/1", second.coverage_gaps)
         self.assertEqual(results.sources[1].observed_in_action_ids, ["ws_batch"])
         self.assertEqual(results.sources[1].discovered_via_queries, [])
+        self.assertFalse(
+            any("deterministic task attribution" in item for item in results.warnings)
+        )
+
+    def test_ambiguous_derived_query_remains_action_only(self):
+        results = SearcherAgent(
+            FakeAmbiguousBatchSearcherLLM()
+        ).create_search_results(
+            self.plan,
+            plan_sha256="7" * 64,
+            plan_reference="/tmp/plan.json",
+            task_limit=2,
+        )
+
+        self.assertEqual(results.task_results[1].attempted_queries, [])
         self.assertTrue(
             any("deterministic task attribution" in item for item in results.warnings)
         )

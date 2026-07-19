@@ -196,6 +196,40 @@ class PlannerAgentTests(TestCase):
             any("unresolved placeholders" in note for note in plan.planning_notes)
         )
 
+    def test_repeated_adjacent_query_terms_are_normalized(self):
+        llm = FakePlannerLLM(
+            PlannerDraft(
+                objective="Build a complete and auditable research plan.",
+                planning_notes=[],
+                assumptions=[],
+                scope_warnings=[],
+                task_guidance=[
+                    PlannerTaskGuidance(
+                        catalog_question_id="scope.brand_identity",
+                        priority=Priority.CRITICAL,
+                        rationale="Resolve the offering entity.",
+                        search_queries=['"Example" "Example" registry PL PL'],
+                        source_hints=[],
+                    )
+                ],
+            )
+        )
+
+        plan = PlannerAgent(self.catalog, llm).create_plan(
+            PlannerInput(brand_name="Example", max_queries_per_task=5)
+        )
+        task = next(
+            task
+            for task in plan.tasks
+            if task.catalog_question_id == "scope.brand_identity"
+        )
+
+        self.assertIn('"Example" registry PL', task.search_queries)
+        self.assertNotIn('"Example" "Example" registry PL PL', task.search_queries)
+        self.assertTrue(
+            any("Normalized" in note for note in plan.planning_notes)
+        )
+
     def test_llm_priority_escalation_adds_task_fields_to_critical_gate(self):
         planner_input = PlannerInput(brand_name="Example")
         question = next(

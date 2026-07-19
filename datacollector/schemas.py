@@ -22,7 +22,7 @@ from pydantic import (
 SCHEMA_VERSION = "1.2.0"
 PROMPT_VERSION = "planner-system-v2"
 SEARCHER_SCHEMA_VERSION = "1.1.0"
-SEARCHER_PROMPT_VERSION = "searcher-system-v2"
+SEARCHER_PROMPT_VERSION = "searcher-system-v3"
 
 
 class ClosedModel(BaseModel):
@@ -79,8 +79,10 @@ class SourceType(StrEnum):
     GOVERNMENT = "government"
     REGULATOR = "regulator"
     REGISTRY = "registry"
+    ROUTING_LEAD = "routing_lead"
     COURT = "court"
     LEGAL_DOCUMENT = "legal_document"
+    LEGISLATIVE_PROJECT = "legislative_project"
     AUDITED_FINANCIAL = "audited_financial"
     REPUTABLE_MEDIA = "reputable_media"
     INDUSTRY = "industry"

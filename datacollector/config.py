@@ -20,6 +20,13 @@ ALLOWED_REASONING_EFFORTS = {
     "xhigh",
     "max",
 }
+ALLOWED_SEARCH_CONTEXT_SIZES = {"low", "medium", "high"}
+DEFAULT_WEB_SEARCH_BLOCKED_DOMAINS = (
+    "arxiv.org",
+    "quora.com",
+    "reddit.com",
+    "wikipedia.org",
+)
 
 
 class ConfigurationError(ValueError):
@@ -37,6 +44,30 @@ def _read_int(name: str, default: int, minimum: int) -> int:
     return value
 
 
+def _read_domains(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw_value = os.getenv(name)
+    values = default if raw_value is None else tuple(raw_value.split(","))
+    domains: list[str] = []
+    for raw_domain in values:
+        domain = raw_domain.strip().lower().rstrip(".")
+        if not domain:
+            continue
+        if (
+            "://" in domain
+            or "/" in domain
+            or " " in domain
+            or "." not in domain
+        ):
+            raise ConfigurationError(
+                f"{name} entries must be bare domains without paths or schemes."
+            )
+        if domain not in domains:
+            domains.append(domain)
+    if len(domains) > 100:
+        raise ConfigurationError(f"{name} supports at most 100 domains.")
+    return tuple(domains)
+
+
 @dataclass(frozen=True)
 class OpenAISettings:
     """OpenAI settings whose representation never exposes the API key."""
@@ -47,6 +78,10 @@ class OpenAISettings:
     timeout_seconds: int = 60
     max_retries: int = 2
     max_output_tokens: int = 8000
+    search_context_size: str = "low"
+    web_search_blocked_domains: tuple[str, ...] = (
+        DEFAULT_WEB_SEARCH_BLOCKED_DOMAINS
+    )
 
     @classmethod
     def from_env(
@@ -81,6 +116,15 @@ class OpenAISettings:
                 f"OPENAI_REASONING_EFFORT must be one of: {allowed}."
             )
 
+        search_context_size = os.getenv(
+            "OPENAI_WEB_SEARCH_CONTEXT_SIZE", "low"
+        ).strip().lower()
+        if search_context_size not in ALLOWED_SEARCH_CONTEXT_SIZES:
+            allowed = ", ".join(sorted(ALLOWED_SEARCH_CONTEXT_SIZES))
+            raise ConfigurationError(
+                "OPENAI_WEB_SEARCH_CONTEXT_SIZE must be one of: " f"{allowed}."
+            )
+
         return cls(
             api_key=api_key,
             model=model,
@@ -88,4 +132,9 @@ class OpenAISettings:
             timeout_seconds=_read_int("OPENAI_TIMEOUT_SECONDS", 60, 1),
             max_retries=_read_int("OPENAI_MAX_RETRIES", 2, 0),
             max_output_tokens=_read_int("OPENAI_MAX_OUTPUT_TOKENS", 8000, 256),
+            search_context_size=search_context_size,
+            web_search_blocked_domains=_read_domains(
+                "OPENAI_WEB_SEARCH_BLOCKED_DOMAINS",
+                DEFAULT_WEB_SEARCH_BLOCKED_DOMAINS,
+            ),
         )

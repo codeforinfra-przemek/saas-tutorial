@@ -24,10 +24,14 @@ from .protocol import ProviderSearchSource, SearcherGeneration, SearcherProvider
 def _as_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
-    if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json")
     if hasattr(value, "__dict__"):
         return vars(value)
+    if hasattr(value, "model_dump"):
+        # SDK response items may contain the separately parsed Structured Output
+        # model. Serializing the complete union can emit Pydantic warnings even
+        # though the web-search fields themselves are valid. Provenance parsing
+        # only needs the object's declared attributes.
+        return value.model_dump(mode="python", exclude={"parsed"})
     return {}
 
 
@@ -204,18 +208,26 @@ class OpenAISearcherClient:
                 "profile or assert normalized facts. For every task, issue at "
                 "least minimum_query_attempts provided search_queries exactly as "
                 "written before optional derived queries. Map every issued query "
-                "and every retained URL to its task."
+                "and every retained URL to its task. Retain a URL only when its "
+                "relevance note names a concrete target or acceptance criterion; "
+                "a brand mention alone is insufficient."
             ),
         }
         web_search_tool: dict[str, Any] = {
             "type": "web_search",
-            "search_context_size": "medium",
+            "search_context_size": self.settings.search_context_size,
             "external_web_access": True,
             "user_location": {
                 "type": "approximate",
                 "country": plan.planner_input.target_country,
             },
         }
+        if self.settings.web_search_blocked_domains:
+            web_search_tool["filters"] = {
+                "blocked_domains": list(
+                    self.settings.web_search_blocked_domains
+                )
+            }
         if plan.planner_input.target_regions:
             web_search_tool["user_location"]["region"] = ", ".join(
                 plan.planner_input.target_regions

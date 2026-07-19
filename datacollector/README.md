@@ -130,6 +130,14 @@ increase `--limit-tasks` deliberately after comparing quality and cost.
 
 Paid Searcher uses the Responses API hosted `web_search` tool with live external
 access, required search, provider source inclusion, and a hard tool-call cap.
+It defaults to `search_context_size=low` for URL discovery and blocks domains
+that produced high-volume, low-value results in the benchmark
+(`arxiv.org`, `quora.com`, `reddit.com`, and `wikipedia.org`). Override these
+without changing code through `OPENAI_WEB_SEARCH_CONTEXT_SIZE` and the
+comma-separated `OPENAI_WEB_SEARCH_BLOCKED_DOMAINS`; an empty domain value
+disables the block list. `medium` remains available for tasks that need more
+search-result context, but the setting does not guarantee an exact token or
+source count.
 Every stored paid URL must also occur in provider-returned search sources or URL
 citations; model-only URLs are discarded. Schema `1.1.0` additionally requires a
 stored URL to be mapped to at least one selected task and to the provider action
@@ -160,6 +168,11 @@ only that the URL was present in provider provenance. Schema `1.0.0` artifacts
 using the old field still load, but new artifacts serialize the new name. Exact
 `discovered_via_queries` are stored only when one action/query association is
 unambiguous; batched activity remains auditable through `observed_in_action_ids`.
+An executed derived query may be assigned to a task only when the model reports
+that exact provider-observed query for one task; ambiguous multi-task assignments
+remain action-only. Third-party registry aggregators are classified as
+`routing_lead`, draft legislation as `legislative_project`, and unrelated
+contest/campaign URLs are kept out of Extractor inputs.
 
 Paid quality retries are disabled by default, so a coverage gap cannot silently
 create another API request. To permit at most two one-task retries while keeping

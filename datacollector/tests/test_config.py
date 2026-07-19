@@ -28,7 +28,52 @@ class OpenAISettingsTests(TestCase):
         self.assertEqual(settings.timeout_seconds, 12)
         self.assertEqual(settings.max_retries, 0)
         self.assertEqual(settings.max_output_tokens, 4096)
+        self.assertEqual(settings.search_context_size, "low")
+        self.assertEqual(
+            settings.web_search_blocked_domains,
+            ("arxiv.org", "quora.com", "reddit.com", "wikipedia.org"),
+        )
         self.assertNotIn("sk-test-secret", repr(settings))
+
+    def test_web_search_options_are_configurable(self):
+        environment = {
+            "OPENAI_API_KEY": "secret",
+            "OPENAI_WEB_SEARCH_CONTEXT_SIZE": "high",
+            "OPENAI_WEB_SEARCH_BLOCKED_DOMAINS": (
+                " reddit.com,Example.org,reddit.com "
+            ),
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = OpenAISettings.from_env(MISSING_ENV_FILE)
+
+        self.assertEqual(settings.search_context_size, "high")
+        self.assertEqual(
+            settings.web_search_blocked_domains,
+            ("reddit.com", "example.org"),
+        )
+
+    def test_invalid_web_search_options_fail_before_api_call(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "secret",
+                "OPENAI_WEB_SEARCH_CONTEXT_SIZE": "huge",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ConfigurationError, "CONTEXT_SIZE"):
+                OpenAISettings.from_env(MISSING_ENV_FILE)
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "secret",
+                "OPENAI_WEB_SEARCH_BLOCKED_DOMAINS": "https://reddit.com/r/test",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ConfigurationError, "bare domains"):
+                OpenAISettings.from_env(MISSING_ENV_FILE)
 
     def test_legacy_key_name_is_temporarily_supported(self):
         with patch.dict(os.environ, {"openai_apikey": "legacy-secret"}, clear=True):
