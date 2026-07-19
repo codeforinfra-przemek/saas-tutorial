@@ -456,6 +456,14 @@ re-extracting the page that mentioned it. Work is grouped into
 `extract_known_source`, `retry_retrieval`, `reextract_existing`,
 `search_new_source`, or `human_review` execution batches.
 
+Resolver does not schedule `reextract_existing` for a routing-only lead, an
+unparsed/inaccessible document, or a source already recorded as semantically
+processed for the same plan task. Gaps requiring another publisher,
+independent corroboration, a preferred authority, or alternative evidence
+prefer `search_new_source` after any genuinely unevaluated known source. If a
+paid strategy is rejected locally, the fallback artifact records the specific
+validation code and reason instead of hiding it behind a generic failure.
+
 Then run the optional paid prioritization against the exact same Checker input:
 
 ```bash

@@ -521,6 +521,11 @@ class ExecutorAgent:
         retry_search_calls: int,
         query_overrides: dict[str, list[str]],
     ) -> SearchResults:
+        materialized_query_overrides = (
+            delta.limits.query_overrides
+            if delta is not None
+            else query_overrides
+        )
         prior_by_id = {source.source_id: source for source in prior.sources}
         delta_by_id = {
             source.source_id: source for source in (delta.sources if delta else [])
@@ -660,7 +665,7 @@ class ExecutorAgent:
                 min_queries_per_task=min_queries_per_task,
                 max_retry_tasks=max_retry_tasks,
                 retry_search_calls=retry_search_calls,
-                query_overrides=query_overrides,
+                query_overrides=materialized_query_overrides,
             ),
             selected_task_ids=selected_task_ids,
             unselected_task_ids=[
@@ -713,6 +718,9 @@ class ExecutorAgent:
         prior_document_by_source = {
             document.source_id: document for document in prior.documents
         }
+        merged_source_by_id = {
+            source.source_id: source for source in merged_search.sources
+        }
         selected_source_ids = _deduplicate(
             [
                 *prior.selected_source_ids,
@@ -742,11 +750,7 @@ class ExecutorAgent:
             if source_id not in prior_document_by_source:
                 replacement_source_ids.add(source_id)
                 continue
-            source = next(
-                source
-                for source in merged_search.sources
-                if source.source_id == source_id
-            )
+            source = merged_source_by_id[source_id]
             if (
                 execution_mode == ExecutorMode.PAID
                 and delta_document.parse_status
@@ -768,6 +772,10 @@ class ExecutorAgent:
                 delta_document_by_source[source_id]
                 if source_id in replacement_source_ids
                 else prior_document_by_source[source_id]
+            ).model_copy(
+                update={
+                    "task_ids": merged_source_by_id[source_id].task_ids,
+                }
             )
             for source_id in selected_source_ids
         ]
@@ -831,10 +839,9 @@ class ExecutorAgent:
             task for task in plan.tasks if task.task_id in selected_task_id_set
         ]
         selected_task_ids = [task.task_id for task in selected_tasks]
-        source_by_id = {
-            source.source_id: source for source in merged_search.sources
-        }
-        selected_sources = [source_by_id[source_id] for source_id in selected_source_ids]
+        selected_sources = [
+            merged_source_by_id[source_id] for source_id in selected_source_ids
+        ]
         semantic_scopes = _successful_semantic_scopes(prior)
         if delta is not None:
             semantic_scopes -= {

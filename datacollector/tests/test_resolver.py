@@ -14,12 +14,16 @@ from datacollector.schemas import (
     AgentIterationUsage,
     CheckerClaimDecisionDraft,
     CheckerDraft,
+    CheckerFollowUpAction,
     CheckerIssueCode,
     CheckerModelSemanticFit,
     CheckerModelSourceSupport,
     CheckerModelVerdict,
     CheckerNextAction,
     CheckerFollowUpReason,
+    DocumentParseStatus,
+    DocumentRetrievalStatus,
+    ExtractionSemanticScope,
     ResearchPlan,
     ResolverAction,
     ResolverDraft,
@@ -179,10 +183,13 @@ class ResolverAgentTests(TestCase):
         )
 
     def _run(self, llm=None, *, checker_results=None, **kwargs):
+        extraction_results = kwargs.pop(
+            "extraction_results", self.extraction_results
+        )
         return ResolverAgent(llm).create_resolution_results(
             self.plan,
             self.search_results,
-            self.extraction_results,
+            extraction_results,
             checker_results or self.checker_results,
             plan_sha256=kwargs.pop(
                 "plan_sha256", checker_fixtures.PLAN_SHA256
@@ -202,10 +209,32 @@ class ResolverAgentTests(TestCase):
             **kwargs,
         )
 
-    def test_free_routes_unresolved_field_without_provider_cost(self):
-        results = self._run()
+    def test_free_reextracts_only_usable_unprocessed_evidence_sources(self):
+        follow_up = self.checker_results.follow_up_tasks[0].model_copy(
+            update={"minimum_additional_sources": 0}
+        )
+        task_result = self.checker_results.task_results[0]
+        field_result = task_result.field_results[0].model_copy(
+            update={"issue_codes": [CheckerIssueCode.UNSUPPORTED_CLAIM]}
+        )
+        changed_task_result = task_result.model_copy(
+            update={
+                "field_results": [
+                    field_result,
+                    *task_result.field_results[1:],
+                ]
+            }
+        )
+        checker = self.checker_results.model_copy(
+            update={
+                "follow_up_tasks": [follow_up],
+                "task_results": [changed_task_result],
+            }
+        )
+        results = self._run(checker_results=checker)
 
         self.assertEqual(results.generated_by, "deterministic")
+        self.assertEqual(results.prompt_version, "resolver-system-v2")
         self.assertEqual(
             results.strategy_source,
             ResolverStrategySource.DETERMINISTIC,
@@ -218,7 +247,125 @@ class ResolverAgentTests(TestCase):
             results.work_items[0].selected_action,
             ResolverAction.REEXTRACT_EXISTING,
         )
+        self.assertEqual(
+            results.work_items[0].selected_source_ids,
+            [
+                self.search_results.sources[0].source_id,
+                self.search_results.sources[1].source_id,
+            ],
+        )
+        self.assertNotIn(
+            self.search_results.sources[2].source_id,
+            results.available_source_ids,
+        )
         self.assertEqual(len(results.execution_batches), 1)
+
+    def test_processed_scopes_force_new_search_instead_of_reextraction(self):
+        follow_up = self.checker_results.follow_up_tasks[0].model_copy(
+            update={"minimum_additional_sources": 0}
+        )
+        task_result = self.checker_results.task_results[0]
+        field_result = task_result.field_results[0].model_copy(
+            update={"issue_codes": [CheckerIssueCode.UNSUPPORTED_CLAIM]}
+        )
+        changed_task_result = task_result.model_copy(
+            update={
+                "field_results": [
+                    field_result,
+                    *task_result.field_results[1:],
+                ]
+            }
+        )
+        checker = self.checker_results.model_copy(
+            update={
+                "follow_up_tasks": [follow_up],
+                "task_results": [changed_task_result],
+            }
+        )
+        processed_scopes = [
+            ExtractionSemanticScope(
+                task_id=follow_up.task_id,
+                source_id=source.source_id,
+            )
+            for source in self.search_results.sources[:2]
+        ]
+        extraction = self.extraction_results.model_copy(
+            update={"semantically_processed_scopes": processed_scopes}
+        )
+
+        results = self._run(
+            checker_results=checker,
+            extraction_results=extraction,
+        )
+
+        self.assertEqual(
+            results.work_items[0].selected_action,
+            ResolverAction.SEARCH_NEW_SOURCE,
+        )
+        self.assertNotIn(
+            ResolverAction.REEXTRACT_EXISTING,
+            results.work_items[0].allowed_actions,
+        )
+        self.assertEqual(results.execution_source_ids, [])
+
+    def test_inaccessible_document_is_not_eligible_for_reextraction(self):
+        follow_up = self.checker_results.follow_up_tasks[0].model_copy(
+            update={
+                "candidate_source_ids": [],
+                "retry_source_ids": [],
+                "reextract_source_ids": [
+                    self.search_results.sources[0].source_id
+                ],
+            }
+        )
+        inaccessible = self.extraction_results.documents[0].model_copy(
+            update={
+                "retrieval_status": DocumentRetrievalStatus.NOT_ACCESSIBLE,
+                "parse_status": DocumentParseStatus.NOT_ATTEMPTED,
+            }
+        )
+        extraction = self.extraction_results.model_copy(
+            update={
+                "documents": [
+                    inaccessible,
+                    *self.extraction_results.documents[1:],
+                ]
+            }
+        )
+
+        pools = ResolverAgent._eligible_source_pools(
+            [follow_up],
+            self.search_results,
+            extraction,
+        )
+
+        self.assertEqual(
+            pools[follow_up.follow_up_id][
+                ResolverAction.REEXTRACT_EXISTING
+            ],
+            [],
+        )
+
+    def test_corroboration_prefers_new_search_over_reextraction(self):
+        follow_up = self.checker_results.follow_up_tasks[0].model_copy(
+            update={
+                "action": CheckerFollowUpAction.CORROBORATE,
+                "reason": CheckerFollowUpReason.NEEDS_CORROBORATION,
+                "minimum_additional_sources": 1,
+                "requires_independent_source": True,
+            }
+        )
+        checker = self.checker_results.model_copy(
+            update={"follow_up_tasks": [follow_up]}
+        )
+
+        results = self._run(checker_results=checker)
+
+        self.assertEqual(
+            results.work_items[0].selected_action,
+            ResolverAction.SEARCH_NEW_SOURCE,
+        )
+        self.assertEqual(results.execution_source_ids, [])
 
     def test_ready_selected_scope_schedules_next_plan_batch(self):
         second_task = checker_fixtures.CheckerAgentTests.second_task
@@ -463,6 +610,14 @@ class ResolverAgentTests(TestCase):
                     )
                 ),
                 "agent_usage": [usage],
+                "search_task_ids": list(
+                    dict.fromkeys(
+                        item.task_id
+                        for item in work_items
+                        if item.selected_action
+                        == ResolverAction.SEARCH_NEW_SOURCE
+                    )
+                ),
             }
         )
 
@@ -496,7 +651,7 @@ class ResolverAgentTests(TestCase):
                 items=[
                     ResolverItemDraft(
                         follow_up_id=item.follow_up_id,
-                        selected_action=item.selected_action,
+                        selected_action=ResolverAction.REEXTRACT_EXISTING,
                         selected_source_ids=["source-ffffffffffffffff"],
                         sequence=1,
                         rationale="The fixture deliberately invents a source ID.",
@@ -514,7 +669,13 @@ class ResolverAgentTests(TestCase):
         self.assertEqual(len(results.failed_attempts), 1)
         self.assertEqual(
             results.failed_attempts[0].error_code,
-            "invalid_resolver_output",
+            "invalid_source_selection",
+        )
+        self.assertTrue(
+            any(
+                "invalid_source_selection" in warning
+                for warning in results.warnings
+            )
         )
         self.assertNotIn(
             "source-ffffffffffffffff",

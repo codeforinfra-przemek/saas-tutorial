@@ -32,7 +32,7 @@ CHECKER_SCHEMA_VERSION = "1.2.0"
 CHECKER_PROMPT_VERSION = "checker-system-v3"
 CHECKER_SCORING_VERSION = "checker-scoring-v2"
 RESOLVER_SCHEMA_VERSION = "1.1.0"
-RESOLVER_PROMPT_VERSION = "resolver-system-v1"
+RESOLVER_PROMPT_VERSION = "resolver-system-v2"
 EXECUTOR_SCHEMA_VERSION = "1.0.0"
 
 
@@ -3262,7 +3262,9 @@ class ResolverResults(ClosedModel):
     """Bounded repair plan consumed by the next Searcher/Extractor round."""
 
     schema_version: Literal["1.0.0", "1.1.0"] = RESOLVER_SCHEMA_VERSION
-    prompt_version: Literal["resolver-system-v1"] = RESOLVER_PROMPT_VERSION
+    prompt_version: Literal["resolver-system-v1", "resolver-system-v2"] = (
+        RESOLVER_PROMPT_VERSION
+    )
     resolution_id: str
     plan_run_id: str
     search_id: str

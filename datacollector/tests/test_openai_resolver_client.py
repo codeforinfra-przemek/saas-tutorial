@@ -62,7 +62,9 @@ class OpenAIResolverClientTests(TestCase):
     def setUpClass(cls):
         resolver_fixtures.ResolverAgentTests.setUpClass()
         case = resolver_fixtures.ResolverAgentTests(
-            methodName="test_free_routes_unresolved_field_without_provider_cost"
+            methodName=(
+                "test_free_reextracts_only_usable_unprocessed_evidence_sources"
+            )
         )
         cls.plan = case.plan
         cls.search_results = case.search_results

@@ -29,7 +29,34 @@ class ExecutorAgentTests(TestCase):
         cls.search = resolver_fixtures.ResolverAgentTests.search_results
         cls.extraction = resolver_fixtures.ResolverAgentTests.extraction_results
         cls.checker = resolver_fixtures.ResolverAgentTests.checker_results
-        cls.resolution = resolver_fixtures.ResolverAgentTests()._run()
+        base_resolution = resolver_fixtures.ResolverAgentTests()._run()
+        source_id = cls.search.sources[0].source_id
+        reextract_item = base_resolution.work_items[0].model_copy(
+            update={
+                "allowed_actions": [
+                    ResolverAction.REEXTRACT_EXISTING,
+                    ResolverAction.SEARCH_NEW_SOURCE,
+                    ResolverAction.HUMAN_REVIEW,
+                ],
+                "selected_action": ResolverAction.REEXTRACT_EXISTING,
+                "selected_source_ids": [source_id],
+                "fallback_source_ids": [],
+            }
+        )
+        resolution_payload = base_resolution.model_dump(mode="python")
+        resolution_payload.update(
+            {
+                "work_items": [reextract_item],
+                "execution_batches": (
+                    resolver_fixtures.ResolverAgent._build_batches(
+                        [reextract_item]
+                    )
+                ),
+                "execution_source_ids": [source_id],
+                "search_task_ids": [],
+            }
+        )
+        cls.resolution = ResolverResults.model_validate(resolution_payload)
 
     def test_free_execution_reuses_document_and_materializes_merged_state(self):
         merged_search, merged_extraction, execution = ExecutorAgent(
@@ -114,6 +141,80 @@ class ExecutorAgentTests(TestCase):
                 execution_mode=ExecutorMode.FREE,
             )
 
+    def test_merge_updates_preserved_document_task_mappings(self):
+        second_task = checker_fixtures.CheckerAgentTests.second_task
+        expanded_plan = self.plan.model_copy(
+            update={"tasks": [self.plan.tasks[0], second_task]}
+        )
+        first_source = self.search.sources[0]
+        routing_source = self.search.sources[2]
+        expanded_sources = [
+            first_source.model_copy(
+                update={
+                    "task_ids": [
+                        self.plan.tasks[0].task_id,
+                        second_task.task_id,
+                    ]
+                }
+            ),
+            self.search.sources[1],
+            routing_source.model_copy(
+                update={"task_ids": [second_task.task_id]}
+            ),
+        ]
+        merged_search = self.search.model_copy(
+            update={
+                "selected_task_ids": [
+                    self.plan.tasks[0].task_id,
+                    second_task.task_id,
+                ],
+                "unselected_task_ids": [],
+                "sources": expanded_sources,
+            }
+        )
+        expanded_documents = [
+            *self.extraction.documents[:2],
+            self.extraction.documents[2].model_copy(
+                update={"task_ids": [second_task.task_id]}
+            ),
+        ]
+        prior_extraction = self.extraction.model_copy(
+            update={"documents": expanded_documents}
+        )
+
+        merged = ExecutorAgent._merge_extraction(
+            expanded_plan,
+            merged_search,
+            prior_extraction,
+            None,
+            process_source_ids=[first_source.source_id],
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            merged_search_sha256="f" * 64,
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            merged_search_reference="/fixtures/sources-r005-free.json",
+            prior_extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            prior_extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            resolution=self.resolution,
+            resolution_sha256="e" * 64,
+            resolution_reference="/fixtures/resolution-r004-free.json",
+            execution_mode=ExecutorMode.FREE,
+            iteration=5,
+        )
+
+        document_by_source = {
+            document.source_id: document for document in merged.documents
+        }
+        self.assertEqual(
+            document_by_source[first_source.source_id].task_ids,
+            [self.plan.tasks[0].task_id, second_task.task_id],
+        )
+        second_result = next(
+            item
+            for item in merged.task_results
+            if item.task_id == second_task.task_id
+        )
+        self.assertIn(first_source.source_id, second_result.source_ids)
+
     def test_paid_execution_reextracts_cached_source_and_records_only_new_usage(self):
         merged_search, merged_extraction, execution = ExecutorAgent(
             SearcherAgent(),
@@ -172,13 +273,20 @@ class ExecutorAgentTests(TestCase):
 
     def test_paid_search_batch_uses_resolver_query_and_adds_new_source(self):
         original_item = self.resolution.work_items[0]
-        resolver_query = '"Żabka" aktualny dokument franczyzowy 2026'
+        resolver_queries = [
+            '"Żabka" "Żabka" aktualny dokument franczyzowy 2026',
+            "franchise disclosure relationship law PL PL",
+        ]
+        normalized_queries = [
+            '"Żabka" aktualny dokument franczyzowy 2026',
+            "franchise disclosure relationship law PL",
+        ]
         changed_item = original_item.model_copy(
             update={
                 "allowed_actions": [ResolverAction.SEARCH_NEW_SOURCE],
                 "selected_action": ResolverAction.SEARCH_NEW_SOURCE,
                 "selected_source_ids": [],
-                "queries": [resolver_query],
+                "queries": resolver_queries,
             }
         )
         original_batch = self.resolution.execution_batches[0]
@@ -186,7 +294,7 @@ class ExecutorAgentTests(TestCase):
             update={
                 "action": ResolverAction.SEARCH_NEW_SOURCE,
                 "source_ids": [],
-                "queries": [resolver_query],
+                "queries": resolver_queries,
             }
         )
         payload = self.resolution.model_dump(mode="python")
@@ -229,7 +337,14 @@ class ExecutorAgentTests(TestCase):
             execution_mode=ExecutorMode.PAID,
         )
 
-        self.assertEqual(search_llm.calls[0][1][0].search_queries, [resolver_query])
+        self.assertEqual(
+            search_llm.calls[0][1][0].search_queries,
+            normalized_queries,
+        )
+        self.assertEqual(
+            merged_search.limits.query_overrides,
+            {changed_item.task_id: normalized_queries},
+        )
         self.assertTrue(merged_search.search_executed)
         self.assertEqual(len(execution.new_source_ids), 1)
         self.assertIn(

@@ -18,6 +18,8 @@ from ..schemas import (
     CheckerIssueCode,
     CheckerNextAction,
     CheckerResults,
+    DocumentParseStatus,
+    DocumentRetrievalStatus,
     ExtractionResults,
     PRIORITY_ORDER,
     ResearchPlan,
@@ -31,11 +33,12 @@ from ..schemas import (
     ResolverStrategySource,
     ResolverWorkItem,
     SearchResults,
+    SourceType,
 )
 
 
 DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "resolver_system_v1.md"
+    Path(__file__).resolve().parent.parent / "prompts" / "resolver_system_v2.md"
 )
 DEFAULT_MAX_FOLLOW_UPS = 30
 DEFAULT_MAX_SOURCE_ACTIONS = 10
@@ -45,6 +48,14 @@ DEFAULT_MAX_QUERIES_PER_ITEM = 3
 
 class ResolverValidationError(ValueError):
     """Raised before an invalid or misleading Resolver artifact is saved."""
+
+
+class ResolverDraftValidationError(ValueError):
+    """Describe why a paid Resolver draft could not be grounded locally."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def _stable_id(prefix: str, *parts: object) -> str:
@@ -153,13 +164,19 @@ class ResolverAgent:
             item.follow_up_id
             for item in ordered_follow_ups[len(selected_follow_ups):]
         ]
-        available_source_ids = self._available_source_ids(
+        eligible_source_pools = self._eligible_source_pools(
             selected_follow_ups,
+            search_results,
+            extraction_results,
+        )
+        available_source_ids = self._available_source_ids(
+            eligible_source_pools,
             search_results,
         )
         deterministic_items = self._build_deterministic_items(
             selected_follow_ups,
             checker_results,
+            eligible_source_pools=eligible_source_pools,
             max_source_actions=max_source_actions,
             max_search_tasks=max_search_tasks,
             max_queries_per_item=max_queries_per_item,
@@ -262,25 +279,37 @@ class ResolverAgent:
                         generation.draft,
                         deterministic_items,
                         selected_follow_ups,
+                        eligible_source_pools=eligible_source_pools,
                         max_source_actions=max_source_actions,
                         max_search_tasks=max_search_tasks,
                         max_queries_per_item=max_queries_per_item,
                     )
-                except Exception:
+                except Exception as exc:
+                    error_code = (
+                        exc.code
+                        if isinstance(exc, ResolverDraftValidationError)
+                        else "invalid_resolver_output"
+                    )
+                    error_detail = (
+                        str(exc)
+                        if isinstance(exc, ResolverDraftValidationError)
+                        else type(exc).__name__
+                    )
                     failed_attempts.append(
                         ResolverAttemptFailure(
                             call_index=1,
                             scope_task_ids=scope_task_ids,
                             scope_source_ids=available_source_ids,
-                            error_code="invalid_resolver_output",
+                            error_code=error_code,
                             usage_recorded=True,
                             token_usage_unknown=False,
                         )
                     )
                     strategy_source = ResolverStrategySource.DETERMINISTIC_FALLBACK
                     warnings.append(
-                        "Paid Resolver output failed local action, source, budget, "
-                        "or exact-coverage validation; retained the deterministic plan."
+                        "Paid Resolver output failed local validation "
+                        f"({error_code}: {error_detail}); retained the deterministic "
+                        "plan."
                     )
                 else:
                     strategy_source = ResolverStrategySource.OPENAI
@@ -378,23 +407,77 @@ class ResolverAgent:
 
     @staticmethod
     def _available_source_ids(
-        follow_ups: list[CheckerFollowUpTask],
+        eligible_source_pools: dict[
+            str, dict[ResolverAction, list[str]]
+        ],
         search_results: SearchResults,
     ) -> list[str]:
         referenced = {
             source_id
-            for follow_up in follow_ups
-            for source_id in [
-                *follow_up.candidate_source_ids,
-                *follow_up.retry_source_ids,
-                *follow_up.reextract_source_ids,
-            ]
+            for pools in eligible_source_pools.values()
+            for source_ids in pools.values()
+            for source_id in source_ids
         }
         return [
             source.source_id
             for source in search_results.sources
             if source.source_id in referenced
         ]
+
+    @staticmethod
+    def _eligible_source_pools(
+        follow_ups: list[CheckerFollowUpTask],
+        search_results: SearchResults,
+        extraction_results: ExtractionResults,
+    ) -> dict[str, dict[ResolverAction, list[str]]]:
+        """Keep only source actions that can materially change evidence state."""
+
+        source_by_id = {
+            source.source_id: source for source in search_results.sources
+        }
+        usable_document_source_ids = {
+            document.source_id
+            for document in extraction_results.documents
+            if document.retrieval_status == DocumentRetrievalStatus.FETCHED
+            and document.parse_status
+            in {DocumentParseStatus.PARSED, DocumentParseStatus.PARTIAL}
+        }
+        processed_scopes = {
+            (scope.task_id, scope.source_id)
+            for scope in extraction_results.semantically_processed_scopes
+        }
+
+        def evidence_source_ids(source_ids: list[str]) -> list[str]:
+            return [
+                source_id
+                for source_id in _deduplicate(source_ids)
+                if source_id in source_by_id
+                and source_by_id[source_id].source_type
+                != SourceType.ROUTING_LEAD
+            ]
+
+        pools_by_follow_up: dict[
+            str, dict[ResolverAction, list[str]]
+        ] = {}
+        for follow_up in follow_ups:
+            reextract_source_ids = [
+                source_id
+                for source_id in evidence_source_ids(
+                    follow_up.reextract_source_ids
+                )
+                if source_id in usable_document_source_ids
+                and (follow_up.task_id, source_id) not in processed_scopes
+            ]
+            pools_by_follow_up[follow_up.follow_up_id] = {
+                ResolverAction.EXTRACT_KNOWN_SOURCE: evidence_source_ids(
+                    follow_up.candidate_source_ids
+                ),
+                ResolverAction.RETRY_RETRIEVAL: evidence_source_ids(
+                    follow_up.retry_source_ids
+                ),
+                ResolverAction.REEXTRACT_EXISTING: reextract_source_ids,
+            }
+        return pools_by_follow_up
 
     @staticmethod
     def _build_scope_expansion_follow_ups(
@@ -506,6 +589,9 @@ class ResolverAgent:
         follow_ups: list[CheckerFollowUpTask],
         checker_results: CheckerResults,
         *,
+        eligible_source_pools: dict[
+            str, dict[ResolverAction, list[str]]
+        ],
         max_source_actions: int,
         max_search_tasks: int,
         max_queries_per_item: int,
@@ -570,14 +656,13 @@ class ResolverAgent:
                 CheckerIssueCode.MENTIONED_NOT_OBTAINED in field_issues
             )
             pools = {
-                ResolverAction.EXTRACT_KNOWN_SOURCE: follow_up.candidate_source_ids,
-                ResolverAction.RETRY_RETRIEVAL: follow_up.retry_source_ids,
-                ResolverAction.REEXTRACT_EXISTING: (
-                    []
-                    if mentioned_not_obtained
-                    else follow_up.reextract_source_ids
-                ),
+                action: list(source_ids)
+                for action, source_ids in eligible_source_pools[
+                    follow_up.follow_up_id
+                ].items()
             }
+            if mentioned_not_obtained:
+                pools[ResolverAction.REEXTRACT_EXISTING] = []
             allowed_actions = [
                 action for action, source_ids in pools.items() if source_ids
             ]
@@ -586,12 +671,40 @@ class ResolverAgent:
 
             preferred_actions: list[ResolverAction] = []
             if follow_up.candidate_source_ids:
-                preferred_actions.append(ResolverAction.EXTRACT_KNOWN_SOURCE)
+                if pools[ResolverAction.EXTRACT_KNOWN_SOURCE]:
+                    preferred_actions.append(
+                        ResolverAction.EXTRACT_KNOWN_SOURCE
+                    )
             if mentioned_not_obtained and follow_up.retry_source_ids:
-                preferred_actions.append(ResolverAction.RETRY_RETRIEVAL)
-            if not mentioned_not_obtained and follow_up.reextract_source_ids:
+                if pools[ResolverAction.RETRY_RETRIEVAL]:
+                    preferred_actions.append(ResolverAction.RETRY_RETRIEVAL)
+            requires_new_evidence = (
+                follow_up.minimum_additional_sources > 0
+                or follow_up.requires_independent_source
+                or follow_up.action
+                in {
+                    CheckerFollowUpAction.CORROBORATE,
+                    CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE,
+                    CheckerFollowUpAction.RESOLVE_CONFLICT,
+                }
+                or bool(
+                    field_issues
+                    & {
+                        CheckerIssueCode.INSUFFICIENT_SOURCES,
+                        CheckerIssueCode.NEEDS_INDEPENDENT_CORROBORATION,
+                        CheckerIssueCode.PREFERRED_SOURCE_MISSING,
+                        CheckerIssueCode.SELF_DECLARATION_ONLY,
+                    }
+                )
+            )
+            if requires_new_evidence:
+                preferred_actions.append(ResolverAction.SEARCH_NEW_SOURCE)
+            if (
+                not mentioned_not_obtained
+                and pools[ResolverAction.REEXTRACT_EXISTING]
+            ):
                 preferred_actions.append(ResolverAction.REEXTRACT_EXISTING)
-            if follow_up.retry_source_ids:
+            if pools[ResolverAction.RETRY_RETRIEVAL]:
                 preferred_actions.append(ResolverAction.RETRY_RETRIEVAL)
             preferred_actions.append(ResolverAction.SEARCH_NEW_SOURCE)
             if ResolverAction.HUMAN_REVIEW in allowed_actions:
@@ -621,9 +734,9 @@ class ResolverAgent:
 
             all_source_ids = _deduplicate(
                 [
-                    *follow_up.candidate_source_ids,
-                    *follow_up.retry_source_ids,
-                    *follow_up.reextract_source_ids,
+                    *pools[ResolverAction.EXTRACT_KNOWN_SOURCE],
+                    *pools[ResolverAction.RETRY_RETRIEVAL],
+                    *pools[ResolverAction.REEXTRACT_EXISTING],
                 ]
             )
             fallback_source_ids = [
@@ -660,9 +773,8 @@ class ResolverAgent:
                     ),
                     completion_criteria=follow_up.completion_criteria,
                     rationale=(
-                        "Deterministic routing selected the least expensive "
-                        "eligible action, preferring known sources over retry "
-                        "or a new search."
+                        "Deterministic routing selected an evidence-producing "
+                        "action within the source and search budgets."
                     ),
                 )
             )
@@ -675,13 +787,19 @@ class ResolverAgent:
         deterministic_items: list[ResolverWorkItem],
         follow_ups: list[CheckerFollowUpTask],
         *,
+        eligible_source_pools: dict[
+            str, dict[ResolverAction, list[str]]
+        ],
         max_source_actions: int,
         max_search_tasks: int,
         max_queries_per_item: int,
     ) -> list[ResolverWorkItem]:
         expected_ids = [item.follow_up_id for item in deterministic_items]
         if set(item.follow_up_id for item in draft.items) != set(expected_ids):
-            raise ValueError("Resolver draft must cover every selected follow-up once.")
+            raise ResolverDraftValidationError(
+                "The draft must cover every selected follow-up exactly once.",
+                code="incomplete_follow_up_coverage",
+            )
         deterministic_by_id = {
             item.follow_up_id: item for item in deterministic_items
         }
@@ -698,29 +816,46 @@ class ResolverAgent:
             baseline = deterministic_by_id[item.follow_up_id]
             follow_up = follow_up_by_id[item.follow_up_id]
             if item.selected_action not in baseline.allowed_actions:
-                raise ValueError("Resolver draft selected a locally forbidden action.")
+                raise ResolverDraftValidationError(
+                    "The draft selected a locally forbidden action.",
+                    code="forbidden_action",
+                )
             source_field = source_pool_by_action.get(item.selected_action)
-            allowed_source_ids = (
-                list(getattr(follow_up, source_field)) if source_field else []
+            allowed_source_ids = list(
+                eligible_source_pools[follow_up.follow_up_id].get(
+                    item.selected_action, []
+                )
             )
             if source_field:
                 if (
                     not item.selected_source_ids
                     or not set(item.selected_source_ids).issubset(allowed_source_ids)
                 ):
-                    raise ValueError("Resolver draft source selection is invalid.")
+                    raise ResolverDraftValidationError(
+                        "The draft selected an ineligible source for its action.",
+                        code="invalid_source_selection",
+                    )
             elif item.selected_source_ids:
-                raise ValueError("Resolver non-source action selected source IDs.")
+                raise ResolverDraftValidationError(
+                    "A non-source action cannot select source IDs.",
+                    code="unexpected_source_selection",
+                )
             for source_id in item.selected_source_ids:
                 if source_id not in execution_sources:
                     execution_sources.append(source_id)
             if len(execution_sources) > max_source_actions:
-                raise ValueError("Resolver draft exceeds the source-action budget.")
+                raise ResolverDraftValidationError(
+                    "The draft exceeds the source-action budget.",
+                    code="source_action_budget_exceeded",
+                )
             if item.selected_action == ResolverAction.SEARCH_NEW_SOURCE:
                 if baseline.task_id not in search_tasks:
                     search_tasks.append(baseline.task_id)
                 if len(search_tasks) > max_search_tasks:
-                    raise ValueError("Resolver draft exceeds the search-task budget.")
+                    raise ResolverDraftValidationError(
+                        "The draft exceeds the search-task budget.",
+                        code="search_task_budget_exceeded",
+                    )
             queries = _deduplicate(
                 [*item.derived_queries, *baseline.queries]
             )[:max_queries_per_item]
@@ -728,9 +863,15 @@ class ResolverAgent:
                 source_id
                 for source_id in _deduplicate(
                     [
-                        *follow_up.candidate_source_ids,
-                        *follow_up.retry_source_ids,
-                        *follow_up.reextract_source_ids,
+                        *eligible_source_pools[follow_up.follow_up_id][
+                            ResolverAction.EXTRACT_KNOWN_SOURCE
+                        ],
+                        *eligible_source_pools[follow_up.follow_up_id][
+                            ResolverAction.RETRY_RETRIEVAL
+                        ],
+                        *eligible_source_pools[follow_up.follow_up_id][
+                            ResolverAction.REEXTRACT_EXISTING
+                        ],
                     ]
                 )
                 if source_id not in item.selected_source_ids
