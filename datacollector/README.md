@@ -371,14 +371,29 @@ Use `--model <model-name>` when Checker should use a different model from the
 global `OPENAI_MODEL`; the selected model and its usage remain recorded in the
 artifact.
 
-Paid mode sends only the selected tasks, source metadata, raw claims, exact
-citation quotes and upstream coverage summaries through one Responses API
-Structured Outputs request. It does not browse, retrieve raw documents, use
-tools, normalize values or accept instructions embedded in source text. The
+Paid mode sends only the selected tasks, bounded source/document status metadata,
+raw claims, exact citation quotes and upstream coverage summaries through one
+Responses API Structured Outputs request. It does not browse, retrieve raw
+documents, use tools, normalize values or accept instructions embedded in source
+text. The
 local agent remains authoritative for lineage, scope, exact grounding, source
 classification, completeness, deductions and the final score/pass gate; the
 model supplies bounded semantic-fit, support, contradiction and safety
 judgments.
+
+Checker contract `1.1.0` keeps semantic acceptance separate from source
+corroboration. A directly supported claim can therefore be `accepted` while its
+field remains `needs_corroboration`. Multi-valued fields with both supported and
+unresolved values use `partial`, so accepted evidence keeps partial quality
+credit. For document inventory, a page that only names a document can establish
+the stated title or existence, but receives `mentioned_not_obtained` until the
+actual current document is fetched and parsed.
+
+Every unresolved field produces one Resolver-ready follow-up containing an
+action, known candidate/retry/re-extraction source IDs, unresolved and supporting
+claim IDs, suggested plan queries, the minimum additional source count,
+independence requirement and an explicit completion criterion. This lets the next
+agent act on existing Searcher results before paying for another broad search.
 
 The defaults impose a hard preflight ceiling of 100 claims and 100,000 quoted
 evidence characters. Checker refuses an artifact above either ceiling instead of
@@ -439,13 +454,15 @@ source scope. It has no separately billed web-search tool call, so the estimate
 contains model tokens only. The CLI summary reports the claim verdicts, field and
 task statuses, scope completeness, deductions, final score, pass decision,
 recommended next action and the same per-call and total token/cost ledger stored
-in the artifact. Deterministic checking keeps that provider ledger empty and its
-estimated cost at zero.
+in the artifact. `accepted_claim_source_quality_score` describes only sources
+behind accepted claims; it is not a score for every selected source.
+Deterministic checking keeps that provider ledger empty and its estimated cost at
+zero.
 
-For GPT-5.6, Planner disables the default implicit cache breakpoint. A one-off,
-brand-specific planning payload would otherwise incur cache-write charges without
-guaranteeing a later cache hit. Provider-reported cache-write tokens are still
-recorded and priced if they occur.
+For GPT-5.6, Planner, Searcher, Extractor and Checker disable the default implicit
+cache breakpoint for their one-off, brand-specific calls. Those payloads would
+otherwise incur cache-write charges without guaranteeing a later cache hit.
+Provider-reported cache-write tokens are still recorded and priced if they occur.
 
 For a later logical Planner pass, label the iteration:
 

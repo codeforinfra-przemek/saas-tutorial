@@ -19,12 +19,15 @@ from datacollector.schemas import (
     CheckerClaimDecisionDraft,
     CheckerDraft,
     CheckerFieldStatus,
+    CheckerFollowUpAction,
+    CheckerFollowUpReason,
     CheckerIssueCode,
     CheckerModelSemanticFit,
     CheckerModelSourceSupport,
     CheckerModelVerdict,
     CheckerNextAction,
     CheckerSeverity,
+    CheckerScoreBreakdown,
     CheckerUnsafeCategory,
     CheckerUnsafeItemDraft,
     CheckerVerdict,
@@ -463,6 +466,23 @@ class CheckerAgentTests(TestCase):
         self.assertEqual(routing.authority_class, SourceAuthorityClass.ROUTING_ONLY)
         self.assertEqual(routing.reliability_score, 5)
 
+    def test_v1_source_quality_metric_loads_under_v11_name(self):
+        score = CheckerScoreBreakdown.model_validate(
+            {
+                "scoring_version": "checker-scoring-v1",
+                "raw_coverage_score": 17,
+                "verified_coverage_score": 3,
+                "semantic_acceptance_score": 38,
+                "source_quality_score": 80,
+                "whole_plan_coverage_score": 0,
+                "deduction_points": 0,
+                "quality_score": 3,
+            }
+        )
+
+        self.assertEqual(score.accepted_claim_source_quality_score, 80)
+        self.assertNotIn("source_quality_score", score.model_dump())
+
     def test_exact_paid_decisions_are_locally_scored_and_can_pass(self):
         llm = FixtureCheckerLLM(self._accepted_draft)
 
@@ -485,13 +505,120 @@ class CheckerAgentTests(TestCase):
         self.assertEqual(results.score_breakdown.raw_coverage_score, 100)
         self.assertEqual(results.score_breakdown.verified_coverage_score, 95)
         self.assertEqual(results.score_breakdown.semantic_acceptance_score, 100)
-        self.assertEqual(results.score_breakdown.source_quality_score, 88)
+        self.assertEqual(
+            results.score_breakdown.accepted_claim_source_quality_score,
+            88,
+        )
         self.assertEqual(results.quality_score, 95)
         self.assertTrue(results.passed)
         self.assertEqual(
             results.recommended_next_action,
             CheckerNextAction.HUMAN_REVIEW,
         )
+
+    def test_direct_claim_is_accepted_even_when_it_needs_corroboration(self):
+        target_field = self.task.target_fields[0]
+
+        def draft_factory(extraction_results):
+            decisions = []
+            for claim in extraction_results.claims:
+                needs_corroboration = claim.target_field == target_field
+                decisions.append(
+                    CheckerClaimDecisionDraft(
+                        claim_id=claim.claim_id,
+                        verdict=(
+                            CheckerModelVerdict.NEEDS_REVIEW
+                            if needs_corroboration
+                            else CheckerModelVerdict.ACCEPTED
+                        ),
+                        semantic_fit=CheckerModelSemanticFit.DIRECT,
+                        source_support=(
+                            CheckerModelSourceSupport.NEEDS_CORROBORATION
+                            if needs_corroboration
+                            else CheckerModelSourceSupport.SUFFICIENT
+                        ),
+                        issue_codes=(
+                            [CheckerIssueCode.NEEDS_INDEPENDENT_CORROBORATION]
+                            if needs_corroboration
+                            else []
+                        ),
+                        rationale="The quote is direct but corroboration remains.",
+                    )
+                )
+            return CheckerDraft(decisions=decisions)
+
+        results = self._run(FixtureCheckerLLM(draft_factory))
+        field = results.task_results[0].field_results[0]
+
+        self.assertTrue(
+            all(
+                decision.verdict == CheckerVerdict.ACCEPTED
+                for decision in results.claim_decisions
+                if decision.target_field == target_field
+            )
+        )
+        self.assertEqual(field.status, CheckerFieldStatus.NEEDS_CORROBORATION)
+        self.assertEqual(field.needs_review_claim_ids, [])
+
+    def test_mixed_multivalue_field_is_partial_and_routes_unresolved_claim(self):
+        target_field = self.task.target_fields[0]
+        first_target_claim = next(
+            claim
+            for claim in self.extraction_results.claims
+            if claim.target_field == target_field
+        )
+
+        def draft_factory(extraction_results):
+            return CheckerDraft(
+                decisions=[
+                    CheckerClaimDecisionDraft(
+                        claim_id=claim.claim_id,
+                        verdict=(
+                            CheckerModelVerdict.REJECTED
+                            if claim.claim_id == first_target_claim.claim_id
+                            else CheckerModelVerdict.ACCEPTED
+                        ),
+                        semantic_fit=(
+                            CheckerModelSemanticFit.MISMATCH
+                            if claim.claim_id == first_target_claim.claim_id
+                            else CheckerModelSemanticFit.DIRECT
+                        ),
+                        source_support=CheckerModelSourceSupport.SUFFICIENT,
+                        issue_codes=(
+                            [CheckerIssueCode.UNSUPPORTED_CLAIM]
+                            if claim.claim_id == first_target_claim.claim_id
+                            else []
+                        ),
+                        rationale="The fixture creates a mixed-value field result.",
+                    )
+                    for claim in extraction_results.claims
+                ]
+            )
+
+        results = self._run(FixtureCheckerLLM(draft_factory))
+        field = results.task_results[0].field_results[0]
+        follow_up = next(
+            item
+            for item in results.follow_up_tasks
+            if item.target_field == target_field
+        )
+
+        self.assertEqual(field.status, CheckerFieldStatus.PARTIAL)
+        self.assertGreater(field.quality_points, 0)
+        self.assertEqual(
+            follow_up.reason,
+            CheckerFollowUpReason.COMPLETE_PARTIAL_FIELD,
+        )
+        self.assertEqual(
+            follow_up.related_claim_ids,
+            [first_target_claim.claim_id],
+        )
+        self.assertTrue(follow_up.supporting_claim_ids)
+        self.assertEqual(
+            follow_up.action,
+            CheckerFollowUpAction.REEXTRACT_EXISTING,
+        )
+        self.assertTrue(follow_up.reextract_source_ids)
 
     def test_critical_missing_field_blocks_pass_above_threshold(self):
         blocked_field = self.task.target_fields[0]

@@ -193,9 +193,16 @@ class OpenAICheckerClientTests(TestCase):
             ]
         )
 
-    def _generate(self, fake_client, *, iteration=2, call_index=1):
+    def _generate(
+        self,
+        fake_client,
+        *,
+        iteration=2,
+        call_index=1,
+        model="gpt-5.6-terra",
+    ):
         client = OpenAICheckerClient(
-            OpenAISettings(api_key="test", model="gpt-5.6-terra"),
+            OpenAISettings(api_key="test", model=model),
             client=fake_client,
         )
         return client.generate(
@@ -241,7 +248,10 @@ class OpenAICheckerClientTests(TestCase):
         self.assertNotIn("tools", request)
         self.assertNotIn("tool_choice", request)
         self.assertNotIn("max_tool_calls", request)
-        self.assertNotIn("prompt_cache_options", request)
+        self.assertEqual(
+            request["prompt_cache_options"],
+            {"mode": "explicit"},
+        )
         self.assertEqual(
             request["metadata"],
             {
@@ -307,6 +317,13 @@ class OpenAICheckerClientTests(TestCase):
             generation.usage.cost_estimate.total_estimated_cost_usd,
             Decimal("0.00400000"),
         )
+
+    def test_explicit_cache_mode_is_not_sent_to_older_models(self):
+        fake_client = FakeOpenAI(self._draft())
+
+        self._generate(fake_client, model="gpt-5.5-terra")
+
+        self.assertNotIn("prompt_cache_options", fake_client.responses.kwargs)
 
     def test_incomplete_response_preserves_usage_and_attempt_context(self):
         fake_client = FakeOpenAI(self._draft(), response_status="incomplete")

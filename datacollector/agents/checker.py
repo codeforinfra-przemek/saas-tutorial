@@ -20,7 +20,9 @@ from ..schemas import (
     CheckerDraft,
     CheckerFieldResult,
     CheckerFieldStatus,
+    CheckerFollowUpAction,
     CheckerFollowUpReason,
+    CheckerFollowUpRoute,
     CheckerFollowUpTask,
     CheckerIssueCode,
     CheckerLimits,
@@ -51,7 +53,7 @@ from ..schemas import (
 
 
 DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "checker_system_v1.md"
+    Path(__file__).resolve().parent.parent / "prompts" / "checker_system_v2.md"
 )
 DEFAULT_MAX_CLAIMS = 100
 DEFAULT_MAX_EVIDENCE_CHARS = 100_000
@@ -440,6 +442,7 @@ class CheckerAgent:
 
         task_results, follow_up_tasks = self._build_task_results(
             selected_tasks,
+            search_results,
             extraction_results,
             decisions,
             contradictions,
@@ -765,22 +768,38 @@ class CheckerAgent:
                 "Checker draft must cover claim IDs once and in exact input order."
             )
         claim_by_id = {claim.claim_id: claim for claim in claims}
-        decisions = [
-            CheckerClaimDecision(
-                claim_id=item.claim_id,
-                task_id=claim_by_id[item.claim_id].task_id,
-                target_field=claim_by_id[item.claim_id].target_field,
-                source_ids=_claim_source_ids(
-                    claim_by_id[item.claim_id], citation_source_by_id
-                ),
-                verdict=item.verdict.value,
-                semantic_fit=item.semantic_fit.value,
-                source_support=item.source_support.value,
-                issue_codes=item.issue_codes,
-                rationale=item.rationale,
+        corroboration_only_issues = {
+            CheckerIssueCode.INSUFFICIENT_SOURCES,
+            CheckerIssueCode.MENTIONED_NOT_OBTAINED,
+            CheckerIssueCode.NEEDS_INDEPENDENT_CORROBORATION,
+            CheckerIssueCode.PREFERRED_SOURCE_MISSING,
+            CheckerIssueCode.SELF_DECLARATION_ONLY,
+        }
+        decisions = []
+        for item in draft.decisions:
+            verdict = item.verdict.value
+            if (
+                verdict == CheckerVerdict.NEEDS_REVIEW
+                and item.semantic_fit == CheckerSemanticFit.DIRECT
+                and item.source_support == CheckerSourceSupport.NEEDS_CORROBORATION
+                and set(item.issue_codes).issubset(corroboration_only_issues)
+            ):
+                verdict = CheckerVerdict.ACCEPTED
+            decisions.append(
+                CheckerClaimDecision(
+                    claim_id=item.claim_id,
+                    task_id=claim_by_id[item.claim_id].task_id,
+                    target_field=claim_by_id[item.claim_id].target_field,
+                    source_ids=_claim_source_ids(
+                        claim_by_id[item.claim_id], citation_source_by_id
+                    ),
+                    verdict=verdict,
+                    semantic_fit=item.semantic_fit.value,
+                    source_support=item.source_support.value,
+                    issue_codes=item.issue_codes,
+                    rationale=item.rationale,
+                )
             )
-            for item in draft.decisions
-        ]
         decision_by_id = {item.claim_id: item for item in decisions}
         contradictions: list[CheckerContradiction] = []
         seen_contradiction_keys: set[tuple[str, ...]] = set()
@@ -851,6 +870,7 @@ class CheckerAgent:
     @staticmethod
     def _build_task_results(
         tasks: list[ResearchTask],
+        search_results: SearchResults,
         extraction_results: ExtractionResults,
         decisions: list[CheckerClaimDecision],
         contradictions: list[CheckerContradiction],
@@ -872,10 +892,46 @@ class CheckerAgent:
         extraction_by_task = {
             result.task_id: result for result in extraction_results.task_results
         }
+        document_by_source = {
+            document.source_id: document for document in extraction_results.documents
+        }
+        unselected_source_ids = set(extraction_results.unselected_source_ids)
+        source_order = {
+            source.source_id: index
+            for index, source in enumerate(search_results.sources)
+        }
         task_results: list[CheckerTaskResult] = []
         follow_ups: list[CheckerFollowUpTask] = []
         for task in tasks:
             extraction_task = extraction_by_task[task.task_id]
+            task_candidate_sources = [
+                source.source_id
+                for source in search_results.sources
+                if source.source_id in unselected_source_ids
+                and task.task_id in source.task_ids
+                and source.source_type != SourceType.ROUTING_LEAD
+            ]
+            task_candidate_sources.sort(
+                key=lambda source_id: (
+                    source_by_id[source_id].source_type
+                    not in task.preferred_source_types,
+                    source_order[source_id],
+                )
+            )
+            task_retry_sources = [
+                source_id
+                for source_id in extraction_results.selected_source_ids
+                if task.task_id in source_by_id[source_id].task_ids
+                and document_by_source[source_id].parse_status
+                not in {DocumentParseStatus.PARSED, DocumentParseStatus.PARTIAL}
+            ]
+            task_reextract_sources = [
+                source_id
+                for source_id in extraction_results.selected_source_ids
+                if task.task_id in source_by_id[source_id].task_ids
+                and document_by_source[source_id].parse_status
+                in {DocumentParseStatus.PARSED, DocumentParseStatus.PARTIAL}
+            ]
             extraction_fields = {
                 item.target_field: item for item in extraction_task.field_results
             }
@@ -914,6 +970,69 @@ class CheckerAgent:
                         for issue in decision.issue_codes
                     ]
                 )
+                accepted_decisions = [
+                    item
+                    for item in field_decisions
+                    if item.verdict == CheckerVerdict.ACCEPTED
+                ]
+                accepted_source_ids = _deduplicate(
+                    [
+                        source_id
+                        for decision in accepted_decisions
+                        for source_id in decision.source_ids
+                    ]
+                )
+                publisher_count = len(
+                    {
+                        _publisher_key(source_by_id[source_id])
+                        for source_id in accepted_source_ids
+                    }
+                )
+                independent_met = any(
+                    assessment_by_source[source_id].independence
+                    == SourceIndependence.INDEPENDENT
+                    for source_id in accepted_source_ids
+                )
+                preferred_met = any(
+                    source_by_id[source_id].source_type
+                    in task.preferred_source_types
+                    for source_id in accepted_source_ids
+                )
+                partial_semantics = any(
+                    item.semantic_fit != CheckerSemanticFit.DIRECT
+                    for item in accepted_decisions
+                )
+                needs_corroboration = any(
+                    item.source_support == CheckerSourceSupport.NEEDS_CORROBORATION
+                    for item in accepted_decisions
+                )
+                if accepted_source_ids and all(
+                    assessment_by_source[source_id].independence
+                    == SourceIndependence.FIRST_PARTY
+                    for source_id in accepted_source_ids
+                ):
+                    issues = _deduplicate(
+                        [*issues, CheckerIssueCode.SELF_DECLARATION_ONLY.value]
+                    )
+                if accepted and publisher_count < task.min_sources:
+                    issues = _deduplicate(
+                        [*issues, CheckerIssueCode.INSUFFICIENT_SOURCES.value]
+                    )
+                if (
+                    accepted
+                    and task.requires_independent_corroboration
+                    and not independent_met
+                ):
+                    issues = _deduplicate(
+                        [
+                            *issues,
+                            CheckerIssueCode.NEEDS_INDEPENDENT_CORROBORATION.value,
+                        ]
+                    )
+                if accepted and not preferred_met:
+                    issues = _deduplicate(
+                        [*issues, CheckerIssueCode.PREFERRED_SOURCE_MISSING.value]
+                    )
                 key = (task.task_id, target_field)
                 if key in contradiction_fields:
                     status = CheckerFieldStatus.CONFLICTING
@@ -922,60 +1041,13 @@ class CheckerAgent:
                     )
                 elif raw_ids and not paid_success:
                     status = CheckerFieldStatus.NOT_REVIEWED
-                elif needs_review or (accepted and rejected):
+                elif accepted and (needs_review or rejected):
+                    status = CheckerFieldStatus.PARTIAL
+                elif needs_review:
                     status = CheckerFieldStatus.NEEDS_REVIEW
                 elif accepted:
-                    accepted_decisions = [
-                        item
-                        for item in field_decisions
-                        if item.verdict == CheckerVerdict.ACCEPTED
-                    ]
-                    accepted_source_ids = _deduplicate(
-                        [
-                            source_id
-                            for decision in accepted_decisions
-                            for source_id in decision.source_ids
-                        ]
-                    )
-                    publisher_count = len(
-                        {
-                            _publisher_key(source_by_id[source_id])
-                            for source_id in accepted_source_ids
-                        }
-                    )
-                    independent_met = any(
-                        assessment_by_source[source_id].independence
-                        == SourceIndependence.INDEPENDENT
-                        for source_id in accepted_source_ids
-                    )
-                    if accepted_source_ids and all(
-                        assessment_by_source[source_id].independence
-                        == SourceIndependence.FIRST_PARTY
-                        for source_id in accepted_source_ids
-                    ):
-                        issues = _deduplicate(
-                            [*issues, CheckerIssueCode.SELF_DECLARATION_ONLY.value]
-                        )
-                    preferred_met = any(
-                        source_by_id[source_id].source_type
-                        in task.preferred_source_types
-                        for source_id in accepted_source_ids
-                    )
-                    partial_semantics = any(
-                        item.semantic_fit != CheckerSemanticFit.DIRECT
-                        for item in accepted_decisions
-                    )
-                    unsuitable = any(
-                        item.source_support == CheckerSourceSupport.UNSUITABLE
-                        for item in accepted_decisions
-                    )
-                    needs_corroboration = any(
-                        item.source_support
-                        == CheckerSourceSupport.NEEDS_CORROBORATION
-                        for item in accepted_decisions
-                    )
-                    if partial_semantics or unsuitable:
-                        status = CheckerFieldStatus.NEEDS_REVIEW
+                    if partial_semantics:
+                        status = CheckerFieldStatus.PARTIAL
                     elif (
                         needs_corroboration
                         or publisher_count < task.min_sources
@@ -986,21 +1058,6 @@ class CheckerAgent:
                         or not preferred_met
                     ):
                         status = CheckerFieldStatus.NEEDS_CORROBORATION
-                        if publisher_count < task.min_sources:
-                            issues = _deduplicate(
-                                [*issues, CheckerIssueCode.INSUFFICIENT_SOURCES.value]
-                            )
-                        if task.requires_independent_corroboration and not independent_met:
-                            issues = _deduplicate(
-                                [
-                                    *issues,
-                                    CheckerIssueCode.NEEDS_INDEPENDENT_CORROBORATION.value,
-                                ]
-                            )
-                        if not preferred_met:
-                            issues = _deduplicate(
-                                [*issues, CheckerIssueCode.PREFERRED_SOURCE_MISSING.value]
-                            )
                     else:
                         status = CheckerFieldStatus.VERIFIED
                 elif rejected:
@@ -1037,16 +1094,95 @@ class CheckerAgent:
                 field_results.append(field_result)
                 if status != CheckerFieldStatus.VERIFIED:
                     reason = {
-                        CheckerFieldStatus.NEEDS_CORROBORATION: CheckerFollowUpReason.NEEDS_CORROBORATION,
-                        CheckerFieldStatus.NEEDS_REVIEW: CheckerFollowUpReason.NEEDS_SEMANTIC_REVIEW,
-                        CheckerFieldStatus.CONFLICTING: CheckerFollowUpReason.RESOLVE_CONTRADICTION,
-                        CheckerFieldStatus.REJECTED: CheckerFollowUpReason.REJECTED_CLAIM,
-                        CheckerFieldStatus.NOT_ACCESSIBLE: CheckerFollowUpReason.SOURCE_NOT_ACCESSIBLE,
-                        CheckerFieldStatus.NOT_REVIEWED: CheckerFollowUpReason.NEEDS_SEMANTIC_REVIEW,
+                        CheckerFieldStatus.PARTIAL: (
+                            CheckerFollowUpReason.COMPLETE_PARTIAL_FIELD
+                        ),
+                        CheckerFieldStatus.NEEDS_CORROBORATION: (
+                            CheckerFollowUpReason.NEEDS_CORROBORATION
+                        ),
+                        CheckerFieldStatus.NEEDS_REVIEW: (
+                            CheckerFollowUpReason.NEEDS_SEMANTIC_REVIEW
+                        ),
+                        CheckerFieldStatus.CONFLICTING: (
+                            CheckerFollowUpReason.RESOLVE_CONTRADICTION
+                        ),
+                        CheckerFieldStatus.REJECTED: (
+                            CheckerFollowUpReason.REJECTED_CLAIM
+                        ),
+                        CheckerFieldStatus.NOT_ACCESSIBLE: (
+                            CheckerFollowUpReason.SOURCE_NOT_ACCESSIBLE
+                        ),
+                        CheckerFieldStatus.NOT_REVIEWED: (
+                            CheckerFollowUpReason.NEEDS_SEMANTIC_REVIEW
+                        ),
                     }.get(status, CheckerFollowUpReason.MISSING_CLAIM)
                     follow_up_id = _stable_id(
                         "followup", task.task_id, target_field, reason.value
                     )
+                    unresolved_claim_ids = [
+                        item.claim_id
+                        for item in field_decisions
+                        if item.verdict != CheckerVerdict.ACCEPTED
+                        or item.semantic_fit != CheckerSemanticFit.DIRECT
+                        or item.source_support != CheckerSourceSupport.SUFFICIENT
+                    ]
+                    source_deficit = max(0, task.min_sources - publisher_count)
+                    if status in {
+                        CheckerFieldStatus.NOT_REVIEWED,
+                        CheckerFieldStatus.NEEDS_REVIEW,
+                    }:
+                        additional_sources = 0
+                    elif status == CheckerFieldStatus.NEEDS_CORROBORATION:
+                        additional_sources = max(1, source_deficit)
+                    else:
+                        additional_sources = source_deficit
+                    independent_required = (
+                        status != CheckerFieldStatus.NOT_REVIEWED
+                        and task.requires_independent_corroboration
+                        and not independent_met
+                    )
+                    if independent_required:
+                        additional_sources = max(1, additional_sources)
+                    if CheckerIssueCode.MENTIONED_NOT_OBTAINED.value in issues:
+                        additional_sources = max(1, additional_sources)
+                    if status == CheckerFieldStatus.CONFLICTING:
+                        action = CheckerFollowUpAction.RESOLVE_CONFLICT
+                    elif status == CheckerFieldStatus.NEEDS_CORROBORATION:
+                        action = CheckerFollowUpAction.CORROBORATE
+                    elif (
+                        status == CheckerFieldStatus.NOT_ACCESSIBLE
+                        and task_retry_sources
+                    ):
+                        action = CheckerFollowUpAction.RETRY_RETRIEVAL
+                    elif task_candidate_sources:
+                        action = CheckerFollowUpAction.EXTRACT_KNOWN_SOURCE
+                    elif task_reextract_sources:
+                        action = CheckerFollowUpAction.REEXTRACT_EXISTING
+                    elif status in {
+                        CheckerFieldStatus.NEEDS_REVIEW,
+                        CheckerFieldStatus.NOT_REVIEWED,
+                    }:
+                        action = CheckerFollowUpAction.SEMANTIC_REVIEW
+                    else:
+                        action = CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE
+                    if additional_sources:
+                        completion = (
+                            f"Complete when {target_field!r} is supported by at least "
+                            f"{additional_sources} additional distinct publisher "
+                            "source(s)"
+                        )
+                    else:
+                        completion = (
+                            f"Complete when {target_field!r} is semantically resolved "
+                            "from grounded evidence"
+                        )
+                    if independent_required:
+                        completion += ", including an independent source"
+                    if CheckerIssueCode.MENTIONED_NOT_OBTAINED.value in issues:
+                        completion += (
+                            ", and the actual current document is fetched and parsed"
+                        )
+                    completion += "."
                     follow_ups.append(
                         CheckerFollowUpTask(
                             follow_up_id=follow_up_id,
@@ -1059,7 +1195,17 @@ class CheckerAgent:
                                 f"question: {task.question}"
                             ),
                             required_source_types=task.preferred_source_types,
-                            related_claim_ids=raw_ids,
+                            related_claim_ids=unresolved_claim_ids,
+                            supporting_claim_ids=accepted,
+                            route=CheckerFollowUpRoute.RESOLVER,
+                            action=action,
+                            candidate_source_ids=task_candidate_sources,
+                            retry_source_ids=task_retry_sources,
+                            reextract_source_ids=task_reextract_sources,
+                            minimum_additional_sources=additional_sources,
+                            requires_independent_source=independent_required,
+                            suggested_queries=task.search_queries[:5],
+                            completion_criteria=completion,
                         )
                     )
                     task_follow_up_ids.append(follow_up_id)
@@ -1106,6 +1252,7 @@ class CheckerAgent:
     ) -> Decimal:
         status_credit = {
             CheckerFieldStatus.VERIFIED: Decimal("1"),
+            CheckerFieldStatus.PARTIAL: Decimal("0.60"),
             CheckerFieldStatus.NEEDS_CORROBORATION: Decimal("0.60"),
             CheckerFieldStatus.NEEDS_REVIEW: Decimal("0.30"),
             CheckerFieldStatus.CONFLICTING: Decimal("0.15"),
@@ -1237,7 +1384,7 @@ class CheckerAgent:
             raw_coverage_score=raw_coverage,
             verified_coverage_score=verified_coverage,
             semantic_acceptance_score=semantic_acceptance,
-            source_quality_score=source_quality,
+            accepted_claim_source_quality_score=source_quality,
             whole_plan_coverage_score=whole_plan_coverage,
             deduction_points=deductions,
             quality_score=quality_score,

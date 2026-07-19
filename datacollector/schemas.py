@@ -28,9 +28,9 @@ SEARCHER_SCHEMA_VERSION = "1.1.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v3"
 EXTRACTOR_SCHEMA_VERSION = "1.0.0"
 EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
-CHECKER_SCHEMA_VERSION = "1.0.0"
-CHECKER_PROMPT_VERSION = "checker-system-v1"
-CHECKER_SCORING_VERSION = "checker-scoring-v1"
+CHECKER_SCHEMA_VERSION = "1.1.0"
+CHECKER_PROMPT_VERSION = "checker-system-v2"
+CHECKER_SCORING_VERSION = "checker-scoring-v2"
 
 
 class ClosedModel(BaseModel):
@@ -2070,6 +2070,7 @@ class SourceIndependence(StrEnum):
 
 class CheckerFieldStatus(StrEnum):
     VERIFIED = "verified"
+    PARTIAL = "partial"
     NEEDS_CORROBORATION = "needs_corroboration"
     NEEDS_REVIEW = "needs_review"
     CONFLICTING = "conflicting"
@@ -2091,10 +2092,26 @@ class CheckerTaskStatus(StrEnum):
 class CheckerFollowUpReason(StrEnum):
     MISSING_CLAIM = "missing_claim"
     REJECTED_CLAIM = "rejected_claim"
+    COMPLETE_PARTIAL_FIELD = "complete_partial_field"
     NEEDS_SEMANTIC_REVIEW = "needs_semantic_review"
     NEEDS_CORROBORATION = "needs_corroboration"
     RESOLVE_CONTRADICTION = "resolve_contradiction"
     SOURCE_NOT_ACCESSIBLE = "source_not_accessible"
+
+
+class CheckerFollowUpRoute(StrEnum):
+    RESOLVER = "resolver"
+    HUMAN_REVIEW = "human_review"
+
+
+class CheckerFollowUpAction(StrEnum):
+    EXTRACT_KNOWN_SOURCE = "extract_known_source"
+    REEXTRACT_EXISTING = "reextract_existing"
+    RETRY_RETRIEVAL = "retry_retrieval"
+    FIND_ALTERNATIVE_SOURCE = "find_alternative_source"
+    CORROBORATE = "corroborate"
+    RESOLVE_CONFLICT = "resolve_conflict"
+    SEMANTIC_REVIEW = "semantic_review"
 
 
 class CheckerNextAction(StrEnum):
@@ -2241,6 +2258,20 @@ class CheckerFollowUpTask(ClosedModel):
     question: str = Field(min_length=10, max_length=2000)
     required_source_types: list[SourceType] = Field(default_factory=list, max_length=20)
     related_claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    supporting_claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    route: CheckerFollowUpRoute = CheckerFollowUpRoute.RESOLVER
+    action: CheckerFollowUpAction = CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE
+    candidate_source_ids: list[str] = Field(default_factory=list, max_length=100)
+    retry_source_ids: list[str] = Field(default_factory=list, max_length=100)
+    reextract_source_ids: list[str] = Field(default_factory=list, max_length=100)
+    minimum_additional_sources: int = Field(default=1, ge=0, le=20)
+    requires_independent_source: bool = False
+    suggested_queries: list[str] = Field(default_factory=list, max_length=10)
+    completion_criteria: str = Field(
+        default="Resolve the field with grounded evidence.",
+        min_length=10,
+        max_length=2000,
+    )
     status: Literal["pending"] = "pending"
 
 
@@ -2255,11 +2286,20 @@ class CheckerTaskResult(ClosedModel):
 
 
 class CheckerScoreBreakdown(ClosedModel):
-    scoring_version: Literal["checker-scoring-v1"] = CHECKER_SCORING_VERSION
+    scoring_version: Literal["checker-scoring-v1", "checker-scoring-v2"] = (
+        CHECKER_SCORING_VERSION
+    )
     raw_coverage_score: int = Field(ge=0, le=100)
     verified_coverage_score: int = Field(ge=0, le=100)
     semantic_acceptance_score: int | None = Field(default=None, ge=0, le=100)
-    source_quality_score: int | None = Field(default=None, ge=0, le=100)
+    accepted_claim_source_quality_score: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices(
+            "accepted_claim_source_quality_score", "source_quality_score"
+        ),
+    )
     whole_plan_coverage_score: int = Field(ge=0, le=100)
     deduction_points: int = Field(default=0, ge=0, le=100)
     quality_score: int = Field(ge=0, le=100)
@@ -2283,8 +2323,10 @@ class CheckerAttemptFailure(ClosedModel):
 class CheckerResults(ClosedModel):
     """Auditable quality decision consumed by Resolver and human review."""
 
-    schema_version: Literal["1.0.0"] = CHECKER_SCHEMA_VERSION
-    prompt_version: Literal["checker-system-v1"] = CHECKER_PROMPT_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = CHECKER_SCHEMA_VERSION
+    prompt_version: Literal["checker-system-v1", "checker-system-v2"] = (
+        CHECKER_PROMPT_VERSION
+    )
     check_id: str
     plan_run_id: str
     search_id: str
@@ -2384,6 +2426,7 @@ class CheckerResults(ClosedModel):
         decision_by_id = {item.claim_id: item for item in self.claim_decisions}
         known_tasks = set(self.selected_task_ids)
         known_sources = set(self.selected_source_ids)
+        known_all_sources = known_sources | set(self.unevaluated_source_ids)
         if any(
             item.task_id not in known_tasks
             or not set(item.source_ids).issubset(known_sources)
@@ -2590,20 +2633,61 @@ class CheckerResults(ClosedModel):
             if (
                 (follow_up.task_id, follow_up.target_field)
                 not in field_result_by_key
-                or not set(follow_up.related_claim_ids).issubset(decision_by_id)
+                or not set(
+                    [*follow_up.related_claim_ids, *follow_up.supporting_claim_ids]
+                ).issubset(decision_by_id)
             ):
                 raise ValueError("Checker follow-up scope is invalid.")
             key = (follow_up.task_id, follow_up.target_field)
             if key in follow_up_by_key:
                 raise ValueError("Checker fields may have at most one follow-up.")
             follow_up_by_key[key] = follow_up
-            if (
-                follow_up.related_claim_ids
-                != field_result_by_key[key].raw_claim_ids
+            field_claim_ids = set(field_result_by_key[key].raw_claim_ids)
+            if self.schema_version == "1.0.0":
+                if (
+                    follow_up.related_claim_ids
+                    != field_result_by_key[key].raw_claim_ids
+                ):
+                    raise ValueError(
+                        "Checker follow-up claims must match its unresolved field."
+                    )
+                continue
+            for values in (
+                follow_up.related_claim_ids,
+                follow_up.supporting_claim_ids,
+                follow_up.candidate_source_ids,
+                follow_up.retry_source_ids,
+                follow_up.reextract_source_ids,
+                follow_up.suggested_queries,
+            ):
+                if len(values) != len(set(values)):
+                    raise ValueError("Checker follow-up lists must be unique.")
+            if not set(
+                [*follow_up.related_claim_ids, *follow_up.supporting_claim_ids]
+            ).issubset(field_claim_ids):
+                raise ValueError(
+                    "Checker follow-up claims must belong to its target field."
+                )
+            if not set(follow_up.candidate_source_ids).issubset(
+                self.unevaluated_source_ids
             ):
                 raise ValueError(
-                    "Checker follow-up claims must match its unresolved field."
+                    "Checker candidate sources must be known unevaluated sources."
                 )
+            if not set(
+                [*follow_up.retry_source_ids, *follow_up.reextract_source_ids]
+            ).issubset(known_sources):
+                raise ValueError(
+                    "Checker retry and re-extraction sources must be selected sources."
+                )
+            if not set(
+                [
+                    *follow_up.candidate_source_ids,
+                    *follow_up.retry_source_ids,
+                    *follow_up.reextract_source_ids,
+                ]
+            ).issubset(known_all_sources):
+                raise ValueError("Checker follow-up references an unknown source.")
         unresolved_field_keys = {
             key
             for key, result in field_result_by_key.items()

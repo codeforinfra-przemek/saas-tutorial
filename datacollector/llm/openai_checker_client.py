@@ -49,8 +49,8 @@ def _task_payload(task: ResearchTask) -> dict[str, Any]:
     }
 
 
-def _source_payload(source: SearchSource) -> dict[str, Any]:
-    return {
+def _source_payload(source: SearchSource, document: Any | None) -> dict[str, Any]:
+    payload = {
         "source_id": source.source_id,
         "canonical_url": source.canonical_url,
         "title": source.title,
@@ -61,6 +61,20 @@ def _source_payload(source: SearchSource) -> dict[str, Any]:
         "relevance_note": source.relevance_note,
         "discovered_at": source.discovered_at.isoformat(),
     }
+    if document is not None:
+        payload["document"] = {
+            "document_id": document.document_id,
+            "retrieval_status": document.retrieval_status.value,
+            "parse_status": document.parse_status.value,
+            "media_type": document.media_type,
+            "content_file_retained": document.content_path is not None,
+            "final_url": document.final_url,
+            "title": document.title,
+            "page_count": document.page_count,
+            "parsed_pages": document.parsed_pages,
+            "text_truncated": document.text_truncated,
+        }
+    return payload
 
 
 def _citation_payload(citation: ExtractionCitation) -> dict[str, Any]:
@@ -195,6 +209,10 @@ class OpenAICheckerClient:
         extraction_result_by_task = {
             result.task_id: result for result in extraction_results.task_results
         }
+        document_by_source = {
+            document.source_id: document
+            for document in getattr(extraction_results, "documents", [])
+        }
         payload = {
             "checker_context": {
                 "current_date": datetime.now(timezone.utc).date().isoformat(),
@@ -207,7 +225,10 @@ class OpenAICheckerClient:
                 "extraction_created_at": extraction_results.created_at.isoformat(),
             },
             "tasks": [_task_payload(task) for task in tasks],
-            "sources": [_source_payload(source) for source in sources],
+            "sources": [
+                _source_payload(source, document_by_source.get(source.source_id))
+                for source in sources
+            ],
             "claims": [_claim_payload(claim, citation_by_id) for claim in claims],
             "task_coverage": [
                 {
@@ -244,6 +265,11 @@ class OpenAICheckerClient:
             "requested_model": self.settings.model,
         }
         try:
+            cache_options = (
+                {"prompt_cache_options": {"mode": "explicit"}}
+                if self.settings.model.startswith("gpt-5.6")
+                else {}
+            )
             response = self._client.responses.parse(
                 model=self.settings.model,
                 reasoning={"effort": self.settings.reasoning_effort},
@@ -264,6 +290,7 @@ class OpenAICheckerClient:
                     },
                 ],
                 text_format=CheckerDraft,
+                **cache_options,
             )
         except Exception as exc:
             raise CheckerProviderError(
