@@ -40,6 +40,21 @@ class FixtureResolverResults:
         }
 
 
+class FixtureExecutorResults:
+    def __init__(self, *, iteration: int, execution_mode: str) -> None:
+        self.iteration = iteration
+        self.execution_mode = SimpleNamespace(value=execution_mode)
+
+    def model_dump(self, *, mode: str):
+        if mode != "json":
+            raise AssertionError("Executor artifacts must use JSON-mode serialization.")
+        return {
+            "iteration": self.iteration,
+            "execution_mode": self.execution_mode.value,
+            "brand_name": "Żabka",
+        }
+
+
 class ImmutableWriteTests(TestCase):
     def test_publishes_complete_file_from_same_directory_and_fsyncs(self):
         with TemporaryDirectory() as temporary_directory:
@@ -239,3 +254,81 @@ class ResolverStorageTests(TestCase):
                 hashlib.sha256(raw_resolution).hexdigest(),
             )
             validate.assert_called_once_with(raw_resolution)
+
+
+class ExecutorStorageTests(TestCase):
+    def test_executor_and_merged_artifact_names_preserve_free_marker(self):
+        free_executor = FixtureExecutorResults(
+            iteration=6,
+            execution_mode="free",
+        )
+        paid_executor = FixtureExecutorResults(
+            iteration=6,
+            execution_mode="paid",
+        )
+        self.assertEqual(
+            json_store.executor_results_filename_for(6, free=True),
+            "execution-r006-free.json",
+        )
+        self.assertEqual(
+            json_store.executor_results_filename(free_executor),
+            "execution-r006-free.json",
+        )
+        self.assertEqual(
+            json_store.executor_results_filename(paid_executor),
+            "execution-r006.json",
+        )
+        self.assertEqual(
+            json_store.search_results_filename(
+                SimpleNamespace(
+                    iteration=6,
+                    generated_by="executor",
+                    execution_mode="free",
+                )
+            ),
+            "sources-r006-free.json",
+        )
+        self.assertEqual(
+            json_store.extraction_results_filename(
+                SimpleNamespace(
+                    iteration=6,
+                    generated_by="executor",
+                    execution_mode="free",
+                )
+            ),
+            "extractions-r006-free.json",
+        )
+
+    def test_executor_save_is_immutable_and_load_returns_exact_hash(self):
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            resolution_path = directory / "resolution-r005.json"
+            results = FixtureExecutorResults(
+                iteration=6,
+                execution_mode="free",
+            )
+
+            execution_path = json_store.save_executor_results(
+                results,
+                resolution_path,
+            )
+            raw_execution = execution_path.read_bytes()
+
+            self.assertEqual(
+                execution_path,
+                directory / "execution-r006-free.json",
+            )
+            with self.assertRaises(FileExistsError):
+                json_store.save_executor_results(results, resolution_path)
+
+            validated = object()
+            with patch.object(
+                json_store.ExecutorResults,
+                "model_validate_json",
+                return_value=validated,
+            ) as validate:
+                loaded, digest = json_store.load_executor_results(execution_path)
+
+            self.assertIs(loaded, validated)
+            self.assertEqual(digest, hashlib.sha256(raw_execution).hexdigest())
+            validate.assert_called_once_with(raw_execution)

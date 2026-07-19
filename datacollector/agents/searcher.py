@@ -479,6 +479,7 @@ class SearcherAgent:
         min_queries_per_task: int = 1,
         max_retry_tasks: int = 0,
         retry_search_calls: int = 1,
+        query_overrides: dict[str, list[str]] | None = None,
     ) -> SearchResults:
         if iteration < 1:
             raise SearcherValidationError("Searcher iteration must be at least 1.")
@@ -511,6 +512,28 @@ class SearcherAgent:
 
         requested = _deduplicate(requested_task_ids or [])
         selected = _select_tasks(plan, requested, task_limit)
+        overrides = {
+            task_id: _deduplicate(queries)
+            for task_id, queries in (query_overrides or {}).items()
+        }
+        selected_ids_for_overrides = {task.task_id for task in selected}
+        unknown_override_tasks = set(overrides) - selected_ids_for_overrides
+        if unknown_override_tasks:
+            raise SearcherValidationError(
+                "Query overrides reference unselected task IDs: "
+                f"{sorted(unknown_override_tasks)}"
+            )
+        if any(
+            not queries
+            or any(
+                not query.strip() or len(query) > 500 or "\x00" in query
+                for query in queries
+            )
+            for queries in overrides.values()
+        ):
+            raise SearcherValidationError(
+                "Query overrides must contain bounded, non-empty plain text."
+            )
         if len(selected) > 50:
             raise SearcherValidationError(
                 "One Searcher call can cover at most 50 tasks; select a smaller batch."
@@ -520,6 +543,15 @@ class SearcherAgent:
         normalized_queries = 0
         for task in selected:
             sanitized_task, removed, normalized = _sanitize_task(task)
+            if task.task_id in overrides:
+                normalized_override, override_normalized = normalize_search_queries(
+                    overrides[task.task_id]
+                )
+                overrides[task.task_id] = normalized_override
+                sanitized_task = sanitized_task.model_copy(
+                    update={"search_queries": normalized_override}
+                )
+                normalized += override_normalized
             sanitized.append(sanitized_task)
             removed_queries += removed
             normalized_queries += normalized
@@ -770,6 +802,7 @@ class SearcherAgent:
                     min_queries_per_task=min_queries_per_task,
                     max_retry_tasks=max_retry_tasks,
                     retry_search_calls=retry_search_calls,
+                    query_overrides=overrides,
                 ),
                 selected_task_ids=selected_ids,
                 unselected_task_ids=unselected_ids,

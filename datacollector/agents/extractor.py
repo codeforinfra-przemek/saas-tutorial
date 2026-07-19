@@ -860,6 +860,7 @@ class ExtractorAgent:
         max_evidence_chars_per_call: int = DEFAULT_MAX_EVIDENCE_CHARS_PER_CALL,
         max_api_calls: int = 5,
         cached_documents: list[SourceDocument] | None = None,
+        cached_document_search_id: str | None = None,
     ) -> ExtractionResults:
         self._validate_inputs(
             plan,
@@ -904,7 +905,7 @@ class ExtractorAgent:
         cache = self._validated_cache(
             cached_documents or [],
             selected_sources,
-            search_id=search_results.search_id,
+            search_id=(cached_document_search_id or search_results.search_id),
             max_document_bytes=max_document_bytes,
             max_document_chars=max_document_chars,
         )

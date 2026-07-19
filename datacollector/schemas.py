@@ -33,6 +33,7 @@ CHECKER_PROMPT_VERSION = "checker-system-v2"
 CHECKER_SCORING_VERSION = "checker-scoring-v2"
 RESOLVER_SCHEMA_VERSION = "1.0.0"
 RESOLVER_PROMPT_VERSION = "resolver-system-v1"
+EXECUTOR_SCHEMA_VERSION = "1.0.0"
 
 
 class ClosedModel(BaseModel):
@@ -707,6 +708,7 @@ class SearchQueryCoverage(StrEnum):
 class SearchSourceOrigin(StrEnum):
     PLAN_SEED = "plan_seed"
     OPENAI_WEB_SEARCH = "openai_web_search"
+    INHERITED = "inherited"
 
 
 class SearcherSourceDraft(ClosedModel):
@@ -752,6 +754,7 @@ class SearchLimits(ClosedModel):
     min_queries_per_task: int = Field(default=1, ge=1, le=20)
     max_retry_tasks: int = Field(default=0, ge=0, le=50)
     retry_search_calls: int = Field(default=1, ge=1, le=10)
+    query_overrides: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class SearchAction(ClosedModel):
@@ -780,6 +783,7 @@ class SearchSource(ClosedModel):
     discovered_via_queries: list[str] = Field(default_factory=list)
     relevance_note: str = Field(default="", max_length=1000)
     discovered_at: datetime
+    inherited_from_search_id: str | None = None
 
     @property
     def provider_verified(self) -> bool:
@@ -821,7 +825,7 @@ class SearchAttemptFailure(ClosedModel):
 class SearchResults(ClosedModel):
     """Auditable source-discovery artifact consumed later by Extractor."""
 
-    schema_version: Literal["1.0.0", "1.1.0"] = SEARCHER_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = SEARCHER_SCHEMA_VERSION
     prompt_version: str = SEARCHER_PROMPT_VERSION
     search_id: str
     plan_run_id: str
@@ -829,8 +833,19 @@ class SearchResults(ClosedModel):
     plan_reference: str = Field(min_length=1)
     created_at: datetime
     iteration: int = Field(ge=1)
-    generated_by: Literal["offline", "openai"]
+    generated_by: Literal["offline", "openai", "executor"]
     model: str | None
+    execution_mode: Literal["free", "paid"] | None = None
+    resolution_id: str | None = None
+    resolution_sha256: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    resolution_reference: str | None = None
+    prior_search_id: str | None = None
+    prior_search_sha256: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    prior_search_reference: str | None = None
     brand_name: str
     target_country: str = Field(pattern=r"^[A-Z]{2}$")
     depth: ResearchDepth
@@ -877,11 +892,29 @@ class SearchResults(ClosedModel):
             raise ValueError("Search source IDs must be unique.")
         known_sources = set(source_ids)
         known_tasks = set(self.selected_task_ids)
+        if not set(self.limits.query_overrides).issubset(known_tasks):
+            raise ValueError(
+                "Searcher query overrides may reference only selected tasks."
+            )
+        for task_id, queries in self.limits.query_overrides.items():
+            if (
+                not queries
+                or len(queries) != len(set(queries))
+                or any(
+                    not query.strip() or len(query) > 500 or "\x00" in query
+                    for query in queries
+                )
+            ):
+                raise ValueError(
+                    "Searcher query overrides must be unique bounded text."
+                )
         action_ids = [action.action_id for action in self.actions]
         populated_action_ids = [item for item in action_ids if item is not None]
         if len(populated_action_ids) != len(set(populated_action_ids)):
             raise ValueError("Search action IDs must be unique when present.")
-        if self.schema_version == "1.1.0" and len(populated_action_ids) != len(
+        if self.schema_version in {"1.1.0", "1.2.0"} and len(
+            populated_action_ids
+        ) != len(
             self.actions
         ):
             raise ValueError("Schema 1.1 search actions require stable action IDs.")
@@ -913,7 +946,7 @@ class SearchResults(ClosedModel):
             if not set(source.task_ids).issubset(known_tasks):
                 raise ValueError("Search sources may reference only selected tasks.")
             if (
-                self.schema_version == "1.1.0"
+                self.schema_version in {"1.1.0", "1.2.0"}
                 and source.url != source.canonical_url
             ):
                 raise ValueError(
@@ -931,15 +964,33 @@ class SearchResults(ClosedModel):
                 raise ValueError(
                     "Search source origin must match provider observation status."
                 )
+            if source.origin == SearchSourceOrigin.INHERITED:
+                if (
+                    self.generated_by != "executor"
+                    or source.inherited_from_search_id != self.prior_search_id
+                    or source.observed_in_action_ids
+                    or source.discovered_via_queries
+                ):
+                    raise ValueError(
+                        "Inherited sources require exact Executor predecessor "
+                        "lineage and no current-action provenance."
+                    )
+            elif source.inherited_from_search_id is not None:
+                raise ValueError(
+                    "Only inherited Searcher sources may name a predecessor."
+                )
             if (
-                self.schema_version == "1.1.0"
+                self.schema_version in {"1.1.0", "1.2.0"}
                 and source.origin == SearchSourceOrigin.OPENAI_WEB_SEARCH
                 and (not source.task_ids or not source.observed_in_action_ids)
             ):
                 raise ValueError(
                     "Schema 1.1 provider sources must be mapped to tasks and actions."
                 )
-            if self.schema_version == "1.1.0" and source.observed_in_action_ids:
+            if (
+                self.schema_version in {"1.1.0", "1.2.0"}
+                and source.observed_in_action_ids
+            ):
                 observed_actions = [
                     action_by_id[action_id]
                     for action_id in source.observed_in_action_ids
@@ -1063,7 +1114,7 @@ class SearchResults(ClosedModel):
                     raise ValueError(
                         "Task/source mappings must be symmetric in search results."
                     )
-            if self.schema_version == "1.1.0":
+            if self.schema_version in {"1.1.0", "1.2.0"}:
                 if any(
                     action_by_id[action_id].status != "completed"
                     or result.task_id
@@ -1129,6 +1180,13 @@ class SearchResults(ClosedModel):
                         "partial requires sources plus an explicit coverage gap."
                     )
         result_by_task = {result.task_id: result for result in self.task_results}
+        if any(
+            result_by_task[task_id].planned_queries != queries
+            for task_id, queries in self.limits.query_overrides.items()
+        ):
+            raise ValueError(
+                "Searcher query overrides must match the materialized workload."
+            )
         for source in self.sources:
             for task_id in source.task_ids:
                 if source.source_id not in result_by_task[task_id].source_ids:
@@ -1220,7 +1278,7 @@ class SearchResults(ClosedModel):
                 raise ValueError(
                     "Free Searcher task results must be query workloads only."
                 )
-        else:
+        elif self.generated_by == "openai":
             if self.model is None or not self.model.strip():
                 raise ValueError("OpenAI Searcher must declare a model.")
             if not self.search_executed or not self.agent_usage:
@@ -1262,7 +1320,7 @@ class SearchResults(ClosedModel):
             usage_by_call_index = {
                 usage.call_index: usage for usage in self.agent_usage
             }
-            if self.schema_version == "1.1.0" and any(
+            if self.schema_version in {"1.1.0", "1.2.0"} and any(
                 set(action.scope_task_ids)
                 != set(usage_by_call_index[action.call_index].scope_task_ids)
                 for action in self.actions
@@ -1296,6 +1354,133 @@ class SearchResults(ClosedModel):
                     "Successful actions and observed failed tool calls exceed "
                     "the configured global tool-call cap."
                 )
+        else:
+            lineage_values = (
+                self.execution_mode,
+                self.resolution_id,
+                self.resolution_sha256,
+                self.resolution_reference,
+                self.prior_search_id,
+                self.prior_search_sha256,
+                self.prior_search_reference,
+            )
+            if any(value is None for value in lineage_values):
+                raise ValueError(
+                    "Executor Searcher artifact requires complete resolution and "
+                    "predecessor lineage."
+                )
+            for value, field_name in (
+                (self.resolution_id, "resolution_id"),
+                (self.prior_search_id, "prior_search_id"),
+            ):
+                try:
+                    parsed = UUID(value)
+                except (ValueError, AttributeError) as exc:
+                    raise ValueError(
+                        f"Executor {field_name} must be a valid UUIDv4."
+                    ) from exc
+                if parsed.version != 4:
+                    raise ValueError(
+                        f"Executor {field_name} must be a valid UUIDv4."
+                    )
+            current_sources = [
+                source
+                for source in self.sources
+                if source.origin != SearchSourceOrigin.INHERITED
+            ]
+            if self.execution_mode == "free":
+                if (
+                    self.model is not None
+                    or self.search_executed
+                    or self.actions
+                    or self.agent_usage
+                    or self.failed_attempts
+                    or any(source.provider_observed for source in current_sources)
+                ):
+                    raise ValueError(
+                        "Free Executor search cannot record a provider attempt or "
+                        "new provider-observed source."
+                    )
+            else:
+                if self.search_executed != bool(self.agent_usage):
+                    raise ValueError(
+                        "Paid Executor search execution must match current usage."
+                    )
+                if self.search_executed and (
+                    self.model is None
+                    or not self.model.strip()
+                    or not self.actions
+                ):
+                    raise ValueError(
+                        "Executed paid Executor search requires model and actions."
+                    )
+                if not self.search_executed and (
+                    self.model is not None or self.actions or self.agent_usage
+                ):
+                    raise ValueError(
+                        "Executor cannot declare paid search state when no search ran."
+                    )
+                if any(
+                    source.origin == SearchSourceOrigin.PLAN_SEED
+                    for source in current_sources
+                ):
+                    raise ValueError(
+                        "Paid Executor current sources cannot be new plan seeds."
+                    )
+                if any(
+                    usage.agent != "searcher"
+                    or usage.iteration != self.iteration
+                    or not set(usage.scope_task_ids).issubset(known_tasks)
+                    for usage in self.agent_usage
+                ):
+                    raise ValueError(
+                        "Executor Searcher usage has inconsistent current scope."
+                    )
+                action_call_indices = {
+                    action.call_index for action in self.actions
+                }
+                if not action_call_indices.issubset(usage_call_indices):
+                    raise ValueError(
+                        "Executor search actions require matching current usage."
+                    )
+                if not usage_call_indices.issubset(
+                    action_call_indices | set(failed_call_indices)
+                ):
+                    raise ValueError(
+                        "Executor Searcher usage is not tied to an action or failure."
+                    )
+                recorded_search_calls = sum(
+                    tool.calls
+                    for usage in self.agent_usage
+                    if usage.call_index not in set(failed_call_indices)
+                    for tool in usage.tool_usage
+                    if tool.tool == "web_search"
+                )
+                if recorded_search_calls != sum(
+                    action.action_type == "search" for action in self.actions
+                ):
+                    raise ValueError(
+                        "Executor web-search usage must match current actions."
+                    )
+                if len(self.actions) + sum(
+                    failure.observed_tool_calls
+                    for failure in self.failed_attempts
+                ) > self.limits.max_search_calls:
+                    raise ValueError(
+                        "Executor current search exceeds its tool-call cap."
+                    )
+                current_action_ids = {
+                    action.action_id for action in self.actions
+                }
+                if any(
+                    not set(source.observed_in_action_ids).issubset(
+                        current_action_ids
+                    )
+                    for source in current_sources
+                ):
+                    raise ValueError(
+                        "Executor current source references an unknown action."
+                    )
         return self
 
 
@@ -1570,10 +1755,15 @@ class ExtractionAttemptFailure(ClosedModel):
     token_usage_unknown: bool = False
 
 
+class ExtractionSemanticScope(ClosedModel):
+    task_id: str
+    source_id: str = Field(pattern=r"^source-[a-f0-9]{16}$")
+
+
 class ExtractionResults(ClosedModel):
     """Auditable raw extraction artifact consumed later by Checker."""
 
-    schema_version: Literal["1.0.0"] = EXTRACTOR_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = EXTRACTOR_SCHEMA_VERSION
     prompt_version: str = EXTRACTOR_PROMPT_VERSION
     extraction_id: str
     plan_run_id: str
@@ -1584,8 +1774,25 @@ class ExtractionResults(ClosedModel):
     search_reference: str = Field(min_length=1)
     created_at: datetime
     iteration: int = Field(ge=1)
-    generated_by: Literal["deterministic", "openai"]
+    generated_by: Literal["deterministic", "openai", "executor"]
     model: str | None
+    execution_mode: Literal["free", "paid"] | None = None
+    resolution_id: str | None = None
+    resolution_sha256: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    resolution_reference: str | None = None
+    prior_extraction_id: str | None = None
+    prior_extraction_sha256: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    prior_extraction_reference: str | None = None
+    inherited_source_ids: list[str] = Field(default_factory=list)
+    processed_source_ids: list[str] = Field(default_factory=list)
+    preserved_processed_source_ids: list[str] = Field(default_factory=list)
+    semantically_processed_scopes: list[ExtractionSemanticScope] = Field(
+        default_factory=list
+    )
     brand_name: str
     target_country: str = Field(pattern=r"^[A-Z]{2}$")
     depth: ResearchDepth
@@ -1633,11 +1840,57 @@ class ExtractionResults(ClosedModel):
             (self.selected_task_ids, "selected_task_ids"),
             (self.selected_source_ids, "selected_source_ids"),
             (self.unselected_source_ids, "unselected_source_ids"),
+            (self.inherited_source_ids, "inherited_source_ids"),
+            (self.processed_source_ids, "processed_source_ids"),
+            (
+                self.preserved_processed_source_ids,
+                "preserved_processed_source_ids",
+            ),
         ):
             if len(values) != len(set(values)):
                 raise ValueError(f"{field_name} values must be unique.")
         if set(self.selected_source_ids) & set(self.unselected_source_ids):
             raise ValueError("Selected and unselected extraction sources overlap.")
+        if self.generated_by == "executor":
+            if (
+                set(self.inherited_source_ids) & set(self.processed_source_ids)
+                or set([*self.inherited_source_ids, *self.processed_source_ids])
+                != set(self.selected_source_ids)
+            ):
+                raise ValueError(
+                    "Executor inherited and processed sources must partition the "
+                    "selected sources."
+                )
+            if not set(self.preserved_processed_source_ids).issubset(
+                self.processed_source_ids
+            ):
+                raise ValueError(
+                    "Preserved processed sources must be scheduled source actions."
+                )
+            scope_keys = [
+                (scope.task_id, scope.source_id)
+                for scope in self.semantically_processed_scopes
+            ]
+            if len(scope_keys) != len(set(scope_keys)) or any(
+                task_id not in set(self.selected_task_ids)
+                or source_id not in set(self.selected_source_ids)
+                for task_id, source_id in scope_keys
+            ):
+                raise ValueError(
+                    "Executor semantic scopes must be unique and selected."
+                )
+        elif (
+            self.inherited_source_ids
+            or self.processed_source_ids
+            or self.preserved_processed_source_ids
+        ):
+            raise ValueError(
+                "Only Executor extraction artifacts may record merged source sets."
+            )
+        elif self.semantically_processed_scopes:
+            raise ValueError(
+                "Only Executor extraction may materialize inherited semantic scopes."
+            )
 
         document_ids = [item.document_id for item in self.documents]
         document_source_ids = [item.source_id for item in self.documents]
@@ -1940,10 +2193,18 @@ class ExtractionResults(ClosedModel):
                 field.status in closed_field_statuses
                 for field in result.field_results
             )
-            semantic_success = any(
-                result.task_id in usage.scope_task_ids
-                and usage.scope_source_ids[0] in result.source_ids
-                for usage in successful_usage
+            semantic_success = (
+                any(
+                    scope.task_id == result.task_id
+                    and scope.source_id in result.source_ids
+                    for scope in self.semantically_processed_scopes
+                )
+                if self.generated_by == "executor"
+                else any(
+                    result.task_id in usage.scope_task_ids
+                    and usage.scope_source_ids[0] in result.source_ids
+                    for usage in successful_usage
+                )
             )
             if not accessible:
                 expected_status = ExtractionTaskStatus.NO_ACCESSIBLE_CONTENT
@@ -1971,6 +2232,59 @@ class ExtractionResults(ClosedModel):
             ):
                 raise ValueError(
                     "Extractor provider_executed must match recorded provider attempts."
+                )
+        elif self.generated_by == "executor":
+            lineage_values = (
+                self.execution_mode,
+                self.resolution_id,
+                self.resolution_sha256,
+                self.resolution_reference,
+                self.prior_extraction_id,
+                self.prior_extraction_sha256,
+                self.prior_extraction_reference,
+            )
+            if any(value is None for value in lineage_values):
+                raise ValueError(
+                    "Executor extraction requires complete resolution and "
+                    "predecessor lineage."
+                )
+            for value, field_name in (
+                (self.resolution_id, "resolution_id"),
+                (self.prior_extraction_id, "prior_extraction_id"),
+            ):
+                try:
+                    parsed = UUID(value)
+                except (ValueError, AttributeError) as exc:
+                    raise ValueError(
+                        f"Executor {field_name} must be a valid UUIDv4."
+                    ) from exc
+                if parsed.version != 4:
+                    raise ValueError(
+                        f"Executor {field_name} must be a valid UUIDv4."
+                    )
+            if self.provider_executed != bool(
+                self.agent_usage or self.failed_attempts
+            ):
+                raise ValueError(
+                    "Executor extraction provider flag must match current attempts."
+                )
+            if self.execution_mode == "free" and (
+                self.provider_executed
+                or self.agent_usage
+                or self.failed_attempts
+            ):
+                raise ValueError(
+                    "Free Executor extraction cannot record current provider calls."
+                )
+            if self.execution_mode == "paid" and self.agent_usage and (
+                self.model is None or not self.model.strip()
+            ):
+                raise ValueError(
+                    "Paid Executor extraction usage requires a model."
+                )
+            if self.claims and (self.model is None or not self.model.strip()):
+                raise ValueError(
+                    "Merged OpenAI claims require their inherited or current model."
                 )
         return self
 
@@ -3140,4 +3454,274 @@ class ResolverResults(ClosedModel):
         )
         if self.recommended_next_action != expected_action:
             raise ValueError("Resolver next action is inconsistent.")
+        return self
+
+
+class ExecutorMode(StrEnum):
+    FREE = "free"
+    PAID = "paid"
+
+
+class ExecutorBatchStatus(StrEnum):
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    PENDING_HUMAN = "pending_human"
+
+
+class ExecutorNextAction(StrEnum):
+    RUN_CHECKER = "run_checker"
+    HUMAN_REVIEW = "human_review"
+
+
+class ExecutorBatchResult(ClosedModel):
+    batch_id: str = Field(pattern=r"^resolution-batch-[a-f0-9]{16}$")
+    action: ResolverAction
+    status: ExecutorBatchStatus
+    resolution_item_ids: list[str] = Field(min_length=1, max_length=100)
+    follow_up_ids: list[str] = Field(min_length=1, max_length=100)
+    task_ids: list[str] = Field(min_length=1, max_length=100)
+    requested_source_ids: list[str] = Field(default_factory=list, max_length=100)
+    requested_queries: list[str] = Field(default_factory=list, max_length=100)
+    resulting_source_ids: list[str] = Field(default_factory=list, max_length=100)
+    resulting_document_ids: list[str] = Field(default_factory=list, max_length=100)
+    resulting_claim_ids: list[str] = Field(default_factory=list, max_length=500)
+    warnings: list[str] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_executor_batch(self) -> "ExecutorBatchResult":
+        for values in (
+            self.resolution_item_ids,
+            self.follow_up_ids,
+            self.task_ids,
+            self.requested_source_ids,
+            self.requested_queries,
+            self.resulting_source_ids,
+            self.resulting_document_ids,
+            self.resulting_claim_ids,
+            self.warnings,
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError("Executor batch lists must be unique.")
+        if self.action == ResolverAction.HUMAN_REVIEW:
+            if (
+                self.status != ExecutorBatchStatus.PENDING_HUMAN
+                or self.resulting_source_ids
+                or self.resulting_document_ids
+                or self.resulting_claim_ids
+            ):
+                raise ValueError("Human-review batch cannot claim automated output.")
+        elif self.status == ExecutorBatchStatus.PENDING_HUMAN:
+            raise ValueError("Automated Executor batch cannot be pending_human.")
+        return self
+
+
+class ExecutorLimits(ClosedModel):
+    max_search_calls: int = Field(ge=1, le=100)
+    min_queries_per_task: int = Field(ge=1, le=20)
+    max_retry_tasks: int = Field(default=0, ge=0, le=50)
+    retry_search_calls: int = Field(default=1, ge=1, le=10)
+    max_document_bytes: int = Field(ge=1024)
+    max_document_chars: int = Field(ge=1000, le=250_000)
+    max_pdf_scan_chars: int = Field(ge=10_000, le=5_000_000)
+    max_passages_per_task: int = Field(ge=1, le=50)
+    max_evidence_chars_per_call: int = Field(
+        ge=10_000, le=500_000
+    )
+    max_extractor_api_calls: int = Field(ge=1, le=100)
+
+
+class ExecutorResults(ClosedModel):
+    """Immutable manifest for one executed Resolver repair round."""
+
+    schema_version: Literal["1.0.0"] = EXECUTOR_SCHEMA_VERSION
+    execution_id: str
+    plan_run_id: str
+    search_id: str
+    extraction_id: str
+    check_id: str
+    resolution_id: str
+    plan_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    prior_search_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    prior_extraction_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    check_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    resolution_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    plan_reference: str = Field(min_length=1)
+    prior_search_reference: str = Field(min_length=1)
+    prior_extraction_reference: str = Field(min_length=1)
+    check_reference: str = Field(min_length=1)
+    resolution_reference: str = Field(min_length=1)
+    created_at: datetime
+    iteration: int = Field(ge=1)
+    execution_mode: ExecutorMode
+    brand_name: str
+    target_country: str = Field(pattern=r"^[A-Z]{2}$")
+    depth: ResearchDepth
+    limits: ExecutorLimits
+    batch_results: list[ExecutorBatchResult] = Field(min_length=1)
+    processed_source_ids: list[str]
+    retried_source_ids: list[str]
+    cached_source_ids: list[str]
+    preserved_processed_source_ids: list[str]
+    new_source_ids: list[str]
+    inherited_source_ids: list[str]
+    pending_human_follow_up_ids: list[str]
+    search_executed: bool
+    network_executed: bool
+    provider_executed: bool
+    merged_search_id: str
+    merged_search_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    merged_search_reference: str = Field(min_length=1)
+    merged_extraction_id: str
+    merged_extraction_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    merged_extraction_reference: str = Field(min_length=1)
+    ready_for_checker: bool
+    recommended_next_action: ExecutorNextAction
+    warnings: list[str]
+    compliance_rules: list[str]
+    agent_usage: list[AgentIterationUsage] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_executor_results(self) -> "ExecutorResults":
+        for value, field_name in (
+            (self.execution_id, "execution_id"),
+            (self.plan_run_id, "plan_run_id"),
+            (self.search_id, "search_id"),
+            (self.extraction_id, "extraction_id"),
+            (self.check_id, "check_id"),
+            (self.resolution_id, "resolution_id"),
+            (self.merged_search_id, "merged_search_id"),
+            (self.merged_extraction_id, "merged_extraction_id"),
+        ):
+            try:
+                parsed = UUID(value)
+            except (ValueError, AttributeError) as exc:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.") from exc
+            if parsed.version != 4:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.")
+        for values, field_name in (
+            (self.processed_source_ids, "processed_source_ids"),
+            (self.retried_source_ids, "retried_source_ids"),
+            (self.cached_source_ids, "cached_source_ids"),
+            (
+                self.preserved_processed_source_ids,
+                "preserved_processed_source_ids",
+            ),
+            (self.new_source_ids, "new_source_ids"),
+            (self.inherited_source_ids, "inherited_source_ids"),
+            (self.pending_human_follow_up_ids, "pending_human_follow_up_ids"),
+            (self.warnings, "warnings"),
+            (self.compliance_rules, "compliance_rules"),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"Executor {field_name} values must be unique.")
+        if len({batch.batch_id for batch in self.batch_results}) != len(
+            self.batch_results
+        ):
+            raise ValueError("Executor batch result IDs must be unique.")
+        batched_item_ids = [
+            item_id
+            for batch in self.batch_results
+            for item_id in batch.resolution_item_ids
+        ]
+        batched_follow_up_ids = [
+            follow_up_id
+            for batch in self.batch_results
+            for follow_up_id in batch.follow_up_ids
+        ]
+        if len(batched_item_ids) != len(set(batched_item_ids)) or len(
+            batched_follow_up_ids
+        ) != len(set(batched_follow_up_ids)):
+            raise ValueError(
+                "Executor batches must preserve unique work-item/follow-up partitions."
+            )
+        expected_retry_sources = list(
+            dict.fromkeys(
+                source_id
+                for batch in self.batch_results
+                if batch.action == ResolverAction.RETRY_RETRIEVAL
+                for source_id in batch.requested_source_ids
+            )
+        )
+        if self.retried_source_ids != expected_retry_sources:
+            raise ValueError("Executor retry-source summary is inconsistent.")
+        expected_human_follow_ups = list(
+            dict.fromkeys(
+                follow_up_id
+                for batch in self.batch_results
+                if batch.action == ResolverAction.HUMAN_REVIEW
+                for follow_up_id in batch.follow_up_ids
+            )
+        )
+        if self.pending_human_follow_up_ids != expected_human_follow_ups:
+            raise ValueError("Executor human-review summary is inconsistent.")
+        expected_new_sources = list(
+            dict.fromkeys(
+                source_id
+                for batch in self.batch_results
+                if batch.action == ResolverAction.SEARCH_NEW_SOURCE
+                for source_id in batch.resulting_source_ids
+            )
+        )
+        if self.new_source_ids != expected_new_sources:
+            raise ValueError("Executor new-source summary is inconsistent.")
+        requested_automated_sources = {
+            source_id
+            for batch in self.batch_results
+            if batch.action not in {
+                ResolverAction.SEARCH_NEW_SOURCE,
+                ResolverAction.HUMAN_REVIEW,
+            }
+            for source_id in batch.requested_source_ids
+        }
+        if not requested_automated_sources.issubset(self.processed_source_ids):
+            raise ValueError(
+                "Executor processed-source summary omits scheduled source work."
+            )
+        if not set(self.retried_source_ids).issubset(self.processed_source_ids):
+            raise ValueError("Executor retry sources must be processed.")
+        if not set(self.cached_source_ids).issubset(self.processed_source_ids):
+            raise ValueError("Executor cached sources must be processed.")
+        if set(self.retried_source_ids) & set(self.cached_source_ids):
+            raise ValueError("Retried sources cannot reuse the predecessor cache.")
+        if not set(self.preserved_processed_source_ids).issubset(
+            self.processed_source_ids
+        ):
+            raise ValueError(
+                "Preserved processed sources must be part of executed work."
+            )
+        if set(self.inherited_source_ids) & set(self.processed_source_ids):
+            raise ValueError("Inherited and processed source sets must be disjoint.")
+        if self.execution_mode == ExecutorMode.FREE and (
+            self.provider_executed or self.agent_usage
+        ):
+            raise ValueError("Free Executor cannot record OpenAI provider calls.")
+        if self.agent_usage and not self.provider_executed:
+            raise ValueError(
+                "Executor usage requires an executed provider attempt."
+            )
+        usage_keys = [
+            (usage.agent, usage.iteration, usage.call_index)
+            for usage in self.agent_usage
+        ]
+        if len(usage_keys) != len(set(usage_keys)):
+            raise ValueError("Executor usage entries must be unique.")
+        if any(
+            usage.agent not in {"searcher", "extractor"}
+            or usage.iteration != self.iteration
+            for usage in self.agent_usage
+        ):
+            raise ValueError("Executor usage must belong to current child agents.")
+        automated = any(
+            batch.action != ResolverAction.HUMAN_REVIEW
+            for batch in self.batch_results
+        )
+        if self.ready_for_checker != automated:
+            raise ValueError("Executor ready_for_checker flag is inconsistent.")
+        expected_action = (
+            ExecutorNextAction.RUN_CHECKER
+            if automated
+            else ExecutorNextAction.HUMAN_REVIEW
+        )
+        if self.recommended_next_action != expected_action:
+            raise ValueError("Executor recommended next action is inconsistent.")
         return self

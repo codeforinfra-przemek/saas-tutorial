@@ -11,6 +11,7 @@ class LoopAgent(StrEnum):
     EXTRACTOR = "extractor"
     CHECKER = "checker"
     RESOLVER = "resolver"
+    EXECUTOR = "executor"
     NORMALIZER = "normalizer"
     HUMAN_REVIEW = "human_review"
     IMPORTER = "importer"
@@ -22,6 +23,7 @@ LOOP_SEQUENCE = (
     LoopAgent.EXTRACTOR,
     LoopAgent.CHECKER,
     LoopAgent.RESOLVER,
+    LoopAgent.EXECUTOR,
     LoopAgent.NORMALIZER,
     LoopAgent.HUMAN_REVIEW,
     LoopAgent.IMPORTER,

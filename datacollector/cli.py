@@ -15,6 +15,11 @@ from pydantic import ValidationError
 
 from .agents.checker import CheckerAgent, CheckerValidationError
 from .agents.extractor import ExtractorAgent, ExtractorValidationError
+from .agents.executor import (
+    ExecutorAgent,
+    ExecutorProviderError,
+    ExecutorValidationError,
+)
 from .agents.planner import PlannerAgent, PlannerValidationError
 from .agents.resolver import ResolverAgent, ResolverValidationError
 from .agents.searcher import SearcherAgent, SearcherValidationError
@@ -38,6 +43,7 @@ from .schemas import (
     AgentFailureArtifact,
     AgentIterationUsage,
     CheckerAttemptFailure,
+    ExecutorMode,
     ExtractionAttemptFailure,
     PlannerInput,
     ResearchDepth,
@@ -46,16 +52,19 @@ from .schemas import (
 from .storage.json_store import (
     DEFAULT_RUNS_DIR,
     checker_results_filename_for,
+    executor_results_filename_for,
     extraction_results_filename_for,
     load_extraction_results,
     load_checker_results,
     load_research_plan,
     resolver_results_filename_for,
+    load_resolver_results,
     load_search_results,
     reserve_artifact,
     save_agent_failure,
     save_checker_results,
     save_extraction_results,
+    save_executor_results,
     save_research_plan,
     save_resolver_results,
     save_search_results,
@@ -86,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m datacollector",
         description=(
             "Auditable franchise research loop "
-            "(Planner + Searcher + Extractor + Checker + Resolver MVP)."
+            "(Planner + Searcher + Extractor + Checker + Resolver + Executor)."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -440,6 +449,120 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         help="Artifact directory; defaults to the input Checker directory.",
+    )
+
+    execute_parser = subparsers.add_parser(
+        "execute",
+        help="Execute Resolver batches and materialize merged Searcher/Extractor state.",
+    )
+    execute_parser.add_argument(
+        "--resolution",
+        type=Path,
+        required=True,
+        help="Exact resolution.json or resolution-rNNN.json to execute.",
+    )
+    execute_parser.add_argument(
+        "--plan",
+        type=Path,
+        help="Exact plan artifact; defaults to Resolver's plan_reference.",
+    )
+    execute_parser.add_argument(
+        "--sources",
+        type=Path,
+        help="Exact predecessor Searcher artifact; defaults to Resolver lineage.",
+    )
+    execute_parser.add_argument(
+        "--extractions",
+        type=Path,
+        help="Exact predecessor Extractor artifact; defaults to Resolver lineage.",
+    )
+    execute_parser.add_argument(
+        "--check",
+        type=Path,
+        help="Exact predecessor Checker artifact; defaults to Resolver lineage.",
+    )
+    execute_parser.add_argument(
+        "--free",
+        "--offline",
+        dest="offline",
+        action="store_true",
+        help=(
+            "Execute local retrieval/parsing and prepare search queries without "
+            "OpenAI web search or semantic extraction."
+        ),
+    )
+    execute_parser.add_argument(
+        "--iteration",
+        type=_positive_int,
+        help="Execution iteration; defaults to Resolver iteration plus one.",
+    )
+    execute_parser.add_argument(
+        "--max-search-calls",
+        type=_positive_int,
+        default=10,
+        help="Global paid Searcher tool-call cap (default: 10).",
+    )
+    execute_parser.add_argument(
+        "--min-queries-per-task",
+        type=_positive_int,
+        default=1,
+        help="Minimum exact Resolver queries per search task (default: 1).",
+    )
+    execute_parser.add_argument(
+        "--max-retry-tasks",
+        type=_nonnegative_int,
+        default=0,
+        help="Optional paid Searcher quality retries (default: 0).",
+    )
+    execute_parser.add_argument(
+        "--retry-search-calls",
+        type=_positive_int,
+        default=1,
+        help="Tool calls reserved per optional Searcher retry (default: 1).",
+    )
+    execute_parser.add_argument(
+        "--max-document-bytes",
+        type=_positive_int,
+        default=40 * 1024 * 1024,
+        help="Hard per-document download cap (default: 40 MiB).",
+    )
+    execute_parser.add_argument(
+        "--max-document-chars",
+        type=_positive_int,
+        default=250_000,
+        help="Maximum stored selected document text (default: 250000).",
+    )
+    execute_parser.add_argument(
+        "--max-pdf-scan-chars",
+        type=_positive_int,
+        default=2_000_000,
+        help="Maximum locally parsed PDF text before selection (default: 2000000).",
+    )
+    execute_parser.add_argument(
+        "--max-passages-per-task",
+        type=_positive_int,
+        default=6,
+        help="Maximum evidence passages per task/document (default: 6).",
+    )
+    execute_parser.add_argument(
+        "--max-evidence-chars-per-call",
+        type=_positive_int,
+        default=100_000,
+        help="Hard evidence cap per paid Extractor request (default: 100000).",
+    )
+    execute_parser.add_argument(
+        "--max-extractor-api-calls",
+        type=_positive_int,
+        default=20,
+        help="Hard paid Extractor request cap for this execution (default: 20).",
+    )
+    execute_parser.add_argument(
+        "--model", help="Override OPENAI_MODEL for Searcher and Extractor children."
+    )
+    execute_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Artifact directory; defaults to the Resolver directory.",
     )
 
     return parser
@@ -1559,6 +1682,389 @@ def _run_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _save_executor_failure_usages(
+    *,
+    plan_run_id: str,
+    reference_path: Path,
+    output_dir: Path,
+    error_code: str,
+    iteration: int,
+    requested_model: str,
+    usages: list[AgentIterationUsage],
+    extraction_failed_attempts: list[ExtractionAttemptFailure] | None = None,
+) -> list[Path]:
+    """Persist all known child usage when a complete execution cannot publish."""
+
+    failure_by_key = {
+        ("extractor", attempt.call_index): attempt
+        for attempt in (extraction_failed_attempts or [])
+    }
+    paths: list[Path] = []
+    usage_keys: set[tuple[str, int]] = set()
+    for usage in usages:
+        key = (usage.agent, usage.call_index)
+        usage_keys.add(key)
+        attempt = failure_by_key.get(key)
+        failure = AgentFailureArtifact(
+            failure_id=str(uuid4()),
+            plan_run_id=plan_run_id,
+            created_at=datetime.now(timezone.utc),
+            error_code=attempt.error_code if attempt is not None else error_code,
+            agent=usage.agent,
+            iteration=usage.iteration,
+            call_index=usage.call_index,
+            scope_task_ids=usage.scope_task_ids,
+            scope_source_ids=usage.scope_source_ids,
+            provider=usage.provider,
+            requested_model=usage.requested_model,
+            usage=usage,
+            observed_tool_calls=sum(tool.calls for tool in usage.tool_usage),
+            tool_usage=usage.tool_usage,
+            token_usage_unknown=False,
+        )
+        paths.append(
+            save_agent_failure(
+                failure,
+                reference_path,
+                output_dir=output_dir,
+            )
+        )
+    for attempt in extraction_failed_attempts or []:
+        key = ("extractor", attempt.call_index)
+        if key in usage_keys:
+            continue
+        failure = AgentFailureArtifact(
+            failure_id=str(uuid4()),
+            plan_run_id=plan_run_id,
+            created_at=datetime.now(timezone.utc),
+            error_code=attempt.error_code,
+            agent="extractor",
+            iteration=iteration,
+            call_index=attempt.call_index,
+            scope_task_ids=attempt.scope_task_ids,
+            scope_source_ids=[attempt.source_id],
+            requested_model=requested_model,
+            usage=None,
+            observed_tool_calls=0,
+            tool_usage=[],
+            token_usage_unknown=True,
+        )
+        paths.append(
+            save_agent_failure(
+                failure,
+                reference_path,
+                output_dir=output_dir,
+            )
+        )
+    return paths
+
+
+def _run_execute(args: argparse.Namespace) -> int:
+    resolution, resolution_sha256 = load_resolver_results(args.resolution)
+    plan_path = args.plan or Path(resolution.plan_reference)
+    prior_search_path = args.sources or Path(resolution.search_reference)
+    prior_extraction_path = args.extractions or Path(
+        resolution.extraction_reference
+    )
+    check_path = args.check or Path(resolution.check_reference)
+    plan, plan_sha256 = load_research_plan(plan_path)
+    prior_search, prior_search_sha256 = load_search_results(prior_search_path)
+    prior_extraction, prior_extraction_sha256 = load_extraction_results(
+        prior_extraction_path
+    )
+    checker, check_sha256 = load_checker_results(check_path)
+    iteration = args.iteration or (resolution.iteration + 1)
+    result_directory = args.output_dir or args.resolution.parent
+    if (
+        any(document.content_path for document in prior_extraction.documents)
+        and result_directory.resolve() != prior_extraction_path.parent.resolve()
+    ):
+        raise ExecutorValidationError(
+            "Executor output directory must match the predecessor Extractor "
+            "directory while inherited raw-document snapshots are referenced."
+        )
+    expected_search_path = result_directory / search_results_filename_for(
+        iteration,
+        offline=args.offline,
+    )
+    expected_extraction_path = (
+        result_directory
+        / extraction_results_filename_for(iteration, free=args.offline)
+    )
+    expected_execution_path = (
+        result_directory
+        / executor_results_filename_for(iteration, free=args.offline)
+    )
+
+    with (
+        reserve_artifact(expected_search_path),
+        reserve_artifact(expected_extraction_path),
+        reserve_artifact(expected_execution_path),
+    ):
+        search_llm = None
+        extraction_llm = None
+        if not args.offline:
+            settings = OpenAISettings.from_env()
+            if args.model:
+                settings = replace(settings, model=args.model)
+            search_llm = OpenAISearcherClient(settings)
+            extraction_llm = OpenAIExtractorClient(settings)
+
+        fetch_policy = FetchPolicy(
+            max_html_bytes=min(args.max_document_bytes, 5 * 1024 * 1024),
+            max_pdf_bytes=args.max_document_bytes,
+            max_text_chars=args.max_pdf_scan_chars,
+        )
+        fetcher = DocumentFetcher(policy=fetch_policy)
+        raw_document_archiver = RawDocumentArchive(
+            result_directory
+            / document_archive_directory_name(
+                iteration,
+                free=args.offline,
+            ),
+            reference_root=result_directory,
+        )
+        agent = ExecutorAgent(
+            SearcherAgent(search_llm),
+            ExtractorAgent(
+                fetcher,
+                extraction_llm,
+                raw_document_archiver=raw_document_archiver,
+            ),
+        )
+        try:
+            merged_search, merged_extraction, results = agent.execute(
+                plan,
+                prior_search,
+                prior_extraction,
+                checker,
+                resolution,
+                plan_sha256=plan_sha256,
+                prior_search_sha256=prior_search_sha256,
+                prior_extraction_sha256=prior_extraction_sha256,
+                check_sha256=check_sha256,
+                resolution_sha256=resolution_sha256,
+                plan_reference=str(plan_path.resolve()),
+                prior_search_reference=str(prior_search_path.resolve()),
+                prior_extraction_reference=str(prior_extraction_path.resolve()),
+                check_reference=str(check_path.resolve()),
+                resolution_reference=str(args.resolution.resolve()),
+                merged_search_reference=str(expected_search_path.resolve()),
+                merged_extraction_reference=str(
+                    expected_extraction_path.resolve()
+                ),
+                iteration=iteration,
+                execution_mode=(
+                    ExecutorMode.FREE if args.offline else ExecutorMode.PAID
+                ),
+                max_search_calls=args.max_search_calls,
+                min_queries_per_task=args.min_queries_per_task,
+                max_retry_tasks=args.max_retry_tasks,
+                retry_search_calls=args.retry_search_calls,
+                max_document_bytes=args.max_document_bytes,
+                max_document_chars=args.max_document_chars,
+                max_pdf_scan_chars=args.max_pdf_scan_chars,
+                max_passages_per_task=args.max_passages_per_task,
+                max_evidence_chars_per_call=(
+                    args.max_evidence_chars_per_call
+                ),
+                max_extractor_api_calls=args.max_extractor_api_calls,
+            )
+        except ExecutorProviderError as exc:
+            paths = _save_executor_failure_usages(
+                plan_run_id=plan.run_id,
+                reference_path=args.resolution,
+                output_dir=result_directory,
+                error_code=exc.code,
+                iteration=iteration,
+                requested_model=(
+                    extraction_llm.model_name
+                    if extraction_llm is not None
+                    else args.model or "unknown"
+                ),
+                usages=exc.usages,
+                extraction_failed_attempts=exc.extraction_failed_attempts,
+            )
+            raise ExecutorProviderError(
+                f"{exc} Failure ledger: {', '.join(str(path) for path in paths)}.",
+                code=exc.code,
+                usages=exc.usages,
+                extraction_failed_attempts=exc.extraction_failed_attempts,
+            ) from None
+        except SearcherProviderError as exc:
+            paths = _save_executor_failure_usages(
+                plan_run_id=plan.run_id,
+                reference_path=args.resolution,
+                output_dir=result_directory,
+                error_code=exc.code,
+                iteration=iteration,
+                requested_model=(
+                    search_llm.model_name
+                    if search_llm is not None
+                    else args.model or "unknown"
+                ),
+                usages=exc.usages,
+            )
+            if not paths and (
+                exc.agent is not None
+                and exc.call_index is not None
+                and exc.requested_model is not None
+            ):
+                paths.append(
+                    save_agent_failure(
+                        AgentFailureArtifact(
+                            failure_id=str(uuid4()),
+                            plan_run_id=plan.run_id,
+                            created_at=datetime.now(timezone.utc),
+                            error_code=exc.code,
+                            agent=exc.agent,
+                            iteration=exc.iteration or iteration,
+                            call_index=exc.call_index,
+                            scope_task_ids=exc.scope_task_ids,
+                            requested_model=exc.requested_model,
+                            usage=None,
+                            observed_tool_calls=exc.observed_tool_calls,
+                            tool_usage=exc.tool_usage,
+                            token_usage_unknown=True,
+                        ),
+                        args.resolution,
+                        output_dir=result_directory,
+                    )
+                )
+            ledger = f" Failure ledger: {', '.join(str(path) for path in paths)}."
+            raise SearcherProviderError(
+                f"{exc}{ledger}",
+                code=exc.code,
+                usages=exc.usages,
+                observed_tool_calls=exc.observed_tool_calls,
+                tool_usage=exc.tool_usage,
+                agent=exc.agent,
+                iteration=exc.iteration,
+                call_index=exc.call_index,
+                scope_task_ids=exc.scope_task_ids,
+                requested_model=exc.requested_model,
+            ) from None
+
+        try:
+            merged_search_path = save_search_results(
+                merged_search,
+                plan_path,
+                output_dir=result_directory,
+            )
+            merged_extraction_path = save_extraction_results(
+                merged_extraction,
+                merged_search_path,
+                output_dir=result_directory,
+            )
+            execution_path = save_executor_results(
+                results,
+                args.resolution,
+                output_dir=result_directory,
+            )
+        except Exception as exc:
+            if not results.agent_usage:
+                raise
+            paths = _save_executor_failure_usages(
+                plan_run_id=plan.run_id,
+                reference_path=args.resolution,
+                output_dir=result_directory,
+                error_code="artifact_write_failed",
+                iteration=iteration,
+                requested_model=results.agent_usage[0].requested_model,
+                usages=results.agent_usage,
+                extraction_failed_attempts=merged_extraction.failed_attempts,
+            )
+            raise ExecutorProviderError(
+                "Paid Executor child calls completed but final artifacts could "
+                f"not all be saved ({type(exc).__name__}). Failure ledger: "
+                f"{', '.join(str(path) for path in paths)}.",
+                code="artifact_write_failed",
+                usages=results.agent_usage,
+                extraction_failed_attempts=merged_extraction.failed_attempts,
+            ) from None
+
+    batch_statuses: dict[str, int] = {}
+    for batch in results.batch_results:
+        status = batch.status.value
+        batch_statuses[status] = batch_statuses.get(status, 0) + 1
+    action_counts: dict[str, int] = {}
+    for batch in results.batch_results:
+        action = batch.action.value
+        action_counts[action] = action_counts.get(action, 0) + 1
+    child_failed_attempts = [
+        *merged_search.failed_attempts,
+        *merged_extraction.failed_attempts,
+    ]
+    execution_usage_totals = _usage_totals(
+        results.agent_usage,
+        failed_call_indices=[
+            attempt.call_index for attempt in child_failed_attempts
+        ],
+        has_unknown_token_usage=any(
+            attempt.token_usage_unknown for attempt in child_failed_attempts
+        ),
+    )
+    execution_usage_totals["api_attempts_recorded"] = len(
+        {
+            *( (usage.agent, usage.call_index) for usage in results.agent_usage ),
+            *(
+                ("searcher", attempt.call_index)
+                for attempt in merged_search.failed_attempts
+            ),
+            *(
+                ("extractor", attempt.call_index)
+                for attempt in merged_extraction.failed_attempts
+            ),
+        }
+    )
+    summary = {
+        "execution_id": results.execution_id,
+        "resolution_id": results.resolution_id,
+        "resolution_sha256": results.resolution_sha256,
+        "brand": results.brand_name,
+        "execution_mode": results.execution_mode.value,
+        "iteration": results.iteration,
+        "batches": len(results.batch_results),
+        "batch_actions": action_counts,
+        "batch_statuses": batch_statuses,
+        "search_executed": results.search_executed,
+        "network_executed": results.network_executed,
+        "provider_executed": results.provider_executed,
+        "processed_sources": len(results.processed_source_ids),
+        "retried_sources": len(results.retried_source_ids),
+        "cached_sources": len(results.cached_source_ids),
+        "preserved_processed_sources": len(
+            results.preserved_processed_source_ids
+        ),
+        "new_sources": len(results.new_source_ids),
+        "inherited_sources": len(results.inherited_source_ids),
+        "pending_human_follow_ups": len(
+            results.pending_human_follow_up_ids
+        ),
+        "merged_search_id": results.merged_search_id,
+        "merged_search_sha256": results.merged_search_sha256,
+        "merged_sources": len(merged_search.sources),
+        "merged_extraction_id": results.merged_extraction_id,
+        "merged_extraction_sha256": results.merged_extraction_sha256,
+        "merged_documents": len(merged_extraction.documents),
+        "merged_claims": len(merged_extraction.claims),
+        "ready_for_checker": results.ready_for_checker,
+        "recommended_next_action": results.recommended_next_action.value,
+        "warnings": results.warnings,
+        "agent_usage": [_usage_summary(usage) for usage in results.agent_usage],
+        "usage_totals": execution_usage_totals,
+        "sources_path": str(merged_search_path),
+        "extractions_path": str(merged_extraction_path),
+        "execution_path": str(execution_path),
+        "next_command": (
+            f".venv/bin/python -m datacollector check --extractions "
+            f"{merged_extraction_path} --iteration {iteration}"
+        ),
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _run_questions(args: argparse.Namespace) -> int:
     catalog = load_question_catalog()
     planner_input = PlannerInput(
@@ -1604,6 +2110,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_check(args)
         if args.command == "resolve":
             return _run_resolve(args)
+        if args.command == "execute":
+            return _run_execute(args)
         if args.command == "questions":
             return _run_questions(args)
     except (
@@ -1615,6 +2123,8 @@ def main(argv: list[str] | None = None) -> int:
         CheckerValidationError,
         ExtractorProviderError,
         ExtractorValidationError,
+        ExecutorProviderError,
+        ExecutorValidationError,
         SearcherProviderError,
         SearcherValidationError,
         ResolverProviderError,

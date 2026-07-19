@@ -537,6 +537,28 @@ class SearcherAgentTests(TestCase):
             any("Normalized 2 plan queries" in warning for warning in results.warnings)
         )
 
+    def test_resolver_query_override_is_the_exact_paid_search_workload(self):
+        llm = FakeSearcherLLM()
+        task = self.plan.tasks[0]
+        resolver_query = '"Żabka" aktualna umowa franczyzowa 2026'
+
+        results = SearcherAgent(llm).create_search_results(
+            self.plan,
+            plan_sha256="b" * 64,
+            plan_reference="/tmp/plan.json",
+            requested_task_ids=[task.task_id],
+            task_limit=1,
+            query_overrides={task.task_id: [resolver_query]},
+        )
+
+        sent_task = llm.calls[0][1][0]
+        self.assertEqual(sent_task.search_queries, [resolver_query])
+        self.assertEqual(results.task_results[0].planned_queries, [resolver_query])
+        self.assertEqual(
+            results.limits.query_overrides,
+            {task.task_id: [resolver_query]},
+        )
+
     def test_routing_metadata_is_refined_conservatively(self):
         self.assertEqual(
             _refine_source_type(

@@ -15,6 +15,7 @@ from typing import Iterator
 from ..schemas import (
     AgentFailureArtifact,
     CheckerResults,
+    ExecutorResults,
     ExtractionResults,
     ResearchPlan,
     ResolverResults,
@@ -121,7 +122,13 @@ def search_results_filename_for(iteration: int, *, offline: bool) -> str:
 def search_results_filename(results: SearchResults) -> str:
     return search_results_filename_for(
         results.iteration,
-        offline=results.generated_by == "offline",
+        offline=(
+            results.generated_by == "offline"
+            or (
+                results.generated_by == "executor"
+                and results.execution_mode == "free"
+            )
+        ),
     )
 
 
@@ -157,7 +164,13 @@ def extraction_results_filename_for(iteration: int, *, free: bool) -> str:
 def extraction_results_filename(results: ExtractionResults) -> str:
     return extraction_results_filename_for(
         results.iteration,
-        free=results.generated_by == "deterministic",
+        free=(
+            results.generated_by == "deterministic"
+            or (
+                results.generated_by == "executor"
+                and results.execution_mode == "free"
+            )
+        ),
     )
 
 
@@ -304,6 +317,55 @@ def save_resolver_results(
     )
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / resolver_results_filename(results)
+    rendered = (
+        json.dumps(
+            results.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    _write_immutable_text(result_path, rendered)
+    return result_path
+
+
+def executor_results_filename_for(iteration: int, *, free: bool) -> str:
+    stem = "execution" if iteration == 1 else f"execution-r{iteration:03d}"
+    if free:
+        stem = f"{stem}-free"
+    return f"{stem}.json"
+
+
+def executor_results_filename(results: ExecutorResults) -> str:
+    return executor_results_filename_for(
+        results.iteration,
+        free=results.execution_mode.value == "free",
+    )
+
+
+def load_executor_results(
+    path: Path | str,
+) -> tuple[ExecutorResults, str]:
+    """Load Executor manifest and return its exact input-byte SHA-256."""
+
+    executor_path = Path(path)
+    raw_executor = executor_path.read_bytes()
+    results = ExecutorResults.model_validate_json(raw_executor)
+    return results, hashlib.sha256(raw_executor).hexdigest()
+
+
+def save_executor_results(
+    results: ExecutorResults,
+    resolution_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> Path:
+    """Save beside the explicit Resolver output and never overwrite."""
+
+    directory = (
+        Path(output_dir) if output_dir is not None else Path(resolution_path).parent
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    result_path = directory / executor_results_filename(results)
     rendered = (
         json.dumps(
             results.model_dump(mode="json"),

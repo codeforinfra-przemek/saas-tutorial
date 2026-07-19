@@ -1,4 +1,4 @@
-# Franchise AI research loop — Planner + Searcher + Extractor + Checker + Resolver
+# Franchise AI research loop — Planner through Executor
 
 This is a standalone, local worker for auditable franchise research. It is kept
 outside Django intentionally: long-running and paid agent work must not execute
@@ -7,11 +7,12 @@ inside a web request. No result is written to the production `Franchise` model.
 The planned loop is:
 
 ```text
-Planner → Searcher → Extractor → Checker ↔ Resolver
+Planner → Searcher → Extractor → Checker ↔ Resolver → Executor → Checker
         → Normalizer → human review → Importer
 ```
 
-Planner, Searcher, Extractor, Checker and Resolver are implemented. Planner combines:
+Planner, Searcher, Extractor, Checker, Resolver and Executor are implemented.
+Planner combines:
 
 - a deterministic, versioned question catalog covering all 23 FTC FDD Items;
 - additional commercial, risk, state-law and unit-level due-diligence questions;
@@ -31,6 +32,9 @@ write production data.
 Resolver consumes a successful paid Checker artifact and turns only its unresolved
 fields into bounded execution batches for the next Searcher/Extractor round. It
 plans retrieval and research; it never claims that planned work has already run.
+Executor runs those exact batches through the existing workers, preserves
+predecessor lineage, deduplicates retrieval, and materializes merged Searcher and
+Extractor artifacts for a new Checker pass. Executor itself makes no model call.
 
 ## Setup
 
@@ -468,6 +472,66 @@ Searcher but has not yet been processed in the selected extraction scope. A new
 Checker pass is required after executing these batches; unresolved data cannot
 advance to Normalizer.
 
+## Run Executor: local comparison, then paid execution
+
+Executor consumes one exact Resolver artifact. It uses Resolver queries for
+`search_new_source`, never uses a stale cache entry for `retry_retrieval`, and
+reuses an eligible predecessor document for `reextract_existing` or
+`extract_known_source`. Every source is processed at most once even when several
+follow-ups reference it.
+
+Run the free comparison first against the paid Resolver strategy:
+
+```bash
+.venv/bin/python -m datacollector execute \
+  --resolution datacollector/data/runs/zabka/<run>/resolution-r005.json \
+  --free \
+  --iteration 6 \
+  --max-search-calls 10 \
+  --max-extractor-api-calls 20
+```
+
+Free execution performs bounded local retrieval and parsing, but no OpenAI web
+search or semantic extraction. Resolver search queries remain an explicit
+workload. Existing paid claims are not discarded merely because a free retry is
+inaccessible or cannot semantically replace them. It writes:
+
+```text
+sources-r006-free.json
+extractions-r006-free.json
+execution-r006-free.json
+```
+
+Then run the paid execution against the same immutable Resolver artifact:
+
+```bash
+.venv/bin/python -m datacollector execute \
+  --resolution datacollector/data/runs/zabka/<run>/resolution-r005.json \
+  --iteration 6 \
+  --max-search-calls 10 \
+  --max-extractor-api-calls 20
+```
+
+The paid variant invokes Searcher only for Resolver's `search_new_source` tasks
+and invokes Extractor once per eligible, deduplicated source up to the explicit
+cap. It writes the corresponding artifacts without `-free` and prints the exact
+next Checker command. `execution-r006.json` is the audit manifest: it records
+batch outcomes, retry/cache decisions, preserved predecessor states, pending
+human work, child-agent token usage, and exact hashes for every input and output.
+
+Run Checker on the paid merged extraction:
+
+```bash
+.venv/bin/python -m datacollector check \
+  --extractions datacollector/data/runs/zabka/<run>/extractions-r006.json \
+  --iteration 6
+```
+
+If Checker still returns `resolve_gaps`, create another Resolver/Executor round.
+If it passes the selected batch but reports `unevaluated_tasks`, research the next
+plan batch before Normalizer. Normalizer is allowed only after the required plan
+scope has passed or a human explicitly accepts documented gaps.
+
 ## Token and cost accounting
 
 Every successful OpenAI call records one `agent_usage` entry in the artifact
@@ -517,6 +581,11 @@ Resolver records at most one `agent_usage` entry and has no tool calls. Its free
 variant has zero provider cost. The paid variant pays only for strategy and uses
 Structured Outputs; if the response is unusable, usage is retained while the
 deterministic plan remains available as `deterministic_fallback`.
+
+Executor has no independent provider usage or model charge. Its manifest contains
+only the current child Searcher and Extractor usage, so `usage_totals` is the real
+incremental cost of that execution rather than a cumulative re-count of inherited
+claims. The free manifest has zero tokens and tool cost.
 
 For GPT-5.6, Planner, Searcher, Extractor, Checker and Resolver disable the default
 implicit cache breakpoint for their one-off, brand-specific calls. Those payloads
