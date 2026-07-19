@@ -21,6 +21,7 @@ from datacollector.schemas import (
     ResolverAction,
     ResolverDraft,
     ResolverItemDraft,
+    ResolverResults,
     ResolverStrategySource,
     TokenUsage,
 )
@@ -289,6 +290,53 @@ class ResolverAgentTests(TestCase):
         self.assertEqual(len(results.agent_usage), 1)
         self.assertEqual(results.agent_usage[0].agent, "resolver")
         self.assertEqual(results.failed_attempts, [])
+
+    def test_usage_scope_allows_paid_work_item_reordering(self):
+        base = self._run(FixtureResolverLLM())
+        original = base.work_items[0].model_copy(update={"sequence": 2})
+        reordered = base.work_items[0].model_copy(
+            update={
+                "resolution_item_id": "resolution-item-aaaaaaaaaaaaaaaa",
+                "follow_up_id": "followup-bbbbbbbbbbbbbbbb",
+                "task_id": "task-second-fixture",
+                "sequence": 1,
+            }
+        )
+        work_items = [reordered, original]
+        usage = base.agent_usage[0].model_copy(
+            update={
+                "scope_task_ids": [original.task_id, reordered.task_id],
+            }
+        )
+        payload = base.model_dump(mode="python")
+        payload.update(
+            {
+                "selected_follow_up_ids": [
+                    item.follow_up_id for item in work_items
+                ],
+                "work_items": work_items,
+                "execution_batches": ResolverAgent._build_batches(work_items),
+                "execution_source_ids": list(
+                    dict.fromkeys(
+                        source_id
+                        for item in work_items
+                        for source_id in item.selected_source_ids
+                    )
+                ),
+                "agent_usage": [usage],
+            }
+        )
+
+        validated = ResolverResults.model_validate(payload)
+
+        self.assertEqual(
+            validated.agent_usage[0].scope_task_ids,
+            [original.task_id, reordered.task_id],
+        )
+        self.assertEqual(
+            [item.task_id for item in validated.work_items],
+            [reordered.task_id, original.task_id],
+        )
 
     def test_paid_failure_retains_deterministic_executable_fallback(self):
         results = self._run(FailingResolverLLM())

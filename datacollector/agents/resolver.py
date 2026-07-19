@@ -267,50 +267,68 @@ class ResolverAgent:
                 "Do not send unresolved data to Normalizer until a new Checker pass accepts it.",
             ]
         )
-        return ResolverResults(
-            resolution_id=str(uuid4()),
-            plan_run_id=plan.run_id,
-            search_id=search_results.search_id,
-            extraction_id=extraction_results.extraction_id,
-            check_id=checker_results.check_id,
-            plan_sha256=plan_sha256,
-            search_sha256=search_sha256,
-            extraction_sha256=extraction_sha256,
-            check_sha256=check_sha256,
-            plan_reference=plan_reference or checker_results.plan_reference,
-            search_reference=search_reference or checker_results.search_reference,
-            extraction_reference=(
+        result_payload = {
+            "resolution_id": str(uuid4()),
+            "plan_run_id": plan.run_id,
+            "search_id": search_results.search_id,
+            "extraction_id": extraction_results.extraction_id,
+            "check_id": checker_results.check_id,
+            "plan_sha256": plan_sha256,
+            "search_sha256": search_sha256,
+            "extraction_sha256": extraction_sha256,
+            "check_sha256": check_sha256,
+            "plan_reference": plan_reference or checker_results.plan_reference,
+            "search_reference": search_reference or checker_results.search_reference,
+            "extraction_reference": (
                 extraction_reference or checker_results.extraction_reference
             ),
-            check_reference=check_reference,
-            created_at=datetime.now(timezone.utc),
-            iteration=resolved_iteration,
-            generated_by=generated_by,
-            strategy_source=strategy_source,
-            model=model,
-            provider_executed=provider_executed,
-            brand_name=plan.planner_input.brand_name,
-            target_country=plan.planner_input.target_country,
-            depth=plan.planner_input.depth,
-            limits=limits,
-            available_source_ids=available_source_ids,
-            selected_follow_up_ids=selected_follow_up_ids,
-            deferred_follow_up_ids=deferred_follow_up_ids,
-            work_items=work_items,
-            execution_batches=execution_batches,
-            execution_source_ids=execution_source_ids,
-            search_task_ids=search_task_ids,
-            ready_for_execution=bool(work_items),
-            recommended_next_action=(
+            "check_reference": check_reference,
+            "created_at": datetime.now(timezone.utc),
+            "iteration": resolved_iteration,
+            "generated_by": generated_by,
+            "strategy_source": strategy_source,
+            "model": model,
+            "provider_executed": provider_executed,
+            "brand_name": plan.planner_input.brand_name,
+            "target_country": plan.planner_input.target_country,
+            "depth": plan.planner_input.depth,
+            "limits": limits,
+            "available_source_ids": available_source_ids,
+            "selected_follow_up_ids": selected_follow_up_ids,
+            "deferred_follow_up_ids": deferred_follow_up_ids,
+            "work_items": work_items,
+            "execution_batches": execution_batches,
+            "execution_source_ids": execution_source_ids,
+            "search_task_ids": search_task_ids,
+            "ready_for_execution": bool(work_items),
+            "recommended_next_action": (
                 ResolverNextAction.EXECUTE_RESOLUTION
                 if work_items
                 else ResolverNextAction.HUMAN_REVIEW
             ),
-            warnings=warnings,
-            compliance_rules=compliance_rules,
-            agent_usage=usage,
-            failed_attempts=failed_attempts,
-        )
+            "warnings": warnings,
+            "compliance_rules": compliance_rules,
+            "agent_usage": usage,
+            "failed_attempts": failed_attempts,
+        }
+        try:
+            return ResolverResults.model_validate(result_payload)
+        except ValueError:
+            if generated_by == "openai":
+                raise ResolverProviderError(
+                    "Paid Resolver result failed final local artifact validation.",
+                    code="invalid_resolver_artifact",
+                    usage=usage[0] if usage else None,
+                    iteration=resolved_iteration,
+                    call_index=1,
+                    scope_task_ids=scope_task_ids,
+                    scope_source_ids=available_source_ids,
+                    requested_model=model,
+                    failed_attempts=failed_attempts,
+                ) from None
+            raise ResolverValidationError(
+                "Deterministic Resolver result failed final artifact validation."
+            ) from None
 
     @staticmethod
     def _available_source_ids(

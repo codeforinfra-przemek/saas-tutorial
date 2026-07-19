@@ -3112,7 +3112,8 @@ class ResolverResults(ClosedModel):
             usage.agent != "resolver"
             or usage.iteration != self.iteration
             or usage.call_index != 1
-            or usage.scope_task_ids != expected_scope_task_ids
+            or len(usage.scope_task_ids) != len(expected_scope_task_ids)
+            or set(usage.scope_task_ids) != set(expected_scope_task_ids)
             or usage.scope_source_ids != self.available_source_ids
             or usage.tool_usage
             for usage in self.agent_usage
@@ -3122,7 +3123,8 @@ class ResolverResults(ClosedModel):
             failure = self.failed_attempts[0]
             usage_recorded = bool(self.agent_usage)
             if (
-                failure.scope_task_ids != expected_scope_task_ids
+                len(failure.scope_task_ids) != len(expected_scope_task_ids)
+                or set(failure.scope_task_ids) != set(expected_scope_task_ids)
                 or failure.scope_source_ids != self.available_source_ids
                 or failure.usage_recorded != usage_recorded
                 or failure.token_usage_unknown == usage_recorded

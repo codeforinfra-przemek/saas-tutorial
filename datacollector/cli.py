@@ -1366,6 +1366,41 @@ def _save_resolver_failure_ledger(results, reference_path: Path) -> Path:
     return save_agent_failure(failure, reference_path)
 
 
+def _save_resolver_provider_failure(
+    exc: ResolverProviderError,
+    *,
+    plan_run_id: str,
+    reference_path: Path,
+    iteration: int,
+    requested_model: str,
+) -> Path:
+    """Persist Resolver usage when failure happens before a final result exists."""
+
+    usage = exc.usage
+    failure = AgentFailureArtifact(
+        failure_id=str(uuid4()),
+        plan_run_id=plan_run_id,
+        created_at=datetime.now(timezone.utc),
+        error_code=exc.code,
+        agent="resolver",
+        iteration=exc.iteration or iteration,
+        call_index=exc.call_index or 1,
+        scope_task_ids=(
+            usage.scope_task_ids if usage is not None else exc.scope_task_ids
+        ),
+        scope_source_ids=(
+            usage.scope_source_ids if usage is not None else exc.scope_source_ids
+        ),
+        provider=usage.provider if usage is not None else "openai",
+        requested_model=requested_model,
+        usage=usage,
+        observed_tool_calls=0,
+        tool_usage=[],
+        token_usage_unknown=usage is None,
+    )
+    return save_agent_failure(failure, reference_path)
+
+
 def _run_resolve(args: argparse.Namespace) -> int:
     checker_results, check_sha256 = load_checker_results(args.check)
     extraction_path = args.extractions or Path(
@@ -1392,25 +1427,59 @@ def _run_resolve(args: argparse.Namespace) -> int:
             if args.model:
                 settings = replace(settings, model=args.model)
             llm = OpenAIResolverClient(settings)
-        results = ResolverAgent(llm).create_resolution_results(
-            plan,
-            search_results,
-            extraction_results,
-            checker_results,
-            plan_sha256=plan_sha256,
-            search_sha256=search_sha256,
-            extraction_sha256=extraction_sha256,
-            check_sha256=check_sha256,
-            check_reference=str(args.check.resolve()),
-            plan_reference=str(plan_path.resolve()),
-            search_reference=str(search_path.resolve()),
-            extraction_reference=str(extraction_path.resolve()),
-            iteration=iteration,
-            max_follow_ups=args.max_follow_ups,
-            max_source_actions=args.max_source_actions,
-            max_search_tasks=args.max_search_tasks,
-            max_queries_per_item=args.max_queries_per_item,
-        )
+        try:
+            results = ResolverAgent(llm).create_resolution_results(
+                plan,
+                search_results,
+                extraction_results,
+                checker_results,
+                plan_sha256=plan_sha256,
+                search_sha256=search_sha256,
+                extraction_sha256=extraction_sha256,
+                check_sha256=check_sha256,
+                check_reference=str(args.check.resolve()),
+                plan_reference=str(plan_path.resolve()),
+                search_reference=str(search_path.resolve()),
+                extraction_reference=str(extraction_path.resolve()),
+                iteration=iteration,
+                max_follow_ups=args.max_follow_ups,
+                max_source_actions=args.max_source_actions,
+                max_search_tasks=args.max_search_tasks,
+                max_queries_per_item=args.max_queries_per_item,
+            )
+        except ResolverProviderError as exc:
+            requested_model = (
+                llm.model_name if llm is not None else exc.requested_model
+            )
+            if requested_model is None:
+                raise
+            ledger_note = ""
+            try:
+                failure_path = _save_resolver_provider_failure(
+                    exc,
+                    plan_run_id=plan.run_id,
+                    reference_path=args.check,
+                    iteration=iteration,
+                    requested_model=requested_model,
+                )
+            except Exception as ledger_exc:
+                ledger_note = (
+                    " Resolver failure ledger also failed with "
+                    f"{type(ledger_exc).__name__}."
+                )
+            else:
+                ledger_note = f" Provider usage saved to: {failure_path}."
+            raise ResolverProviderError(
+                f"{exc}{ledger_note}",
+                code=exc.code,
+                usage=exc.usage,
+                iteration=exc.iteration or iteration,
+                call_index=exc.call_index or 1,
+                scope_task_ids=exc.scope_task_ids,
+                scope_source_ids=exc.scope_source_ids,
+                requested_model=requested_model,
+                failed_attempts=exc.failed_attempts,
+            ) from None
         try:
             results_path = save_resolver_results(
                 results,
