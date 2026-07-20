@@ -161,6 +161,10 @@ def extraction_results_filename_for(iteration: int, *, free: bool) -> str:
     return f"{stem}.json"
 
 
+def reconciled_extraction_results_filename_for(iteration: int) -> str:
+    return f"extractions-r{iteration:03d}-reconciled.json"
+
+
 def extraction_results_filename(results: ExtractionResults) -> str:
     return extraction_results_filename_for(
         results.iteration,
@@ -219,6 +223,36 @@ def save_extraction_results(
     directory = Path(output_dir) if output_dir is not None else Path(search_path).parent
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / extraction_results_filename(results)
+    rendered = (
+        json.dumps(
+            results.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    _write_immutable_text(result_path, rendered)
+    return result_path
+
+
+def save_reconciled_extraction_results(
+    results: ExtractionResults,
+    current_extraction_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> Path:
+    """Save an offline repair beside its source without overwriting history."""
+
+    if results.reconciled_from_extraction_id is None:
+        raise ValueError("Reconciled extraction is missing repair lineage.")
+    directory = (
+        Path(output_dir)
+        if output_dir is not None
+        else Path(current_extraction_path).parent
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    result_path = directory / reconciled_extraction_results_filename_for(
+        results.iteration
+    )
     rendered = (
         json.dumps(
             results.model_dump(mode="json"),

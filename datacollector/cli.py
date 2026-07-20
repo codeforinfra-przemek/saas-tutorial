@@ -54,6 +54,7 @@ from .storage.json_store import (
     checker_results_filename_for,
     executor_results_filename_for,
     extraction_results_filename_for,
+    reconciled_extraction_results_filename_for,
     load_extraction_results,
     load_checker_results,
     load_research_plan,
@@ -64,6 +65,7 @@ from .storage.json_store import (
     save_agent_failure,
     save_checker_results,
     save_extraction_results,
+    save_reconciled_extraction_results,
     save_executor_results,
     save_research_plan,
     save_resolver_results,
@@ -563,6 +565,45 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         help="Artifact directory; defaults to the Resolver directory.",
+    )
+
+    reconcile_parser = subparsers.add_parser(
+        "reconcile",
+        help=(
+            "Repair an existing Executor extraction merge offline while preserving "
+            "both input artifacts."
+        ),
+    )
+    reconcile_parser.add_argument(
+        "--extractions",
+        type=Path,
+        required=True,
+        help="Current Executor extraction artifact to reconcile.",
+    )
+    reconcile_parser.add_argument(
+        "--prior-extractions",
+        type=Path,
+        help="Exact predecessor extraction; defaults to current artifact lineage.",
+    )
+    reconcile_parser.add_argument(
+        "--plan",
+        type=Path,
+        help="Exact plan artifact; defaults to current artifact lineage.",
+    )
+    reconcile_parser.add_argument(
+        "--sources",
+        type=Path,
+        help="Exact merged Searcher artifact; defaults to current artifact lineage.",
+    )
+    reconcile_parser.add_argument(
+        "--resolution",
+        type=Path,
+        help="Exact Resolver artifact; defaults to current artifact lineage.",
+    )
+    reconcile_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Artifact directory; defaults to current extraction directory.",
     )
 
     return parser
@@ -2067,6 +2108,114 @@ def _run_execute(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_reconcile(args: argparse.Namespace) -> int:
+    current, current_sha256 = load_extraction_results(args.extractions)
+    if current.generated_by != "executor":
+        raise ExecutorValidationError(
+            "Reconcile requires an Executor-generated extraction artifact."
+        )
+    required_references = (
+        current.plan_reference,
+        current.search_reference,
+        current.prior_extraction_reference,
+        current.resolution_reference,
+    )
+    if any(reference is None for reference in required_references):
+        raise ExecutorValidationError(
+            "Current extraction has incomplete Executor lineage."
+        )
+
+    plan_path = args.plan or Path(current.plan_reference)
+    search_path = args.sources or Path(current.search_reference)
+    prior_path = args.prior_extractions or Path(
+        current.prior_extraction_reference or ""
+    )
+    resolution_path = args.resolution or Path(current.resolution_reference or "")
+    plan, plan_sha256 = load_research_plan(plan_path)
+    merged_search, search_sha256 = load_search_results(search_path)
+    prior, prior_sha256 = load_extraction_results(prior_path)
+    resolution, resolution_sha256 = load_resolver_results(resolution_path)
+
+    result_directory = args.output_dir or args.extractions.parent
+    if (
+        any(document.content_path for document in [*prior.documents, *current.documents])
+        and result_directory.resolve() != args.extractions.parent.resolve()
+    ):
+        raise ExecutorValidationError(
+            "Reconciliation output directory must match the current extraction "
+            "directory while raw-document snapshots are referenced."
+        )
+    expected_path = result_directory / reconciled_extraction_results_filename_for(
+        current.iteration
+    )
+    with reserve_artifact(expected_path):
+        reconciled = ExecutorAgent.reconcile_extraction(
+            plan,
+            merged_search,
+            prior,
+            current,
+            resolution,
+            plan_sha256=plan_sha256,
+            merged_search_sha256=search_sha256,
+            prior_extraction_sha256=prior_sha256,
+            current_extraction_sha256=current_sha256,
+            resolution_sha256=resolution_sha256,
+            plan_reference=str(plan_path.resolve()),
+            merged_search_reference=str(search_path.resolve()),
+            prior_extraction_reference=str(prior_path.resolve()),
+            current_extraction_reference=str(args.extractions.resolve()),
+            resolution_reference=str(resolution_path.resolve()),
+        )
+        reconciled_path = save_reconciled_extraction_results(
+            reconciled,
+            args.extractions,
+            output_dir=result_directory,
+        )
+    _, reconciled_sha256 = load_extraction_results(reconciled_path)
+
+    prior_claim_ids = {claim.claim_id for claim in prior.claims}
+    current_claim_ids = {claim.claim_id for claim in current.claims}
+    reconciled_claim_ids = {claim.claim_id for claim in reconciled.claims}
+    restored_claim_ids = sorted(
+        (prior_claim_ids - current_claim_ids) & reconciled_claim_ids
+    )
+    unknown_usage = any(
+        attempt.token_usage_unknown for attempt in current.failed_attempts
+    )
+    summary = {
+        "reconciliation_mode": "offline_deterministic",
+        "iteration": reconciled.iteration,
+        "current_extraction_id": current.extraction_id,
+        "current_extraction_sha256": current_sha256,
+        "prior_extraction_id": prior.extraction_id,
+        "prior_extraction_sha256": prior_sha256,
+        "reconciled_extraction_id": reconciled.extraction_id,
+        "reconciled_extraction_sha256": reconciled_sha256,
+        "claims_before": len(current.claims),
+        "claims_after": len(reconciled.claims),
+        "restored_predecessor_claims": len(restored_claim_ids),
+        "restored_predecessor_claim_ids": restored_claim_ids,
+        "reconciliation_api_calls": 0,
+        "reconciliation_network_calls": 0,
+        "reconciliation_cost_usd": "0",
+        "inherited_extractor_usage_from_current_artifact": _usage_totals(
+            current.agent_usage,
+            failed_call_indices=[
+                attempt.call_index for attempt in current.failed_attempts
+            ],
+            has_unknown_token_usage=unknown_usage,
+        ),
+        "warnings": reconciled.warnings,
+        "extractions_path": str(reconciled_path),
+        "next_command": (
+            f".venv/bin/python -m datacollector check --extractions "
+            f"{reconciled_path} --iteration {reconciled.iteration}"
+        ),
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _run_questions(args: argparse.Namespace) -> int:
     catalog = load_question_catalog()
     planner_input = PlannerInput(
@@ -2114,6 +2263,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_resolve(args)
         if args.command == "execute":
             return _run_execute(args)
+        if args.command == "reconcile":
+            return _run_reconcile(args)
         if args.command == "questions":
             return _run_questions(args)
     except (

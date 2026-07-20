@@ -279,6 +279,10 @@ class ExecutorStorageTests(TestCase):
             "execution-r006.json",
         )
         self.assertEqual(
+            json_store.reconciled_extraction_results_filename_for(10),
+            "extractions-r010-reconciled.json",
+        )
+        self.assertEqual(
             json_store.search_results_filename(
                 SimpleNamespace(
                     iteration=6,

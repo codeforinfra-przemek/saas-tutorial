@@ -18,8 +18,11 @@ from ..schemas import (
     ExecutorMode,
     ExecutorNextAction,
     ExecutorResults,
+    EvidencePassage,
+    ExtractionCitation,
     ExtractionResults,
     ExtractionSemanticScope,
+    RawExtractionClaim,
     ResearchPlan,
     ResolverAction,
     ResolverResults,
@@ -30,6 +33,7 @@ from ..schemas import (
     SearchSourceOrigin,
     SearchTaskResult,
     SearchTaskStatus,
+    SourceDocument,
 )
 from .extractor import (
     DEFAULT_MAX_DOCUMENT_BYTES,
@@ -81,6 +85,12 @@ def _artifact_sha256(value) -> str:
     return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
+def _stable_id(prefix: str, *parts: object) -> str:
+    material = "\x1f".join(str(part) for part in parts)
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}-{digest}"
+
+
 def _claim_source_ids(extraction: ExtractionResults, claim) -> set[str]:
     citation_by_id = {
         citation.citation_id: citation for citation in extraction.citations
@@ -107,6 +117,156 @@ def _successful_semantic_scopes(
         for source_id in _claim_source_ids(extraction, claim):
             scopes.add((claim.task_id, source_id))
     return scopes
+
+
+def _claim_semantic_key(extraction: ExtractionResults, claim) -> tuple:
+    return (
+        claim.task_id,
+        claim.target_field,
+        claim.value_text,
+        tuple(sorted(_claim_source_ids(extraction, claim))),
+    )
+
+
+def _find_rebased_quote_start(
+    document: SourceDocument,
+    citation: ExtractionCitation,
+) -> int | None:
+    starts: list[int] = []
+    offset = 0
+    while True:
+        start = document.text.find(citation.quote, offset)
+        if start < 0:
+            break
+        starts.append(start)
+        offset = start + 1
+    if not starts:
+        return None
+    return min(starts, key=lambda start: abs(start - citation.start_char))
+
+
+def _rebase_additive_claims(
+    prior: ExtractionResults,
+    delta: ExtractionResults,
+    additive_source_ids: set[str],
+    merged_document_by_source: dict[str, SourceDocument],
+) -> tuple[
+    list[EvidencePassage],
+    list[ExtractionCitation],
+    list[RawExtractionClaim],
+    int,
+]:
+    """Ground new same-content claims in predecessor documents.
+
+    Prior claims keep their stable IDs so Checker history remains usable. New
+    claims are added only when their exact quotes still occur in the immutable
+    predecessor parse selected for the merged artifact.
+    """
+
+    delta_citation_by_id = {
+        citation.citation_id: citation for citation in delta.citations
+    }
+    prior_semantic_keys = {
+        _claim_semantic_key(prior, claim) for claim in prior.claims
+    }
+    passages: list[EvidencePassage] = []
+    citations: list[ExtractionCitation] = []
+    claims: list[RawExtractionClaim] = []
+    discarded = 0
+
+    for claim in delta.claims:
+        claim_citations = [
+            delta_citation_by_id[citation_id]
+            for citation_id in claim.citation_ids
+            if citation_id in delta_citation_by_id
+        ]
+        source_ids = {citation.source_id for citation in claim_citations}
+        if (
+            not claim_citations
+            or len(claim_citations) != len(claim.citation_ids)
+            or not source_ids
+            or not source_ids.issubset(additive_source_ids)
+        ):
+            continue
+        semantic_key = (
+            claim.task_id,
+            claim.target_field,
+            claim.value_text,
+            tuple(sorted(source_ids)),
+        )
+        if semantic_key in prior_semantic_keys:
+            continue
+
+        rebased_citations: list[ExtractionCitation] = []
+        rebased_passages: list[EvidencePassage] = []
+        for citation in claim_citations:
+            document = merged_document_by_source.get(citation.source_id)
+            if document is None or claim.task_id not in document.task_ids:
+                break
+            start = _find_rebased_quote_start(document, citation)
+            if start is None:
+                break
+            end = start + len(citation.quote)
+            passage_id = _stable_id(
+                "passage", document.document_id, claim.task_id, start, end
+            )
+            locator = f"chars:{start}-{end}"
+            rebased_passages.append(
+                EvidencePassage(
+                    passage_id=passage_id,
+                    document_id=document.document_id,
+                    source_id=document.source_id,
+                    task_id=claim.task_id,
+                    start_char=start,
+                    end_char=end,
+                    locator=locator,
+                    text=citation.quote,
+                    matched_terms=[],
+                )
+            )
+            rebased_citations.append(
+                ExtractionCitation(
+                    citation_id=_stable_id(
+                        "citation",
+                        passage_id,
+                        document.document_id,
+                        start,
+                        end,
+                        citation.quote,
+                    ),
+                    passage_id=passage_id,
+                    document_id=document.document_id,
+                    source_id=document.source_id,
+                    text_sha256=document.text_sha256 or "",
+                    quote=citation.quote,
+                    start_char=start,
+                    end_char=end,
+                    locator=locator,
+                )
+            )
+        else:
+            citation_ids = [item.citation_id for item in rebased_citations]
+            passages.extend(rebased_passages)
+            citations.extend(rebased_citations)
+            claims.append(
+                claim.model_copy(
+                    update={
+                        "claim_id": _stable_id(
+                            "claim",
+                            claim.task_id,
+                            claim.target_field,
+                            claim.value_text,
+                            *citation_ids,
+                        ),
+                        "citation_ids": citation_ids,
+                    }
+                )
+            )
+            prior_semantic_keys.add(semantic_key)
+            continue
+        discarded += 1
+
+    return passages, citations, claims, discarded
 
 
 class ExecutorAgent:
@@ -302,6 +462,7 @@ class ExecutorAgent:
                     cached_document_origin=(
                         "the exact predecessor Extractor artifact recorded by Executor"
                     ),
+                    trust_cached_document_ids=True,
                 )
             except ExtractorProviderError as exc:
                 raise ExecutorProviderError(
@@ -499,6 +660,77 @@ class ExecutorAgent:
             agent_usage=agent_usage,
         )
         return merged_search, merged_extraction, results
+
+    @staticmethod
+    def reconcile_extraction(
+        plan: ResearchPlan,
+        merged_search: SearchResults,
+        prior: ExtractionResults,
+        current: ExtractionResults,
+        resolution: ResolverResults,
+        *,
+        plan_sha256: str,
+        merged_search_sha256: str,
+        prior_extraction_sha256: str,
+        current_extraction_sha256: str,
+        resolution_sha256: str,
+        plan_reference: str,
+        merged_search_reference: str,
+        prior_extraction_reference: str,
+        current_extraction_reference: str,
+        resolution_reference: str,
+    ) -> ExtractionResults:
+        """Repair an existing Executor merge without new external work."""
+
+        if current.generated_by != "executor":
+            raise ExecutorValidationError(
+                "Only an Executor extraction artifact can be reconciled."
+            )
+        if current.reconciled_from_extraction_id is not None:
+            raise ExecutorValidationError(
+                "The supplied extraction is already a reconciliation artifact."
+            )
+        if (
+            current.plan_run_id != plan.run_id
+            or current.plan_sha256 != plan_sha256
+            or current.search_id != merged_search.search_id
+            or current.search_sha256 != merged_search_sha256
+            or current.prior_extraction_id != prior.extraction_id
+            or current.prior_extraction_sha256 != prior_extraction_sha256
+            or current.resolution_id != resolution.resolution_id
+            or current.resolution_sha256 != resolution_sha256
+        ):
+            raise ExecutorValidationError(
+                "Reconciliation inputs do not match the current artifact lineage."
+            )
+        try:
+            execution_mode = ExecutorMode(current.execution_mode)
+        except (TypeError, ValueError) as exc:
+            raise ExecutorValidationError(
+                "Current Executor extraction has an invalid execution mode."
+            ) from exc
+
+        return ExecutorAgent._merge_extraction(
+            plan,
+            merged_search,
+            prior,
+            current,
+            process_source_ids=current.processed_source_ids,
+            plan_sha256=plan_sha256,
+            merged_search_sha256=merged_search_sha256,
+            plan_reference=plan_reference,
+            merged_search_reference=merged_search_reference,
+            prior_extraction_sha256=prior_extraction_sha256,
+            prior_extraction_reference=prior_extraction_reference,
+            resolution=resolution,
+            resolution_sha256=resolution_sha256,
+            resolution_reference=resolution_reference,
+            execution_mode=execution_mode,
+            iteration=current.iteration,
+            reconciled_from_extraction_id=current.extraction_id,
+            reconciled_from_extraction_sha256=current_extraction_sha256,
+            reconciled_from_extraction_reference=current_extraction_reference,
+        )
 
     @staticmethod
     def _merge_search(
@@ -709,6 +941,9 @@ class ExecutorAgent:
         resolution_reference: str,
         execution_mode: ExecutorMode,
         iteration: int,
+        reconciled_from_extraction_id: str | None = None,
+        reconciled_from_extraction_sha256: str | None = None,
+        reconciled_from_extraction_reference: str | None = None,
     ) -> ExtractionResults:
         processed = set(process_source_ids)
         delta_document_by_source = {
@@ -743,6 +978,7 @@ class ExecutorAgent:
             )
         }
         replacement_source_ids: set[str] = set()
+        additive_same_content_source_ids: set[str] = set()
         for source_id in process_source_ids:
             delta_document = delta_document_by_source.get(source_id)
             if delta_document is None:
@@ -760,7 +996,15 @@ class ExecutorAgent:
                     or source.source_type.value == "routing_lead"
                 )
             ):
-                replacement_source_ids.add(source_id)
+                prior_document = prior_document_by_source[source_id]
+                if (
+                    prior_document.content_sha256 is not None
+                    and prior_document.content_sha256
+                    == delta_document.content_sha256
+                ):
+                    additive_same_content_source_ids.add(source_id)
+                else:
+                    replacement_source_ids.add(source_id)
         preserved_processed_source_ids = [
             source_id
             for source_id in process_source_ids
@@ -779,6 +1023,9 @@ class ExecutorAgent:
             )
             for source_id in selected_source_ids
         ]
+        merged_document_by_source = {
+            document.source_id: document for document in documents
+        }
         inherited_source_ids = [
             source_id for source_id in selected_source_ids if source_id not in processed
         ]
@@ -803,35 +1050,69 @@ class ExecutorAgent:
             for claim in prior.claims
             if set(claim.citation_ids).issubset(kept_citation_ids)
         ]
-        passages = [
-            *kept_passages,
-            *(
-                passage
-                for passage in (delta.evidence_passages if delta else [])
-                if passage.source_id in replacement_source_ids
-            ),
+        direct_delta_passages = [
+            passage
+            for passage in (delta.evidence_passages if delta else [])
+            if passage.source_id in replacement_source_ids
         ]
-        citations = [
-            *kept_citations,
-            *(
-                citation
-                for citation in (delta.citations if delta else [])
-                if citation.source_id in replacement_source_ids
-            ),
-        ]
-        delta_kept_citation_ids = {
-            citation.citation_id
-            for citation in citations
+        direct_delta_citations = [
+            citation
+            for citation in (delta.citations if delta else [])
             if citation.source_id in replacement_source_ids
-        }
-        claims = [
-            *kept_claims,
-            *(
-                claim
-                for claim in (delta.claims if delta else [])
-                if set(claim.citation_ids).issubset(delta_kept_citation_ids)
-            ),
         ]
+        direct_delta_citation_ids = {
+            citation.citation_id for citation in direct_delta_citations
+        }
+        direct_delta_claims = [
+            claim
+            for claim in (delta.claims if delta else [])
+            if set(claim.citation_ids).issubset(direct_delta_citation_ids)
+        ]
+        (
+            rebased_passages,
+            rebased_citations,
+            rebased_claims,
+            discarded_rebased_claims,
+        ) = (
+            _rebase_additive_claims(
+                prior,
+                delta,
+                additive_same_content_source_ids,
+                merged_document_by_source,
+            )
+            if delta is not None and additive_same_content_source_ids
+            else ([], [], [], 0)
+        )
+        passages = list(
+            {
+                passage.passage_id: passage
+                for passage in [
+                    *kept_passages,
+                    *direct_delta_passages,
+                    *rebased_passages,
+                ]
+            }.values()
+        )
+        citations = list(
+            {
+                citation.citation_id: citation
+                for citation in [
+                    *kept_citations,
+                    *direct_delta_citations,
+                    *rebased_citations,
+                ]
+            }.values()
+        )
+        claims = list(
+            {
+                claim.claim_id: claim
+                for claim in [
+                    *kept_claims,
+                    *direct_delta_claims,
+                    *rebased_claims,
+                ]
+            }.values()
+        )
         selected_task_id_set = {
             task_id for document in documents for task_id in document.task_ids
         }
@@ -852,7 +1133,8 @@ class ExecutorAgent:
             semantic_scopes |= {
                 scope
                 for scope in _successful_semantic_scopes(delta)
-                if scope[1] in replacement_source_ids
+                if scope[1]
+                in (replacement_source_ids | additive_same_content_source_ids)
             }
         task_results = ExtractorAgent._build_task_results(
             selected_tasks,
@@ -870,7 +1152,7 @@ class ExecutorAgent:
             )
         )
         return ExtractionResults(
-            schema_version="1.1.0",
+            schema_version="1.2.0",
             extraction_id=str(uuid4()),
             plan_run_id=plan.run_id,
             search_id=merged_search.search_id,
@@ -889,6 +1171,13 @@ class ExecutorAgent:
             prior_extraction_id=prior.extraction_id,
             prior_extraction_sha256=prior_extraction_sha256,
             prior_extraction_reference=prior_extraction_reference,
+            reconciled_from_extraction_id=reconciled_from_extraction_id,
+            reconciled_from_extraction_sha256=(
+                reconciled_from_extraction_sha256
+            ),
+            reconciled_from_extraction_reference=(
+                reconciled_from_extraction_reference
+            ),
             inherited_source_ids=inherited_source_ids,
             processed_source_ids=[
                 source_id for source_id in selected_source_ids if source_id in processed
@@ -921,13 +1210,41 @@ class ExecutorAgent:
             warnings=_deduplicate(
                 [
                     "Merged predecessor extraction with current Resolver execution; "
-                    "only usable paid semantic replacements supersede prior evidence.",
+                    "changed content may supersede prior evidence, while identical "
+                    "raw content is merged additively.",
+                    *(
+                        [
+                            "Preserved checked predecessor evidence and added newly "
+                            "grounded claims for "
+                            f"{len(additive_same_content_source_ids)} source(s) with "
+                            "identical raw content."
+                        ]
+                        if additive_same_content_source_ids
+                        else []
+                    ),
+                    *(
+                        [
+                            "Discarded "
+                            f"{discarded_rebased_claims} additive claim(s) because "
+                            "their exact quotes were absent from the preserved parse."
+                        ]
+                        if discarded_rebased_claims
+                        else []
+                    ),
+                    *(
+                        [
+                            "Offline reconciliation materialized a new immutable "
+                            "artifact; it made no provider or network calls."
+                        ]
+                        if reconciled_from_extraction_id is not None
+                        else []
+                    ),
                     *(
                         [
                             "Preserved predecessor evidence for "
                             f"{len(preserved_processed_source_ids)} processed "
-                            "source(s) because free mode or the new result was not "
-                            "a usable semantic replacement."
+                            "source(s) because free mode, an unusable replacement, "
+                            "or identical raw content made preservation preferable."
                         ]
                         if preserved_processed_source_ids
                         else []

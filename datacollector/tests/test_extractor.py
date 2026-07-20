@@ -536,6 +536,31 @@ class ExtractorAgentTests(TestCase):
             any("prior free Extractor" in item for item in cached_results.warnings)
         )
 
+    def test_trusted_predecessor_cache_is_not_bound_to_new_search_uuid(self):
+        source = self._source()
+        first_search = self._search_results([source])
+        first_results, _ = self._run(
+            [source],
+            search_results=first_search,
+        )
+        next_search = first_search.model_copy(
+            update={"search_id": str(uuid4())}
+        )
+        never_fetcher = NeverFetcher()
+
+        cached_results, _ = self._run(
+            [source],
+            fetcher=never_fetcher,
+            search_results=next_search,
+            cached_documents=first_results.documents,
+            trust_cached_document_ids=True,
+            cached_document_origin="the exact validated predecessor artifact",
+        )
+
+        self.assertEqual(never_fetcher.calls, [])
+        self.assertEqual(cached_results.documents, first_results.documents)
+        self.assertFalse(cached_results.network_executed)
+
     def test_failed_free_document_is_retried_instead_of_cached_for_paid_mode(self):
         source = self._source()
         search_results = self._search_results([source])

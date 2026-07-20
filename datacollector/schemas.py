@@ -26,7 +26,7 @@ SCHEMA_VERSION = "1.2.0"
 PROMPT_VERSION = "planner-system-v2"
 SEARCHER_SCHEMA_VERSION = "1.1.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v3"
-EXTRACTOR_SCHEMA_VERSION = "1.0.0"
+EXTRACTOR_SCHEMA_VERSION = "1.2.0"
 EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
 CHECKER_SCHEMA_VERSION = "1.2.0"
 CHECKER_PROMPT_VERSION = "checker-system-v3"
@@ -1763,7 +1763,7 @@ class ExtractionSemanticScope(ClosedModel):
 class ExtractionResults(ClosedModel):
     """Auditable raw extraction artifact consumed later by Checker."""
 
-    schema_version: Literal["1.0.0", "1.1.0"] = EXTRACTOR_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = EXTRACTOR_SCHEMA_VERSION
     prompt_version: str = EXTRACTOR_PROMPT_VERSION
     extraction_id: str
     plan_run_id: str
@@ -1787,6 +1787,11 @@ class ExtractionResults(ClosedModel):
         default=None, pattern=r"^[a-f0-9]{64}$"
     )
     prior_extraction_reference: str | None = None
+    reconciled_from_extraction_id: str | None = None
+    reconciled_from_extraction_sha256: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    reconciled_from_extraction_reference: str | None = None
     inherited_source_ids: list[str] = Field(default_factory=list)
     processed_source_ids: list[str] = Field(default_factory=list)
     preserved_processed_source_ids: list[str] = Field(default_factory=list)
@@ -1891,6 +1896,34 @@ class ExtractionResults(ClosedModel):
             raise ValueError(
                 "Only Executor extraction may materialize inherited semantic scopes."
             )
+
+        reconciliation_lineage = (
+            self.reconciled_from_extraction_id,
+            self.reconciled_from_extraction_sha256,
+            self.reconciled_from_extraction_reference,
+        )
+        if any(value is not None for value in reconciliation_lineage):
+            if (
+                self.generated_by != "executor"
+                or any(value is None for value in reconciliation_lineage)
+            ):
+                raise ValueError(
+                    "Extraction reconciliation requires complete Executor lineage."
+                )
+            try:
+                reconciled_id = UUID(self.reconciled_from_extraction_id or "")
+            except (ValueError, AttributeError) as exc:
+                raise ValueError(
+                    "reconciled_from_extraction_id must be a valid UUIDv4."
+                ) from exc
+            if reconciled_id.version != 4:
+                raise ValueError(
+                    "reconciled_from_extraction_id must be a valid UUIDv4."
+                )
+            if not (self.reconciled_from_extraction_reference or "").strip():
+                raise ValueError(
+                    "Reconciled extraction reference cannot be blank."
+                )
 
         document_ids = [item.document_id for item in self.documents]
         document_source_ids = [item.source_id for item in self.documents]

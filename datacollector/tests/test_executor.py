@@ -255,7 +255,15 @@ class ExecutorAgentTests(TestCase):
             all(usage.iteration == 5 for usage in execution.agent_usage)
         )
         self.assertTrue(execution.provider_executed)
-        self.assertEqual(execution.preserved_processed_source_ids, [])
+        self.assertEqual(
+            execution.preserved_processed_source_ids,
+            [self.search.sources[0].source_id],
+        )
+        self.assertTrue(
+            {claim.claim_id for claim in self.extraction.claims}.issubset(
+                {claim.claim_id for claim in merged_extraction.claims}
+            )
+        )
         self.assertEqual(
             execution.batch_results[0].status,
             ExecutorBatchStatus.COMPLETED,
@@ -269,6 +277,66 @@ class ExecutorAgentTests(TestCase):
         )
         self.assertFalse(
             any("prior free Extractor artifact" in warning for warning in execution.warnings)
+        )
+
+    def test_offline_reconciliation_records_current_lineage_and_adds_no_usage(self):
+        merged_search, current, _ = ExecutorAgent(
+            SearcherAgent(),
+            ExtractorAgent(
+                UnexpectedFetcher(),
+                checker_fixtures.FixtureExtractorLLM(),
+            ),
+        ).execute(
+            self.plan,
+            self.search,
+            self.extraction,
+            self.checker,
+            self.resolution,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            prior_search_sha256=checker_fixtures.SEARCH_SHA256,
+            prior_extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            check_sha256="d" * 64,
+            resolution_sha256="e" * 64,
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            prior_search_reference=checker_fixtures.SEARCH_REFERENCE,
+            prior_extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            check_reference="/fixtures/check-r004.json",
+            resolution_reference="/fixtures/resolution-r004.json",
+            merged_search_reference="/fixtures/sources-r005.json",
+            merged_extraction_reference="/fixtures/extractions-r005.json",
+            iteration=5,
+            execution_mode=ExecutorMode.PAID,
+        )
+
+        reconciled = ExecutorAgent.reconcile_extraction(
+            self.plan,
+            merged_search,
+            self.extraction,
+            current,
+            self.resolution,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            merged_search_sha256=current.search_sha256,
+            prior_extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            current_extraction_sha256="f" * 64,
+            resolution_sha256="e" * 64,
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            merged_search_reference="/fixtures/sources-r005.json",
+            prior_extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            current_extraction_reference="/fixtures/extractions-r005.json",
+            resolution_reference="/fixtures/resolution-r004.json",
+        )
+
+        self.assertEqual(
+            reconciled.reconciled_from_extraction_id,
+            current.extraction_id,
+        )
+        self.assertEqual(reconciled.reconciled_from_extraction_sha256, "f" * 64)
+        self.assertEqual(reconciled.agent_usage, current.agent_usage)
+        self.assertEqual(reconciled.failed_attempts, current.failed_attempts)
+        self.assertTrue(
+            {claim.claim_id for claim in self.extraction.claims}.issubset(
+                {claim.claim_id for claim in reconciled.claims}
+            )
         )
 
     def test_paid_search_batch_uses_resolver_query_and_adds_new_source(self):

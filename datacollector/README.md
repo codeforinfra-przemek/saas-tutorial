@@ -504,7 +504,11 @@ Executor consumes one exact Resolver artifact. It uses Resolver queries for
 `search_new_source`, never uses a stale cache entry for `retry_retrieval`, and
 reuses an eligible predecessor document for `reextract_existing` or
 `extract_known_source`. Every source is processed at most once even when several
-follow-ups reference it.
+follow-ups reference it. The exact, already validated predecessor cache is not
+tied to the newest Searcher UUID; URL, task mapping, status, size and content
+integrity checks still apply. When a paid result has the same raw-content hash,
+Executor preserves checked predecessor claims and merges newly grounded claims
+additively instead of silently replacing the evidence set.
 
 Run the free comparison first against the paid Resolver strategy:
 
@@ -546,6 +550,21 @@ batch outcomes, retry/cache decisions, preserved predecessor states, pending
 human work, child-agent token usage, and exact hashes for every input and output.
 Cache warnings distinguish a same-iteration free retrieval artifact from the
 exact predecessor artifact reused by Executor.
+
+If an older Executor artifact was created before additive same-content merging,
+repair it locally without repeating paid calls:
+
+```bash
+.venv/bin/python -m datacollector reconcile \
+  --extractions datacollector/data/runs/zabka/<run>/extractions-r010.json
+```
+
+The command verifies the exact plan, merged Searcher, Resolver and predecessor
+hashes recorded in lineage. It writes a separate immutable
+`extractions-r010-reconciled.json`, records both predecessor and repaired-current
+lineage, and reports zero reconciliation API/network calls and zero additional
+cost. Original provider usage remains in the repaired artifact because it
+describes the paid evidence being rematerialized; it is not a new charge.
 
 Run Checker on the paid merged extraction:
 

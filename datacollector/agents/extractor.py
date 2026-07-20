@@ -862,6 +862,7 @@ class ExtractorAgent:
         cached_documents: list[SourceDocument] | None = None,
         cached_document_search_id: str | None = None,
         cached_document_origin: str = "a prior Extractor artifact",
+        trust_cached_document_ids: bool = False,
     ) -> ExtractionResults:
         self._validate_inputs(
             plan,
@@ -914,6 +915,7 @@ class ExtractorAgent:
             search_id=(cached_document_search_id or search_results.search_id),
             max_document_bytes=max_document_bytes,
             max_document_chars=max_document_chars,
+            trust_document_ids=trust_cached_document_ids,
         )
         documents: list[SourceDocument] = []
         warnings = [f"Inherited Searcher warning: {item}" for item in search_results.warnings]
@@ -1322,6 +1324,7 @@ class ExtractorAgent:
         search_id: str,
         max_document_bytes: int,
         max_document_chars: int,
+        trust_document_ids: bool = False,
     ) -> dict[str, SourceDocument]:
         selected_by_id = {source.source_id: source for source in selected_sources}
         cache: dict[str, SourceDocument] = {}
@@ -1354,7 +1357,7 @@ class ExtractorAgent:
                 or document.parse_status == DocumentParseStatus.UNSUPPORTED
             )
             if (
-                document.document_id != expected_id
+                (not trust_document_ids and document.document_id != expected_id)
                 or document.canonical_url != source.canonical_url
                 or document.task_ids != source.task_ids
                 or not (parsed_reusable or terminal_reusable)
