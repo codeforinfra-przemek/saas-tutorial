@@ -239,8 +239,15 @@ class NormalizerAgentTests(TestCase):
     def test_paid_normalizer_groups_equivalent_claims_and_records_usage(self):
         results = self._run(FixtureNormalizerLLM(), mode=NormalizerMode.PAID)
 
+        self.assertEqual(results.schema_version, "1.1.0")
+        self.assertEqual(results.prompt_version, "normalizer-system-v2")
         self.assertEqual(results.strategy_source, NormalizerStrategySource.OPENAI)
         self.assertEqual(len(results.agent_usage), 1)
+        self.assertEqual(
+            results.repair_summary.accepted_provider_value_groups,
+            results.repair_summary.provider_value_groups,
+        )
+        self.assertEqual(results.repair_summary.repaired_provider_value_groups, 0)
         self.assertEqual(len(results.normalized_values), 7)
         self.assertTrue(
             all(
@@ -324,7 +331,7 @@ class NormalizerAgentTests(TestCase):
         self.assertEqual(results.failed_attempts[0].error_code, "invalid_claim_coverage")
         self.assertEqual(len(results.normalized_values), len(results.eligible_claim_ids))
 
-    def test_invalid_paid_typed_value_falls_back_and_preserves_usage(self):
+    def test_invalid_paid_typed_value_repairs_only_bad_group_and_preserves_usage(self):
         def invalid_draft(claim_ids, claim_by_id):
             values = []
             for index, claim_id in enumerate(claim_ids):
@@ -342,6 +349,7 @@ class NormalizerAgentTests(TestCase):
                         canonical_text=claim.value_text,
                         date_value="2026-02-31" if index == 0 else None,
                         precision=NormalizationPrecision.EXACT,
+                        notes="provider-kept" if index else "provider-invalid",
                     )
                 )
             return NormalizerDraft(values=values)
@@ -353,11 +361,27 @@ class NormalizerAgentTests(TestCase):
 
         self.assertEqual(
             results.strategy_source,
-            NormalizerStrategySource.DETERMINISTIC_FALLBACK,
+            NormalizerStrategySource.OPENAI_REPAIRED,
         )
         self.assertEqual(len(results.agent_usage), 1)
-        self.assertEqual(results.failed_attempts[0].error_code, "invalid_typed_value")
-        self.assertFalse(results.failed_attempts[0].token_usage_unknown)
+        self.assertEqual(results.failed_attempts, [])
+        self.assertEqual(results.repair_summary.repaired_provider_value_groups, 1)
+        self.assertEqual(results.repair_summary.deterministic_replacement_values, 1)
+        self.assertEqual(results.repair_summary.issue_codes, ["invalid_date_value"])
+        self.assertEqual(
+            sum(value.notes == "provider-kept" for value in results.normalized_values),
+            len(results.eligible_claim_ids) - 1,
+        )
+        repaired = next(
+            value
+            for value in results.normalized_values
+            if value.claim_ids == [results.eligible_claim_ids[0]]
+        )
+        self.assertEqual(repaired.value_type, NormalizedValueType.TEXT)
+        self.assertEqual(
+            repaired.notes,
+            "Conservative deterministic text normalization.",
+        )
 
     def test_provider_failure_retains_zero_invention_fallback(self):
         results = self._run(FailingNormalizerLLM(), mode=NormalizerMode.PAID)
@@ -515,6 +539,7 @@ class NormalizerAgentTests(TestCase):
             self.assertEqual(exit_code, 0)
             self.assertFalse(summary["publishable"])
             self.assertEqual(summary["usage_totals"]["total_tokens"], 0)
+            self.assertEqual(summary["repair_summary"]["provider_value_groups"], 0)
             self.assertEqual(summary["normalized_path"], str(expected_path))
 
     def test_cli_blocks_incomplete_checker_before_openai_configuration(self):

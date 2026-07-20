@@ -34,8 +34,8 @@ CHECKER_SCORING_VERSION = "checker-scoring-v2"
 RESOLVER_SCHEMA_VERSION = "1.1.0"
 RESOLVER_PROMPT_VERSION = "resolver-system-v2"
 EXECUTOR_SCHEMA_VERSION = "1.0.0"
-NORMALIZER_SCHEMA_VERSION = "1.0.0"
-NORMALIZER_PROMPT_VERSION = "normalizer-system-v1"
+NORMALIZER_SCHEMA_VERSION = "1.1.0"
+NORMALIZER_PROMPT_VERSION = "normalizer-system-v2"
 
 
 class ClosedModel(BaseModel):
@@ -3792,6 +3792,7 @@ class NormalizerMode(StrEnum):
 class NormalizerStrategySource(StrEnum):
     DETERMINISTIC = "deterministic"
     OPENAI = "openai"
+    OPENAI_REPAIRED = "openai_repaired"
     DETERMINISTIC_FALLBACK = "deterministic_fallback"
 
 
@@ -3843,33 +3844,33 @@ class NormalizerValueDraft(ClosedModel):
     precision: NormalizationPrecision
     notes: str = ""
 
-    def validate_semantics(self) -> None:
-        """Apply local rules after provider output and usage are available."""
+    def semantic_issue_code(self) -> str | None:
+        """Return a non-sensitive local rule code for an invalid typed value."""
 
         if not self.task_id.strip():
-            raise ValueError("Normalizer draft task_id cannot be blank.")
+            return "blank_task_id"
         if not 1 <= len(self.target_field) <= 500:
-            raise ValueError("Normalizer target_field length is invalid.")
+            return "invalid_target_field"
         if not 1 <= len(self.claim_ids) <= 50:
-            raise ValueError("Normalizer claim group size is invalid.")
+            return "invalid_claim_group_size"
         if len(self.claim_ids) != len(set(self.claim_ids)):
-            raise ValueError("Normalizer draft claim IDs must be unique.")
+            return "duplicate_claim_ids"
         if not 1 <= len(self.canonical_text) <= 2000:
-            raise ValueError("Normalizer canonical_text length is invalid.")
+            return "invalid_canonical_text"
         if self.unit is not None and len(self.unit) > 100:
-            raise ValueError("Normalizer unit is too long.")
+            return "invalid_unit"
         if len(self.notes) > 1000:
-            raise ValueError("Normalizer notes are too long.")
+            return "invalid_notes"
         decimal_pattern = r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$"
         if any(
             value is not None and not re.fullmatch(decimal_pattern, value)
             for value in (self.number_min, self.number_max)
         ):
-            raise ValueError("Normalizer numeric bounds require decimal strings.")
+            return "invalid_numeric_format"
         if self.currency is not None and not re.fullmatch(
             r"[A-Z]{3}", self.currency
         ):
-            raise ValueError("Normalizer currency requires an ISO code.")
+            return "invalid_currency"
         numeric = self.value_type in {
             NormalizedValueType.INTEGER,
             NormalizedValueType.DECIMAL,
@@ -3878,26 +3879,26 @@ class NormalizerValueDraft(ClosedModel):
         }
         if numeric:
             if self.number_min is None or self.boolean_value is not None or self.date_value:
-                raise ValueError("Numeric normalization requires only numeric values.")
+                return "invalid_numeric_value"
             number_min = Decimal(self.number_min)
             number_max = (
                 Decimal(self.number_max) if self.number_max is not None else None
             )
             if number_max is not None and number_max < number_min:
-                raise ValueError("Normalizer number_max cannot be below number_min.")
+                return "descending_numeric_range"
             if self.value_type == NormalizedValueType.INTEGER and any(
                 value != value.to_integral_value()
                 for value in (number_min, number_max)
                 if value is not None
             ):
-                raise ValueError("Integer normalization requires integral values.")
+                return "non_integral_integer"
             if self.value_type == NormalizedValueType.MONEY and self.currency is None:
-                raise ValueError("Money normalization requires an ISO currency.")
+                return "missing_money_currency"
             if self.value_type != NormalizedValueType.MONEY and self.currency is not None:
-                raise ValueError("Only money normalization may declare currency.")
+                return "unexpected_currency"
             if number_max is not None and number_max != number_min:
                 if self.precision != NormalizationPrecision.RANGE:
-                    raise ValueError("A numeric range requires range precision.")
+                    return "invalid_range_precision"
         elif self.value_type == NormalizedValueType.BOOLEAN:
             if (
                 self.boolean_value is None
@@ -3906,7 +3907,7 @@ class NormalizerValueDraft(ClosedModel):
                 or self.date_value is not None
                 or self.currency is not None
             ):
-                raise ValueError("Boolean normalization requires only boolean_value.")
+                return "invalid_boolean_value"
         elif self.value_type == NormalizedValueType.DATE:
             if (
                 self.date_value is None
@@ -3915,11 +3916,11 @@ class NormalizerValueDraft(ClosedModel):
                 or self.boolean_value is not None
                 or self.currency is not None
             ):
-                raise ValueError("Date normalization requires only date_value.")
+                return "invalid_date_value"
             try:
                 date.fromisoformat(self.date_value)
-            except ValueError as exc:
-                raise ValueError("Date normalization requires a real ISO date.") from exc
+            except ValueError:
+                return "invalid_date_value"
         elif any(
             value is not None
             for value in (
@@ -3930,13 +3931,28 @@ class NormalizerValueDraft(ClosedModel):
                 self.currency,
             )
         ):
-            raise ValueError("Text and URL normalization cannot declare typed values.")
+            return "unexpected_typed_value"
+        if (
+            self.value_type == NormalizedValueType.URL
+            and not re.fullmatch(r"https?://[^\s]+", self.canonical_text)
+        ):
+            return "invalid_url_value"
         if self.precision == NormalizationPrecision.RANGE and (
             not numeric
             or self.number_max is None
             or Decimal(self.number_max) == Decimal(self.number_min)
         ):
-            raise ValueError("Range precision requires two distinct numeric bounds.")
+            return "invalid_range_precision"
+        return None
+
+    def validate_semantics(self) -> None:
+        """Apply local rules after provider output and usage are available."""
+
+        issue_code = self.semantic_issue_code()
+        if issue_code is not None:
+            raise ValueError(
+                f"Normalizer draft typed value failed local rule {issue_code}."
+            )
 
 
 class NormalizerDraft(ClosedModel):
@@ -4049,6 +4065,34 @@ class NormalizerLimits(ClosedModel):
     max_api_calls: Literal[1] = 1
 
 
+class NormalizerRepairSummary(ClosedModel):
+    provider_value_groups: int = Field(default=0, ge=0, le=500)
+    accepted_provider_value_groups: int = Field(default=0, ge=0, le=500)
+    repaired_provider_value_groups: int = Field(default=0, ge=0, le=500)
+    deterministic_replacement_values: int = Field(default=0, ge=0, le=500)
+    issue_codes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_repair_summary(self) -> "NormalizerRepairSummary":
+        if (
+            self.accepted_provider_value_groups
+            + self.repaired_provider_value_groups
+            != self.provider_value_groups
+        ):
+            raise ValueError("Normalizer repair group counts are inconsistent.")
+        if len(self.issue_codes) != len(set(self.issue_codes)) or any(
+            not re.fullmatch(r"[a-z][a-z0-9_-]*", code)
+            for code in self.issue_codes
+        ):
+            raise ValueError("Normalizer repair issue codes are invalid.")
+        if self.repaired_provider_value_groups == 0:
+            if self.deterministic_replacement_values or self.issue_codes:
+                raise ValueError("Normalizer repair details require repaired groups.")
+        elif not self.issue_codes or not self.deterministic_replacement_values:
+            raise ValueError("Normalizer repaired groups require repair details.")
+        return self
+
+
 class NormalizerAttemptFailure(ClosedModel):
     call_index: Literal[1] = 1
     scope_task_ids: list[str]
@@ -4061,8 +4105,10 @@ class NormalizerAttemptFailure(ClosedModel):
 class NormalizerResults(ClosedModel):
     """Typed, source-linked staging record that always requires human review."""
 
-    schema_version: Literal["1.0.0"] = NORMALIZER_SCHEMA_VERSION
-    prompt_version: Literal["normalizer-system-v1"] = NORMALIZER_PROMPT_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = NORMALIZER_SCHEMA_VERSION
+    prompt_version: Literal[
+        "normalizer-system-v1", "normalizer-system-v2"
+    ] = NORMALIZER_PROMPT_VERSION
     normalization_id: str
     plan_run_id: str
     search_id: str
@@ -4092,6 +4138,9 @@ class NormalizerResults(ClosedModel):
     input_quality_threshold: int = Field(ge=0, le=100)
     input_scope_complete: bool
     limits: NormalizerLimits
+    repair_summary: NormalizerRepairSummary = Field(
+        default_factory=NormalizerRepairSummary
+    )
     eligible_claim_ids: list[str]
     excluded_claim_ids: list[str]
     unsafe_excluded_claim_ids: list[str]
@@ -4112,6 +4161,14 @@ class NormalizerResults(ClosedModel):
 
     @model_validator(mode="after")
     def validate_normalizer_results(self) -> "NormalizerResults":
+        if (
+            self.schema_version == "1.0.0"
+            and self.prompt_version != "normalizer-system-v1"
+        ) or (
+            self.schema_version == "1.1.0"
+            and self.prompt_version != "normalizer-system-v2"
+        ):
+            raise ValueError("Normalizer schema and prompt versions are inconsistent.")
         for value, field_name in (
             (self.normalization_id, "normalization_id"),
             (self.plan_run_id, "plan_run_id"),
@@ -4210,10 +4267,16 @@ class NormalizerResults(ClosedModel):
                 or self.provider_executed
                 or self.agent_usage
                 or self.failed_attempts
+                or self.repair_summary != NormalizerRepairSummary()
             ):
                 raise ValueError("Free Normalizer cannot contain provider activity.")
         elif self.generated_by == "deterministic":
-            if self.eligible_claim_ids or self.model is not None or self.provider_executed:
+            if (
+                self.eligible_claim_ids
+                or self.model is not None
+                or self.provider_executed
+                or self.repair_summary != NormalizerRepairSummary()
+            ):
                 raise ValueError("Paid deterministic Normalizer is valid only with no eligible claims.")
         else:
             if self.model is None or not self.model.strip() or not self.provider_executed:
@@ -4221,9 +4284,29 @@ class NormalizerResults(ClosedModel):
             if self.strategy_source == NormalizerStrategySource.OPENAI:
                 if len(self.agent_usage) != 1 or self.failed_attempts:
                     raise ValueError("Successful OpenAI Normalizer requires one usage entry.")
+                if (
+                    self.repair_summary.repaired_provider_value_groups
+                    or self.repair_summary.accepted_provider_value_groups
+                    != self.repair_summary.provider_value_groups
+                    or (
+                        self.schema_version == "1.1.0"
+                        and self.repair_summary.provider_value_groups == 0
+                    )
+                ):
+                    raise ValueError("OpenAI Normalizer repair summary is inconsistent.")
+            elif self.strategy_source == NormalizerStrategySource.OPENAI_REPAIRED:
+                if len(self.agent_usage) != 1 or self.failed_attempts:
+                    raise ValueError("Repaired OpenAI Normalizer requires one usage entry.")
+                if (
+                    self.schema_version != "1.1.0"
+                    or self.repair_summary.repaired_provider_value_groups == 0
+                ):
+                    raise ValueError("Repaired OpenAI Normalizer requires repaired groups.")
             elif self.strategy_source == NormalizerStrategySource.DETERMINISTIC_FALLBACK:
                 if len(self.failed_attempts) != 1:
                     raise ValueError("Normalizer fallback requires one failed attempt.")
+                if self.repair_summary != NormalizerRepairSummary():
+                    raise ValueError("Full Normalizer fallback cannot report partial repair.")
             else:
                 raise ValueError("OpenAI Normalizer has an invalid strategy source.")
         if len(self.agent_usage) > 1 or len(self.failed_attempts) > 1:

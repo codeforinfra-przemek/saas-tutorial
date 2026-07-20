@@ -643,7 +643,11 @@ equivalent accepted claims and normalize explicit values as text, integer,
 decimal, boolean, date, URL, money or percentage. Numeric ranges, approximate
 values, units and ISO currencies remain explicit. Local code rejects invented,
 missing, duplicated or cross-field claim IDs and falls back to one conservative
-text value per accepted claim while retaining usage/cost metadata.
+text value per accepted claim while retaining usage/cost metadata. When claim
+coverage and grouping are sound but individual typed groups violate a local
+semantic rule, schema `1.1.0` preserves valid provider groups and replaces only
+the invalid groups with deterministic text values. `repair_summary` records
+counts and non-sensitive rule codes; it never stores rejected model prose.
 
 The optional free smoke test uses that conservative representation directly:
 
@@ -720,9 +724,11 @@ claims. The free manifest has zero tokens and tool cost.
 
 Normalizer records at most one `agent_usage` entry and has no tools. Paid mode
 charges only model input/output tokens for accepted claims and their bounded
-evidence context. Invalid or failed responses retain known usage (or mark it
-unknown) while producing a deterministic text fallback. Free mode has no API
-usage and zero provider cost.
+evidence context. Structurally invalid or failed responses retain known usage
+(or mark it unknown) while producing a deterministic text fallback. A
+structurally complete response with invalid typed groups uses
+`openai_repaired`: valid groups survive and only invalid groups are downgraded.
+Free mode has no API usage and zero provider cost.
 
 For GPT-5.6, Planner, Searcher, Extractor, Checker, Resolver and Normalizer disable the default
 implicit cache breakpoint for their one-off, brand-specific calls. Those payloads

@@ -2413,6 +2413,7 @@ def _run_normalize(args: argparse.Namespace) -> int:
         "eligible_claims": len(results.eligible_claim_ids),
         "excluded_claims": len(results.excluded_claim_ids),
         "normalized_values": len(results.normalized_values),
+        "repair_summary": results.repair_summary.model_dump(mode="json"),
         "field_statuses": field_statuses,
         "value_types": value_types,
         "unresolved_fields": len(results.unresolved_field_ids),

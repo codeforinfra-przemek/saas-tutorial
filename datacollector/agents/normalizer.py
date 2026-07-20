@@ -26,6 +26,7 @@ from ..schemas import (
     NormalizerFieldStatus,
     NormalizerLimits,
     NormalizerMode,
+    NormalizerRepairSummary,
     NormalizerResults,
     NormalizerStrategySource,
     NormalizerValueDraft,
@@ -36,7 +37,7 @@ from ..schemas import (
 
 
 DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "normalizer_system_v1.md"
+    Path(__file__).resolve().parent.parent / "prompts" / "normalizer_system_v2.md"
 )
 DEFAULT_MAX_CLAIMS = 100
 DEFAULT_MAX_INPUT_CHARS = 100_000
@@ -217,6 +218,7 @@ class NormalizerAgent:
         provider_executed = False
         usage: list[AgentIterationUsage] = []
         failed_attempts: list[NormalizerAttemptFailure] = []
+        repair_summary = NormalizerRepairSummary()
         warnings: list[str] = []
 
         scope_task_ids, scope_source_ids = self._scope_ids(
@@ -255,7 +257,10 @@ class NormalizerAgent:
                     scope_task_ids=scope_task_ids,
                     scope_source_ids=scope_source_ids,
                 )
-                self._validate_draft(generation.draft, eligible_claims)
+                selected_draft, repair_summary = self._prepare_draft(
+                    generation.draft,
+                    eligible_claims,
+                )
             except NormalizerProviderError as exc:
                 if exc.usage is not None:
                     self._validate_usage(
@@ -294,8 +299,19 @@ class NormalizerAgent:
                     "retained conservative deterministic text values."
                 )
             else:
-                selected_draft = generation.draft
-                strategy_source = NormalizerStrategySource.OPENAI
+                if repair_summary.repaired_provider_value_groups:
+                    strategy_source = NormalizerStrategySource.OPENAI_REPAIRED
+                    issue_codes = ", ".join(repair_summary.issue_codes)
+                    warnings.append(
+                        "Repaired "
+                        f"{repair_summary.repaired_provider_value_groups} invalid "
+                        "provider value group(s) with "
+                        f"{repair_summary.deterministic_replacement_values} "
+                        "deterministic text value(s); local rule code(s): "
+                        f"{issue_codes}."
+                    )
+                else:
+                    strategy_source = NormalizerStrategySource.OPENAI
                 if generation.draft.warnings:
                     warnings.append(
                         f"Discarded {len(generation.draft.warnings)} provider-authored "
@@ -391,6 +407,7 @@ class NormalizerAgent:
                 max_input_chars=max_input_chars,
                 observed_input_chars=observed_input_chars,
             ),
+            repair_summary=repair_summary,
             eligible_claim_ids=eligible_claim_ids,
             excluded_claim_ids=excluded_claim_ids,
             unsafe_excluded_claim_ids=unsafe_excluded_claim_ids,
@@ -446,31 +463,15 @@ class NormalizerAgent:
             )
 
     @staticmethod
-    def _validate_draft(
+    def _prepare_draft(
         draft: NormalizerDraft,
         eligible_claims: list[RawExtractionClaim],
-    ) -> None:
+    ) -> tuple[NormalizerDraft, NormalizerRepairSummary]:
         if len(draft.values) > 500:
             raise NormalizerDraftValidationError(
                 "Normalizer draft contains too many value groups.",
-                code="invalid_typed_value",
+                code="too_many_value_groups",
             )
-        if len(draft.warnings) > 20 or any(
-            not warning.strip() or len(warning) > 1000
-            for warning in draft.warnings
-        ):
-            raise NormalizerDraftValidationError(
-                "Normalizer draft warnings exceed local limits.",
-                code="invalid_typed_value",
-            )
-        for value in draft.values:
-            try:
-                value.validate_semantics()
-            except (ArithmeticError, ValueError) as exc:
-                raise NormalizerDraftValidationError(
-                    "Normalizer draft contains an invalid typed value.",
-                    code="invalid_typed_value",
-                ) from exc
         claim_by_id = {claim.claim_id: claim for claim in eligible_claims}
         draft_claim_ids = [
             claim_id for value in draft.values for claim_id in value.claim_ids
@@ -486,6 +487,11 @@ class NormalizerAgent:
                 code="invalid_claim_coverage",
             )
         for value in draft.values:
+            if not value.claim_ids:
+                raise NormalizerDraftValidationError(
+                    "Normalizer draft contains an empty claim group.",
+                    code="invalid_claim_grouping",
+                )
             claims = [claim_by_id[claim_id] for claim_id in value.claim_ids]
             if any(
                 claim.task_id != value.task_id
@@ -496,13 +502,34 @@ class NormalizerAgent:
                     "Normalizer grouped claims from different tasks or fields.",
                     code="invalid_claim_grouping",
                 )
-            if value.value_type == NormalizedValueType.URL and not re.fullmatch(
-                r"https?://[^\s]+", value.canonical_text
-            ):
-                raise NormalizerDraftValidationError(
-                    "Normalizer URL value is not an HTTP(S) URL.",
-                    code="invalid_typed_value",
-                )
+
+        repaired_values: list[NormalizerValueDraft] = []
+        issue_codes: list[str] = []
+        repaired_groups = 0
+        deterministic_replacements = 0
+        for value in draft.values:
+            issue_code = value.semantic_issue_code()
+            if issue_code is None:
+                repaired_values.append(value)
+                continue
+            repaired_groups += 1
+            issue_codes.append(issue_code)
+            replacements = _deterministic_draft(
+                [claim_by_id[claim_id] for claim_id in value.claim_ids]
+            ).values
+            deterministic_replacements += len(replacements)
+            repaired_values.extend(replacements)
+
+        return (
+            NormalizerDraft(values=repaired_values, warnings=draft.warnings),
+            NormalizerRepairSummary(
+                provider_value_groups=len(draft.values),
+                accepted_provider_value_groups=len(draft.values) - repaired_groups,
+                repaired_provider_value_groups=repaired_groups,
+                deterministic_replacement_values=deterministic_replacements,
+                issue_codes=_deduplicate(issue_codes),
+            ),
+        )
 
     @staticmethod
     def _materialize_values(
