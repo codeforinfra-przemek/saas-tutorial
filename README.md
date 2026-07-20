@@ -349,3 +349,26 @@ The command creates `demo.viewer@example.com`, `demo.owner@example.com`,
 `demo.other.owner@example.com` and `demo.staff@example.com`. The development
 password defaults to `DemoTest123!` and can be changed with
 `DEMO_USER_PASSWORD`. These accounts are development-only.
+
+## SEO foundation
+
+Public pages now use a shared SEO layer with clean canonical URLs, Open Graph
+metadata, JSON-LD, breadcrumbs and a controlled sitemap. Filtered catalog URLs
+remain available to users but return `noindex,follow`, so arbitrary search and
+filter combinations do not become duplicate search-engine pages. Private areas
+such as vendor, saved, internal analytics, accounts and billing success routes
+return `noindex,nofollow` through the shared template context.
+
+Curated public SEO pages:
+
+- `/franczyzy/k/<category-slug>/` - category landing pages;
+- `/franczyzy/budzet/do-100000-zl/` - budget landing pages;
+- `/franczyzy/model/online/` - business-model landing pages;
+- `/metodologia/` and `/jak-to-dziala/` - trust pages;
+- `/sitemap.xml` and `/robots.txt` - technical SEO endpoints.
+
+The budget and business-model definitions live in
+`franchises/seo_pages.py`. They are deliberately code-controlled, so the site
+does not create thousands of thin pages from user filters. Article and landing
+page SEO fields are grouped in Django Admin with recommended title and
+description lengths.

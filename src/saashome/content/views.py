@@ -17,11 +17,6 @@ def article_list_view(request):
         .select_related("category", "author")
         .order_by("-published_at", "-created_at")
     )
-    breadcrumbs = [
-        {"name": "Start", "url": request.build_absolute_uri(reverse("home"))},
-        {"name": "Poradnik", "url": request.build_absolute_uri(reverse("content:article_list"))},
-        {"name": article.title, "url": request.build_absolute_uri(article.get_absolute_url())},
-    ]
     context = {
         "site_name": "SaaS Home",
         "page_title": "Poradnik franczyzowy",
@@ -45,6 +40,11 @@ def article_detail_view(request, slug):
     if article.category_id:
         related_articles = related_articles.filter(category=article.category)
 
+    breadcrumbs = [
+        {"name": "Start", "url": request.build_absolute_uri(reverse("home"))},
+        {"name": "Poradnik", "url": request.build_absolute_uri(reverse("content:article_list"))},
+        {"name": article.title, "url": request.build_absolute_uri(article.get_absolute_url())},
+    ]
     context = {
         "site_name": "SaaS Home",
         "page_title": article.title,

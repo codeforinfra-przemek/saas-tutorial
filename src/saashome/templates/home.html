@@ -26,6 +26,14 @@
     </div>
 </section>
 
+<section class="border-y border-slate-200 bg-white">
+    <div class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
+        <h2 class="text-xl font-black text-slate-950">Znajdź ofertę po budżecie lub modelu</h2>
+        <div class="mt-4 grid gap-5 md:grid-cols-2"><div><p class="text-xs font-extrabold uppercase text-slate-500">Budżet</p><div class="mt-2 flex flex-wrap gap-2">{% for item in budget_pages %}<a href="{% url 'seo:budget_detail' item.slug %}" class="rounded-full border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:border-brand-300 hover:text-brand-700">{{ item.title }}</a>{% endfor %}</div></div><div><p class="text-xs font-extrabold uppercase text-slate-500">Model działania</p><div class="mt-2 flex flex-wrap gap-2">{% for item in business_model_pages %}<a href="{% url 'seo:model_detail' item.slug %}" class="rounded-full border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:border-brand-300 hover:text-brand-700">{{ item.title }}</a>{% endfor %}</div></div></div>
+        <div class="mt-5 flex gap-4 text-sm font-bold"><a href="{% url 'seo:how_it_works' %}" class="text-brand-700 hover:underline">Jak to działa</a><a href="{% url 'seo:methodology' %}" class="text-brand-700 hover:underline">Metodologia</a></div>
+    </div>
+</section>
+
 <section class="mx-auto w-full max-w-7xl px-5 py-9 sm:px-8 lg:px-10">
     {% url 'franchises:list' as franchise_list_url %}{% include "components/section_header.html" with eyebrow="Wybrane profile" title="Franczyzy warte porównania" description="Zacznij od najpełniejszych i promowanych profili, a potem zawęź wyniki filtrami." action_label="Zobacz cały ranking" action_url=franchise_list_url only %}
     <div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">

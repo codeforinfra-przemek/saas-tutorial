@@ -20,6 +20,11 @@ class ArticleAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at")
     date_hierarchy = "published_at"
     autocomplete_fields = ("author",)
+    fieldsets = (
+        (None, {"fields": ("title", "slug", "category", "excerpt", "body", "featured_image", "author", "status", "is_featured", "published_at")} ),
+        ("SEO (zalecane: tytul do 60 znakow, opis do 155)", {"fields": ("seo_title", "seo_description", "canonical_url")} ),
+        ("Daty", {"fields": ("created_at", "updated_at")} ),
+    )
 
 
 @admin.register(LandingPage)
@@ -40,3 +45,10 @@ class LandingPageAdmin(admin.ModelAdmin):
     filter_horizontal = ("selected_franchises",)
     readonly_fields = ("created_at", "updated_at")
     date_hierarchy = "published_at"
+    fieldsets = (
+        (None, {"fields": ("title", "slug", "subtitle", "intro", "body", "status", "is_featured", "published_at")} ),
+        ("SEO (zalecane: tytul do 60 znakow, opis do 155)", {"fields": ("seo_title", "seo_description", "canonical_url")} ),
+        ("Filtry i oferty", {"fields": ("related_category", "max_investment", "min_investment", "business_type", "home_based", "part_time_possible", "training_provided", "financing_available", "selected_franchises")} ),
+        ("CTA", {"fields": ("cta_label", "cta_url")} ),
+        ("Daty", {"fields": ("created_at", "updated_at")} ),
+    )

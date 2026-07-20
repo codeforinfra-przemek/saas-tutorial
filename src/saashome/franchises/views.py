@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
@@ -13,6 +14,8 @@ from accounts.permissions import staff_required
 from leads.forms import LeadForm
 from leads.models import Lead
 from shortlists.services import get_saved_franchise_ids_for_user, is_franchise_saved_by_user
+from seo.schema import get_breadcrumb_schema, get_franchise_schema
+from seo.services import get_canonical_url, get_franchise_seo
 
 
 FRANCHISE_LIST_PAGE_SIZE = 10
@@ -209,6 +212,7 @@ def franchise_list_view(request):
         "investment_max": investment_max,
         "map_markers": build_map_markers(active_locations),
         "saved_franchise_ids": get_saved_franchise_ids_for_user(request.user),
+        "canonical_url": get_canonical_url(request),
     }
     return render(request, "franchises/list.html", context)
 
@@ -240,6 +244,7 @@ def franchise_directory_view(request):
         "business_type_choices": Franchise.BUSINESS_TYPE_CHOICES,
         "filters": filters,
         "saved_franchise_ids": get_saved_franchise_ids_for_user(request.user),
+        "canonical_url": get_canonical_url(request),
     }
     return render(request, "franchises/directory.html", context)
 
@@ -297,6 +302,17 @@ def franchise_detail_view(request, slug, data_only=False):
 
     plan = get_franchise_plan(franchise)
     approved_assets = franchise.assets.filter(status=FranchiseAsset.STATUS_APPROVED)
+    similar_franchises = apply_promotion_flags(
+        Franchise.objects.filter(is_active=True, category=franchise.category)
+        .exclude(pk=franchise.pk)
+        .select_related("category")[:3]
+    )
+    breadcrumbs = [
+        {"name": "Start", "url": request.build_absolute_uri(reverse("home"))},
+        {"name": "Franczyzy", "url": request.build_absolute_uri(reverse("franchises:list"))},
+        {"name": franchise.category.name, "url": request.build_absolute_uri(franchise.category.get_absolute_url())},
+        {"name": franchise.name, "url": request.build_absolute_uri(franchise.get_absolute_url())},
+    ]
     context = {
         "site_name": "SaaS Home",
         "page_title": franchise.name,
@@ -318,7 +334,13 @@ def franchise_detail_view(request, slug, data_only=False):
         else [],
         "show_website": bool(franchise.website_url and (not franchise.organization_id or (plan and plan.can_show_website))),
         "is_saved": is_franchise_saved_by_user(request.user, franchise),
+        "similar_franchises": similar_franchises,
+        "breadcrumbs": breadcrumbs,
+        "json_ld": json.dumps(
+            [get_franchise_schema(franchise, request), get_breadcrumb_schema(breadcrumbs)], ensure_ascii=False
+        ),
     }
+    context.update(get_franchise_seo(franchise, request))
     return render(request, "franchises/detail.html", context)
 
 

@@ -1,3 +1,4 @@
+import json
 import logging
 from smtplib import SMTPException
 
@@ -11,6 +12,9 @@ from django.template.loader import render_to_string
 from billing.services import apply_promotion_flags
 from content.models import Article
 from franchises.models import Franchise, FranchiseCategory
+from franchises.seo_pages import BUDGET_PAGES, BUSINESS_MODEL_PAGES
+from seo.schema import get_organization_schema, get_website_schema
+from seo.services import build_meta_title, get_canonical_url, truncate_meta_description
 
 from .forms import ContactRequestForm
 
@@ -88,5 +92,11 @@ def home_view(request):
         "featured_franchises": featured_franchises,
         "categories": FranchiseCategory.objects.filter(is_active=True)[:6],
         "latest_articles": Article.objects.published().select_related("category")[:3],
+        "budget_pages": BUDGET_PAGES,
+        "business_model_pages": BUSINESS_MODEL_PAGES,
+        "seo_title": build_meta_title("Ranking i porownywarka franczyz"),
+        "seo_description": truncate_meta_description("Porownuj franczyzy, koszty startu, modele biznesowe i informacje o rozwoju sieci."),
+        "canonical_url": get_canonical_url(request),
+        "json_ld": json.dumps([get_website_schema(request), get_organization_schema(request)], ensure_ascii=False),
     }
     return render(request, "home.html", context)
