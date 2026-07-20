@@ -43,7 +43,7 @@ from ..schemas import (
 
 
 DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "searcher_system_v3.md"
+    Path(__file__).resolve().parent.parent / "prompts" / "searcher_system_v4.md"
 )
 UNRESOLVED_QUERY_MARKER = re.compile(r"\{[^{}]+\}|\[[^\[\]]+\]|<[^<>]+>")
 TRACKING_QUERY_KEYS = {
@@ -131,6 +131,11 @@ CANDIDATE_ROUTER_STOP_WORDS = {
     "zabka",
 }
 DEFAULT_MAX_CANDIDATE_ROUTES = 5
+URL_TRAILING_SENTENCE_PUNCTUATION = ".,;:!?"
+SITE_QUERY_DOMAIN = re.compile(
+    r"(?:^|\s)site:([a-z0-9.-]+)",
+    flags=re.IGNORECASE,
+)
 
 
 class SearcherValidationError(ValueError):
@@ -155,9 +160,25 @@ def _deduplicate(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
 
 
+def _strip_url_punctuation(value: str) -> str:
+    """Remove prose punctuation without changing balanced URL characters."""
+
+    cleaned = value.strip().strip("\"'<>\u00ab\u00bb")
+    previous = None
+    while cleaned != previous:
+        previous = cleaned
+        cleaned = cleaned.rstrip(URL_TRAILING_SENTENCE_PUNCTUATION)
+        for closing, opening in ((")", "("), ("]", "["), ("}", "{")):
+            while cleaned.endswith(closing) and cleaned.count(
+                closing
+            ) > cleaned.count(opening):
+                cleaned = cleaned[:-1]
+    return cleaned
+
+
 def _canonicalize_public_url(value: str) -> str | None:
     try:
-        parsed = urlsplit(value.strip())
+        parsed = urlsplit(_strip_url_punctuation(value))
     except ValueError:
         return None
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
@@ -225,7 +246,7 @@ def _query_key(value: str) -> str:
     return " ".join(value.split()).casefold()
 
 
-def _routing_tokens(value: str) -> set[str]:
+def _routing_tokens(value: str, *, minimum_length: int = 4) -> set[str]:
     normalized = unicodedata.normalize("NFKD", value.casefold())
     ascii_text = "".join(
         character for character in normalized if not unicodedata.combining(character)
@@ -233,8 +254,223 @@ def _routing_tokens(value: str) -> set[str]:
     return {
         token
         for token in re.findall(r"[a-z0-9]+", ascii_text)
-        if len(token) >= 4 and token not in CANDIDATE_ROUTER_STOP_WORDS
+        if len(token) >= minimum_length
+        and token not in CANDIDATE_ROUTER_STOP_WORDS
     }
+
+
+def _task_query_domains(task: ResearchTask) -> set[str]:
+    return {
+        match.group(1).lower().rstrip(".")
+        for query in task.search_queries
+        for match in SITE_QUERY_DOMAIN.finditer(query)
+    }
+
+
+def _authority_route_match(
+    canonical_url: str,
+    title: str,
+    scoped_tasks: list[ResearchTask],
+) -> tuple[str, list[str]] | None:
+    """Route only distinctive registry, law, document, or fee URL signals."""
+
+    parsed = urlsplit(canonical_url)
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    candidate_terms = _routing_tokens(
+        " ".join(
+            [
+                title,
+                hostname,
+                parsed.path.replace("/", " ").replace("-", " ").replace("_", " "),
+            ]
+        ),
+        minimum_length=3,
+    )
+
+    profiles: list[tuple[list[ResearchTask], set[str]]] = []
+    identity_signals = candidate_terms.intersection({"krs", "ekrs", "imsig"})
+    if {"rejestru", "sadowego"}.issubset(candidate_terms):
+        identity_signals.update({"rejestru", "sadowego"})
+    profiles.append(
+        (
+            [
+                task
+                for task in scoped_tasks
+                if "franchisor.registration_id" in task.target_fields
+            ],
+            identity_signals,
+        )
+    )
+
+    legal_signals = candidate_terms.intersection(
+        {"isap", "sejm", "uokik", "uodo"}
+    )
+    if hostname.endswith("eli.gov.pl"):
+        legal_signals.update({"eli", "gov"})
+    profiles.append(
+        (
+            [
+                task
+                for task in scoped_tasks
+                if any(field.startswith("local_law.") for field in task.target_fields)
+            ],
+            legal_signals,
+        )
+    )
+
+    document_markers = candidate_terms.intersection(
+        {
+            "agreement",
+            "disclosure",
+            "document",
+            "regulamin",
+            "terms",
+            "umowa",
+            "warunki",
+        }
+    )
+    document_tasks = [
+        task
+        for task in scoped_tasks
+        if any(field.startswith("documents.") for field in task.target_fields)
+        and any(
+            hostname == domain or hostname.endswith(f".{domain}")
+            for domain in _task_query_domains(task)
+        )
+    ]
+    profiles.append((document_tasks, document_markers))
+
+    fee_signals = candidate_terms.intersection(
+        {"entry", "fee", "initial", "oplata", "wpisowe", "wstepna"}
+    )
+    fee_phrase_present = bool(
+        {"initial", "fee"}.issubset(candidate_terms)
+        or {"entry", "fee"}.issubset(candidate_terms)
+        or {"oplata", "wstepna"}.issubset(candidate_terms)
+        or "wpisowe" in candidate_terms
+    )
+    profiles.append(
+        (
+            [
+                task
+                for task in scoped_tasks
+                if fee_phrase_present
+                and any(field.startswith("fees.initial") for field in task.target_fields)
+            ],
+            fee_signals if fee_phrase_present else set(),
+        )
+    )
+
+    matches = [
+        (tasks[0].task_id, sorted(signals))
+        for tasks, signals in profiles
+        if len(tasks) == 1 and signals
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _candidate_document_quality_bonus(canonical_url: str) -> int:
+    """Prefer document endpoints over news pages within one confidence tier."""
+
+    path = urlsplit(canonical_url).path.casefold()
+    bonus = 0
+    if path.endswith(".pdf"):
+        bonus += 8
+    if any(marker in path for marker in ("/acts/", "docdetails", "download")):
+        bonus += 4
+    if any(
+        marker in path
+        for marker in ("aktualnosci", "article", "artykul", "news")
+    ):
+        bonus -= 8
+    return bonus
+
+
+def _select_candidate_route_urls(
+    routes: list[CandidateRouteDecision],
+    limit: int,
+) -> set[str]:
+    """Select high-quality routes while preserving task-level diversity."""
+
+    ranked = sorted(
+        (route for route in routes if route.decision == "routed"),
+        key=lambda route: (-route.score, route.canonical_url),
+    )
+    selected: list[str] = []
+    selected_tasks: set[str] = set()
+    for route in ranked:
+        if len(selected) >= limit:
+            break
+        assert route.routed_task_id is not None
+        if route.routed_task_id in selected_tasks:
+            continue
+        selected.append(route.canonical_url)
+        selected_tasks.add(route.routed_task_id)
+    for route in ranked:
+        if len(selected) >= limit:
+            break
+        if route.canonical_url not in selected:
+            selected.append(route.canonical_url)
+    return set(selected)
+
+
+def _candidate_route_source_type(
+    route: CandidateRouteDecision | None,
+    canonical_url: str,
+) -> SourceType:
+    """Infer only publisher classes that are explicit in an authority URL."""
+
+    if route is None:
+        return SourceType.UNKNOWN
+    hostname = (urlsplit(canonical_url).hostname or "").casefold()
+    labels = set(hostname.split("."))
+    if "imsig" in labels:
+        return SourceType.ROUTING_LEAD
+    if labels.intersection({"uokik", "uodo"}):
+        return SourceType.REGULATOR
+    if labels.intersection({"isap", "sejm", "eli"}):
+        return SourceType.LEGAL_DOCUMENT
+    return SourceType.UNKNOWN
+
+
+def _attribute_action_queries(
+    actions: list[SearchAction],
+    tasks: list[ResearchTask],
+    draft: SearcherDraft,
+) -> list[SearchAction]:
+    """Attach deterministic query-to-task provenance to provider actions."""
+
+    task_order = {task.task_id: index for index, task in enumerate(tasks)}
+    planned_task_ids_by_query: defaultdict[str, set[str]] = defaultdict(set)
+    for task in tasks:
+        for query in task.search_queries:
+            planned_task_ids_by_query[_query_key(query)].add(task.task_id)
+    reported_task_ids_by_query: defaultdict[str, set[str]] = defaultdict(set)
+    for task_draft in draft.task_results:
+        if task_draft.task_id not in task_order:
+            continue
+        for query in task_draft.attempted_queries:
+            reported_task_ids_by_query[_query_key(query)].add(task_draft.task_id)
+
+    attributed: list[SearchAction] = []
+    for action in actions:
+        scoped = set(action.scope_task_ids)
+        query_task_ids: dict[str, list[str]] = {}
+        for query in action.queries:
+            key = _query_key(query)
+            candidate_ids = planned_task_ids_by_query[key]
+            if not candidate_ids:
+                candidate_ids = reported_task_ids_by_query[key]
+            ordered_ids = sorted(
+                candidate_ids.intersection(scoped),
+                key=lambda task_id: task_order[task_id],
+            )
+            if ordered_ids:
+                query_task_ids[query] = ordered_ids
+        attributed.append(
+            action.model_copy(update={"query_task_ids": query_task_ids})
+        )
+    return attributed
 
 
 def _candidate_route_decision(
@@ -251,6 +487,18 @@ def _candidate_route_decision(
             for task_id in completed_action_by_id[action_id].scope_task_ids
         ]
     )
+    task_by_id = {task.task_id: task for task in tasks}
+    scoped_tasks = [
+        task_by_id[task_id]
+        for task_id in scoped_task_ids
+        if task_id in task_by_id
+    ]
+    authority_match = _authority_route_match(
+        canonical_url,
+        provider_source.title,
+        scoped_tasks,
+    )
+    quality_bonus = _candidate_document_quality_bonus(canonical_url)
     if len(scoped_task_ids) == 1:
         return CandidateRouteDecision(
             canonical_url=canonical_url,
@@ -258,18 +506,66 @@ def _candidate_route_decision(
             action_ids=action_ids,
             decision="routed",
             routed_task_id=scoped_task_ids[0],
-            score=100,
+            score=max(1, 100 + quality_bonus),
             runner_up_score=0,
             matched_terms=[],
             reason_code="single_task_action",
         )
 
-    task_by_id = {task.task_id: task for task in tasks}
-    scoped_tasks = [
-        task_by_id[task_id]
-        for task_id in scoped_task_ids
-        if task_id in task_by_id
+    query_actions = [
+        completed_action_by_id[action_id]
+        for action_id in action_ids
+        if completed_action_by_id[action_id].action_type == "search"
     ]
+    query_scope_complete = bool(query_actions)
+    query_scoped_task_ids: list[str] = []
+    for action in query_actions:
+        if not action.queries or not set(action.queries).issubset(
+            action.query_task_ids
+        ):
+            query_scope_complete = False
+            continue
+        query_scoped_task_ids.extend(
+            task_id
+            for query in action.queries
+            for task_id in action.query_task_ids[query]
+        )
+    query_scoped_task_ids = _deduplicate(query_scoped_task_ids)
+    if query_scope_complete and len(query_scoped_task_ids) == 1:
+        authority_signals = (
+            authority_match[1]
+            if authority_match is not None
+            and authority_match[0] == query_scoped_task_ids[0]
+            else []
+        )
+        return CandidateRouteDecision(
+            canonical_url=canonical_url,
+            title=provider_source.title,
+            action_ids=action_ids,
+            decision="routed",
+            routed_task_id=query_scoped_task_ids[0],
+            score=max(
+                1,
+                90 + quality_bonus + (5 if authority_signals else 0),
+            ),
+            runner_up_score=0,
+            matched_terms=authority_signals,
+            reason_code="single_task_query_scope",
+        )
+
+    if authority_match is not None:
+        task_id, signals = authority_match
+        return CandidateRouteDecision(
+            canonical_url=canonical_url,
+            title=provider_source.title,
+            action_ids=action_ids,
+            decision="routed",
+            routed_task_id=task_id,
+            score=max(1, 80 + quality_bonus + len(signals)),
+            runner_up_score=0,
+            matched_terms=signals,
+            reason_code="authority_path_match",
+        )
     task_terms: dict[str, set[str]] = {}
     document_frequency: defaultdict[str, int] = defaultdict(int)
     for task in scoped_tasks:
@@ -317,7 +613,7 @@ def _candidate_route_decision(
             action_ids=action_ids,
             decision="routed",
             routed_task_id=best_task_id,
-            score=best_score,
+            score=max(1, best_score + quality_bonus),
             runner_up_score=runner_up_score,
             matched_terms=best_terms,
             reason_code="unique_lexical_match",
@@ -531,11 +827,16 @@ def _combine_generations(
         warnings.extend(generation.draft.warnings)
         actions.extend(generation.actions)
         for provider_source in generation.provider_sources:
-            existing_provider = provider_sources_by_url.get(provider_source.url)
-            if existing_provider is None or (
-                not existing_provider.title and provider_source.title
+            canonical = _canonicalize_public_url(provider_source.url)
+            key = canonical or provider_source.url
+            existing_provider = provider_sources_by_url.get(key)
+            if existing_provider is None or len(provider_source.title) > len(
+                existing_provider.title
             ):
-                provider_sources_by_url[provider_source.url] = provider_source
+                provider_sources_by_url[key] = ProviderSearchSource(
+                    url=canonical or provider_source.url,
+                    title=provider_source.title,
+                )
 
         for draft_source in generation.draft.sources:
             canonical = _canonicalize_public_url(draft_source.url)
@@ -790,6 +1091,11 @@ class SearcherAgent:
                 safe_actions, removed_action_urls = self._sanitize_actions(
                     generation.actions
                 )
+                safe_actions = _attribute_action_queries(
+                    safe_actions,
+                    sanitized,
+                    generation.draft,
+                )
                 generation = SearcherGeneration(
                     draft=generation.draft,
                     usage=generation.usage,
@@ -887,6 +1193,11 @@ class SearcherAgent:
                     try:
                         safe_retry_actions, removed_retry_urls = (
                             self._sanitize_actions(retry_generation.actions)
+                        )
+                        safe_retry_actions = _attribute_action_queries(
+                            safe_retry_actions,
+                            [retry_task],
+                            retry_generation.draft,
                         )
                         removed_action_url_count += removed_retry_urls
                         generations.append(
@@ -1024,7 +1335,12 @@ class SearcherAgent:
             if canonical is None:
                 rejected_provider_urls += 1
                 continue
-            provider_by_canonical.setdefault(canonical, source)
+            existing = provider_by_canonical.get(canonical)
+            if existing is None or len(source.title) > len(existing.title):
+                provider_by_canonical[canonical] = ProviderSearchSource(
+                    url=canonical,
+                    title=source.title,
+                )
         if rejected_provider_urls:
             warnings.append(
                 f"Rejected {rejected_provider_urls} non-public or invalid "
@@ -1106,10 +1422,15 @@ class SearcherAgent:
                     uniquely_reported_for_task = reported_task_ids_by_query[
                         _query_key(query)
                     ] == {task.task_id}
+                    uniquely_attributed_to_task = action.query_task_ids.get(
+                        query,
+                        [],
+                    ) == [task.task_id]
                     if task.task_id in action.scope_task_ids and (
                         query in planned_queries
                         or single_task_scope
                         or uniquely_reported_for_task
+                        or uniquely_attributed_to_task
                     ):
                         attempted.append(query)
                         attributed_query_keys.add(_query_key(query))
@@ -1133,15 +1454,81 @@ class SearcherAgent:
                 "action trace because a multi-task batch did not provide "
                 "deterministic task attribution."
             )
+        multi_query_search_actions = sum(
+            action.action_type == "search" and len(action.queries) > 1
+            for action in completed_actions
+        )
+        if multi_query_search_actions:
+            warnings.append(
+                f"Provider returned {multi_query_search_actions} multi-query "
+                "search action(s); URL-to-query provenance remains action-level "
+                "for those results."
+            )
 
         sources: list[SearchSource] = []
         unassigned_provider_sources = 0
         actionless_provider_sources = 0
         promotional_provider_sources = 0
         refined_source_types = 0
-        candidate_routes: list[CandidateRouteDecision] = []
-        routed_candidate_count = 0
         task_by_id = {task.task_id: task for task in tasks}
+        routes_by_canonical: dict[str, CandidateRouteDecision] = {}
+        for canonical, provider_source in provider_by_canonical.items():
+            candidate_task_ids = [
+                task.task_id
+                for task in tasks
+                if task.task_id in task_ids_by_url[canonical]
+            ]
+            url_action_ids = _deduplicate(action_ids_by_url[canonical])
+            mapped_task_ids = [
+                task_id
+                for task_id in candidate_task_ids
+                if any(
+                    task_id in completed_action_by_id[action_id].scope_task_ids
+                    for action_id in url_action_ids
+                )
+            ]
+            if mapped_task_ids or not url_action_ids:
+                continue
+            route = _candidate_route_decision(
+                canonical,
+                provider_source,
+                url_action_ids,
+                completed_action_by_id,
+                tasks,
+            )
+            if route.decision == "routed":
+                assert route.routed_task_id is not None
+                route_tasks = [task_by_id[route.routed_task_id]]
+                if _is_unrelated_promotional_source(canonical, route_tasks):
+                    promotional_provider_sources += 1
+                    route = route.model_copy(
+                        update={
+                            "decision": "excluded",
+                            "routed_task_id": None,
+                            "reason_code": "promotional_source_excluded",
+                        }
+                    )
+            routes_by_canonical[canonical] = route
+
+        allowed_routed_urls = _select_candidate_route_urls(
+            list(routes_by_canonical.values()),
+            max_candidate_routes,
+        )
+        for canonical, route in list(routes_by_canonical.items()):
+            if (
+                route.decision == "routed"
+                and canonical not in allowed_routed_urls
+            ):
+                routes_by_canonical[canonical] = route.model_copy(
+                    update={
+                        "decision": "limit_reached",
+                        "routed_task_id": None,
+                        "reason_code": "route_limit_reached",
+                    }
+                )
+        candidate_routes = list(routes_by_canonical.values())
+        routed_candidate_count = len(allowed_routed_urls)
+
         for canonical, provider_source in provider_by_canonical.items():
             candidate_task_ids = [
                 task.task_id
@@ -1161,37 +1548,10 @@ class SearcherAgent:
                 if not url_action_ids:
                     actionless_provider_sources += 1
                     continue
-                route = _candidate_route_decision(
-                    canonical,
-                    provider_source,
-                    url_action_ids,
-                    completed_action_by_id,
-                    tasks,
-                )
+                route = routes_by_canonical[canonical]
                 if route.decision == "routed":
                     assert route.routed_task_id is not None
-                    route_tasks = [task_by_id[route.routed_task_id]]
-                    if _is_unrelated_promotional_source(canonical, route_tasks):
-                        promotional_provider_sources += 1
-                        route = route.model_copy(
-                            update={
-                                "decision": "excluded",
-                                "routed_task_id": None,
-                                "reason_code": "promotional_source_excluded",
-                            }
-                        )
-                    elif routed_candidate_count >= max_candidate_routes:
-                        route = route.model_copy(
-                            update={
-                                "decision": "limit_reached",
-                                "routed_task_id": None,
-                                "reason_code": "route_limit_reached",
-                            }
-                        )
-                    else:
-                        mapped_task_ids = [route.routed_task_id]
-                        routed_candidate_count += 1
-                candidate_routes.append(route)
+                    mapped_task_ids = [route.routed_task_id]
                 if not mapped_task_ids:
                     unassigned_provider_sources += 1
                     continue
@@ -1231,7 +1591,10 @@ class SearcherAgent:
             proposed_source_type = (
                 draft_source.source_type
                 if draft_source
-                else SourceType.UNKNOWN
+                else _candidate_route_source_type(
+                    matching_route,
+                    canonical,
+                )
             )
             source_type = _refine_source_type(
                 proposed_source_type,
@@ -1260,6 +1623,27 @@ class SearcherAgent:
                             completed_action_by_id[action_id].queries[0]
                             for action_id in observed_action_ids
                             if len(completed_action_by_id[action_id].queries) == 1
+                            and (
+                                set(
+                                    completed_action_by_id[
+                                        action_id
+                                    ].query_task_ids.get(
+                                        completed_action_by_id[action_id].queries[0],
+                                        [],
+                                    )
+                                ).intersection(mapped_task_ids)
+                                or (
+                                    not completed_action_by_id[
+                                        action_id
+                                    ].query_task_ids
+                                    and len(
+                                        completed_action_by_id[
+                                            action_id
+                                        ].scope_task_ids
+                                    )
+                                    == 1
+                                )
+                            )
                         ]
                     ),
                     relevance_note=relevance_note,

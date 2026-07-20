@@ -207,10 +207,12 @@ class OpenAISearcherClient:
                 "Discover public source candidates only. Do not extract a final "
                 "profile or assert normalized facts. For every task, issue at "
                 "least minimum_query_attempts provided search_queries exactly as "
-                "written before optional derived queries. Map every issued query "
-                "and every retained URL to its task. Retain a URL only when its "
-                "relevance note names a concrete target or acceptance criterion; "
-                "a brand mention alone is insufficient."
+                "written before optional derived queries. Use one task and exactly "
+                "one query per search tool action; never bundle queries from "
+                "different tasks into one action. Map every issued query and every "
+                "retained URL to its task. Retain a URL only when its relevance "
+                "note names a concrete target or acceptance criterion; a brand "
+                "mention alone is insufficient."
             ),
         }
         web_search_tool: dict[str, Any] = {
@@ -246,6 +248,7 @@ class OpenAISearcherClient:
                 max_tool_calls=max_search_calls,
                 tools=[web_search_tool],
                 tool_choice="required",
+                parallel_tool_calls=False,
                 include=["web_search_call.action.sources"],
                 store=False,
                 metadata={

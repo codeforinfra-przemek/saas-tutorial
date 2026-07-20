@@ -192,15 +192,23 @@ using the old field still load, but new artifacts serialize the new name. Exact
 unambiguous; batched activity remains auditable through `observed_in_action_ids`.
 An executed derived query may be assigned to a task only when the model reports
 that exact provider-observed query for one task; ambiguous multi-task assignments
-remain action-only. Searcher schema `1.3.0` also records `candidate_routes` for
-provider-observed URLs that the model did not map. Candidate Router promotes a
-URL only when its completed action has one task, or when URL/title terms produce
-a unique, thresholded task match with a minimum margin. Ambiguous candidates stay
-in the action trace. The default promotion ceiling is five per Searcher run and
-can be changed with `--max-candidate-routes`; `0` disables promotion while keeping
-the audit decisions. Third-party registry aggregators are classified as
-`routing_lead`, draft legislation as `legislative_project`, and unrelated
-contest/campaign URLs are kept out of Extractor inputs.
+remain action-only. Searcher schema `1.4.0` records the deterministic
+`query_task_ids` mapping on each action and asks the provider to use one task and
+one query per search action. Provider output can still omit or batch queries, so
+the local validator never invents missing URL-to-query provenance. Citation
+titles are merged by canonical URL and sentence punctuation is removed before
+URL identity is calculated.
+
+`candidate_routes` records provider-observed URLs that the model did not map.
+Candidate Router promotes a URL only when its completed action has one task, its
+complete query attribution resolves to one task, a distinctive registry/legal
+authority path resolves to one task, or URL/title terms produce a unique,
+thresholded match with a minimum margin. Ambiguous candidates stay in the action
+trace. The default promotion ceiling is five per Searcher run and can be changed
+with `--max-candidate-routes`; `0` disables promotion while keeping the audit
+decisions. Third-party registry aggregators are classified as `routing_lead`,
+draft legislation as `legislative_project`, and unrelated contest/campaign URLs
+are kept out of Extractor inputs.
 
 Paid quality retries are disabled by default, so a coverage gap cannot silently
 create another API request. To permit at most two one-task retries while keeping

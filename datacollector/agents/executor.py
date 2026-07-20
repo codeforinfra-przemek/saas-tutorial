@@ -932,7 +932,7 @@ class ExecutorAgent:
                 )
             )
         return SearchResults(
-            schema_version="1.3.0",
+            schema_version="1.4.0",
             search_id=str(uuid4()),
             plan_run_id=plan.run_id,
             plan_sha256=plan_sha256,

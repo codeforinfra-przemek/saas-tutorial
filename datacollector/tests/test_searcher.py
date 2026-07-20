@@ -8,10 +8,15 @@ from datacollector.agents.planner import PlannerAgent
 from datacollector.agents.searcher import (
     SearcherAgent,
     SearcherValidationError,
+    _attribute_action_queries,
     _candidate_domain,
     _candidate_route_decision,
+    _candidate_route_source_type,
+    _canonicalize_public_url,
+    _combine_generations,
     _is_unrelated_promotional_source,
     _refine_source_type,
+    _select_candidate_route_urls,
 )
 from datacollector.catalog import load_question_catalog
 from datacollector.llm.protocol import (
@@ -656,6 +661,14 @@ class SearcherAgentTests(TestCase):
         )
         self.assertTrue(results.sources[0].provider_observed)
         self.assertNotIn("trk=", results.sources[0].canonical_url)
+        self.assertEqual(
+            results.actions[0].query_task_ids,
+            {
+                results.actions[0].queries[0]: [
+                    results.selected_task_ids[0]
+                ]
+            },
+        )
         self.assertIn(
             "https://example.com/unmapped-result",
             results.actions[0].source_urls,
@@ -731,6 +744,153 @@ class SearcherAgentTests(TestCase):
         self.assertEqual(decision.decision, "unassigned")
         self.assertIsNone(decision.routed_task_id)
 
+    def test_url_canonicalization_removes_sentence_punctuation(self):
+        self.assertEqual(
+            _canonicalize_public_url(
+                "https://www.gov.pl/web/gov/uzyskaj-informacje-z-krs.)"
+            ),
+            "https://www.gov.pl/web/gov/uzyskaj-informacje-z-krs",
+        )
+
+    def test_provider_citations_enrich_canonical_source_title(self):
+        task = self.plan.tasks[0]
+        generation = FakeSearcherLLM().generate(
+            self.plan,
+            [task],
+            "prompt",
+            iteration=1,
+            call_index=1,
+            max_search_calls=2,
+            min_queries_per_task=1,
+        )
+        generation = SearcherGeneration(
+            draft=generation.draft,
+            usage=generation.usage,
+            actions=generation.actions,
+            provider_sources=[
+                ProviderSearchSource(url="https://example.com/franchise"),
+                ProviderSearchSource(
+                    url="https://example.com/franchise?utm_source=openai",
+                    title="Official franchise title from citation",
+                ),
+            ],
+        )
+
+        combined = _combine_generations([generation])
+
+        self.assertEqual(len(combined.provider_sources), 1)
+        self.assertEqual(
+            combined.provider_sources[0].title,
+            "Official franchise title from citation",
+        )
+
+    def test_candidate_router_uses_single_task_query_attribution(self):
+        tasks = self.plan.tasks[:2]
+        query = tasks[0].search_queries[0]
+        url = "https://example.com/opaque-result/123"
+        action = SearchAction(
+            action_id="query-attributed-action",
+            call_index=1,
+            scope_task_ids=[task.task_id for task in tasks],
+            action_type="search",
+            queries=[query],
+            source_urls=[url],
+        )
+        draft = SearcherDraft(
+            task_results=[
+                SearcherTaskDraft(
+                    task_id=tasks[0].task_id,
+                    status=SearchTaskStatus.PARTIAL,
+                    attempted_queries=[query],
+                )
+            ]
+        )
+        attributed_action = _attribute_action_queries(
+            [action],
+            tasks,
+            draft,
+        )[0]
+
+        decision = _candidate_route_decision(
+            url,
+            ProviderSearchSource(url=url),
+            [attributed_action.action_id],
+            {attributed_action.action_id: attributed_action},
+            tasks,
+        )
+
+        self.assertEqual(
+            attributed_action.query_task_ids,
+            {query: [tasks[0].task_id]},
+        )
+        self.assertEqual(decision.decision, "routed")
+        self.assertEqual(decision.routed_task_id, tasks[0].task_id)
+        self.assertEqual(decision.reason_code, "single_task_query_scope")
+
+    def test_candidate_router_uses_distinctive_authority_paths(self):
+        plan = PlannerAgent(load_question_catalog()).create_plan(
+            PlannerInput(
+                brand_name="Example",
+                target_country="PL",
+                depth="due_diligence",
+            )
+        )
+        tasks = plan.tasks[:5]
+        action = SearchAction(
+            action_id="authority-action",
+            call_index=1,
+            scope_task_ids=[task.task_id for task in tasks],
+            action_type="search",
+            queries=[task.search_queries[0] for task in tasks],
+            source_urls=[
+                "https://www.imsig.pl/krs/0000636642",
+                "https://isap.sejm.gov.pl/isap.nsf/WDU20250001071.pdf",
+            ],
+        )
+
+        identity = _candidate_route_decision(
+            action.source_urls[0],
+            ProviderSearchSource(url=action.source_urls[0]),
+            [action.action_id],
+            {action.action_id: action},
+            tasks,
+        )
+        local_law = _candidate_route_decision(
+            action.source_urls[1],
+            ProviderSearchSource(url=action.source_urls[1]),
+            [action.action_id],
+            {action.action_id: action},
+            tasks,
+        )
+
+        self.assertEqual(identity.routed_task_id, tasks[0].task_id)
+        self.assertEqual(identity.reason_code, "authority_path_match")
+        self.assertEqual(
+            _candidate_route_source_type(identity, identity.canonical_url),
+            SourceType.ROUTING_LEAD,
+        )
+        self.assertEqual(local_law.routed_task_id, tasks[4].task_id)
+        self.assertEqual(local_law.reason_code, "authority_path_match")
+        self.assertEqual(
+            _candidate_route_source_type(local_law, local_law.canonical_url),
+            SourceType.LEGAL_DOCUMENT,
+        )
+
+        second_local_law = _candidate_route_decision(
+            "https://uokik.gov.pl/download/26014",
+            ProviderSearchSource(url="https://uokik.gov.pl/download/26014"),
+            [action.action_id],
+            {action.action_id: action},
+            tasks,
+        )
+        selected = _select_candidate_route_urls(
+            [local_law, second_local_law, identity],
+            2,
+        )
+
+        self.assertIn(identity.canonical_url, selected)
+        self.assertEqual(len(selected), 2)
+
     def test_candidate_router_uses_unique_multi_task_lexical_evidence(self):
         tasks = self.plan.tasks[:5]
         url = "https://example.com/company-registry-legal-name-registration-parent-entities"
@@ -747,7 +907,7 @@ class SearcherAgentTests(TestCase):
             url,
             ProviderSearchSource(
                 url=url,
-                title="Company registry legal name registration KRS parent entities",
+                title="Company registry legal name registration parent entities",
             ),
             [action.action_id],
             {action.action_id: action},
@@ -981,6 +1141,9 @@ class SearcherAgentTests(TestCase):
             lambda payload: payload["actions"][0].update(action_id=None),
             lambda payload: payload["actions"][0].update(status="failed"),
             lambda payload: payload["actions"][0].update(scope_task_ids=[]),
+            lambda payload: payload["actions"][0].update(
+                query_task_ids={"query never issued": payload["selected_task_ids"]}
+            ),
             lambda payload: payload["actions"][0].update(
                 source_urls=["https://example.com/different"]
             ),

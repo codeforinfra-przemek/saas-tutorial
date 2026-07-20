@@ -150,6 +150,7 @@ class OpenAISearcherClientTests(TestCase):
             "PL",
         )
         self.assertEqual(request["tool_choice"], "required")
+        self.assertFalse(request["parallel_tool_calls"])
         self.assertEqual(request["max_tool_calls"], 4)
         self.assertEqual(request["metadata"]["call_index"], "3")
         self.assertEqual(
@@ -163,6 +164,10 @@ class OpenAISearcherClientTests(TestCase):
         )
         self.assertIs(request["text_format"], SearcherDraft)
         payload = json.loads(request["input"][1]["content"])
+        self.assertIn(
+            "exactly one query per search tool action",
+            payload["instruction"],
+        )
         self.assertRegex(
             payload["search_context"]["current_date"],
             r"^\d{4}-\d{2}-\d{2}$",

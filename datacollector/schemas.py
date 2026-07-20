@@ -24,8 +24,8 @@ from pydantic import (
 
 SCHEMA_VERSION = "1.2.0"
 PROMPT_VERSION = "planner-system-v2"
-SEARCHER_SCHEMA_VERSION = "1.3.0"
-SEARCHER_PROMPT_VERSION = "searcher-system-v3"
+SEARCHER_SCHEMA_VERSION = "1.4.0"
+SEARCHER_PROMPT_VERSION = "searcher-system-v4"
 EXTRACTOR_SCHEMA_VERSION = "1.2.0"
 EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
 CHECKER_SCHEMA_VERSION = "1.3.0"
@@ -768,6 +768,7 @@ class SearchAction(ClosedModel):
     action_type: str = Field(min_length=1, max_length=100)
     status: str = Field(default="completed", min_length=1, max_length=100)
     queries: list[str] = Field(default_factory=list)
+    query_task_ids: dict[str, list[str]] = Field(default_factory=dict)
     target_url: str | None = None
     source_urls: list[str] = Field(default_factory=list)
 
@@ -785,6 +786,8 @@ class CandidateRouteDecision(ClosedModel):
     matched_terms: list[str] = Field(default_factory=list, max_length=50)
     reason_code: Literal[
         "single_task_action",
+        "single_task_query_scope",
+        "authority_path_match",
         "unique_lexical_match",
         "ambiguous_scope",
         "insufficient_lexical_evidence",
@@ -850,7 +853,13 @@ class SearchAttemptFailure(ClosedModel):
 class SearchResults(ClosedModel):
     """Auditable source-discovery artifact consumed later by Extractor."""
 
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = SEARCHER_SCHEMA_VERSION
+    schema_version: Literal[
+        "1.0.0",
+        "1.1.0",
+        "1.2.0",
+        "1.3.0",
+        "1.4.0",
+    ] = SEARCHER_SCHEMA_VERSION
     prompt_version: str = SEARCHER_PROMPT_VERSION
     search_id: str
     plan_run_id: str
@@ -961,9 +970,31 @@ class SearchResults(ClosedModel):
                 raise ValueError(
                     "Search action scopes may reference only selected tasks."
                 )
+            if self.schema_version == "1.4.0" and not set(
+                action.query_task_ids
+            ).issubset(action.queries):
+                raise ValueError(
+                    "Search query attribution may reference only action queries."
+                )
+            for query, task_ids in (
+                action.query_task_ids.items()
+                if self.schema_version == "1.4.0"
+                else []
+            ):
+                if (
+                    not query.strip()
+                    or not task_ids
+                    or len(task_ids) != len(set(task_ids))
+                    or not set(task_ids).issubset(action.scope_task_ids)
+                ):
+                    raise ValueError(
+                        "Search query attribution requires unique scoped task IDs."
+                    )
         routed_urls: set[str] = set()
         for route in (
-            self.candidate_routes if self.schema_version == "1.3.0" else []
+            self.candidate_routes
+            if self.schema_version in {"1.3.0", "1.4.0"}
+            else []
         ):
             if len(route.action_ids) != len(set(route.action_ids)):
                 raise ValueError("Candidate Router action IDs must be unique.")
@@ -998,11 +1029,45 @@ class SearchResults(ClosedModel):
                     raise ValueError(
                         "Candidate route must remain within observed action scope."
                     )
+                if route.reason_code == "single_task_query_scope":
+                    query_actions = [
+                        action_by_id[action_id]
+                        for action_id in route.action_ids
+                        if action_by_id[action_id].action_type == "search"
+                    ]
+                    attributed_tasks = {
+                        task_id
+                        for action in query_actions
+                        for query in action.queries
+                        for task_id in action.query_task_ids.get(query, [])
+                    }
+                    if (
+                        not query_actions
+                        or any(
+                            not action.queries
+                            or not set(action.queries).issubset(
+                                action.query_task_ids
+                            )
+                            for action in query_actions
+                        )
+                        or attributed_tasks != {route.routed_task_id}
+                    ):
+                        raise ValueError(
+                            "Query-scoped candidate route requires complete "
+                            "single-task query attribution."
+                        )
+                if (
+                    route.reason_code == "authority_path_match"
+                    and not route.matched_terms
+                ):
+                    raise ValueError(
+                        "Authority-path candidate route requires routing signals."
+                    )
                 routed_urls.add(route.canonical_url)
             elif route.routed_task_id is not None:
                 raise ValueError("Unrouted candidates cannot name a routed task.")
         source_by_id = {source.source_id: source for source in self.sources}
-        if self.schema_version == "1.3.0":
+        if self.schema_version in {"1.3.0", "1.4.0"}:
             sources_by_url = {
                 source.canonical_url: source for source in self.sources
             }
@@ -1125,6 +1190,27 @@ class SearchResults(ClosedModel):
                     raise ValueError(
                         "Source query provenance must come from a single-query "
                         "observed action."
+                    )
+                if self.schema_version == "1.4.0" and any(
+                    not any(
+                        action.queries == [query]
+                        and (
+                            set(action.query_task_ids.get(query, [])).intersection(
+                                source.task_ids
+                            )
+                            or (
+                                not action.query_task_ids
+                                and len(action.scope_task_ids) == 1
+                                and action.scope_task_ids[0] in source.task_ids
+                            )
+                        )
+                        for action in observed_actions
+                    )
+                    for query in source.discovered_via_queries
+                ):
+                    raise ValueError(
+                        "Source query provenance must share deterministic task "
+                        "attribution with the source."
                     )
         for result in self.task_results:
             for values, field_name in (
