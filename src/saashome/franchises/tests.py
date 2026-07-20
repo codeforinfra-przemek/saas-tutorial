@@ -1,3 +1,5 @@
+import hashlib
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -7,6 +9,14 @@ from django.urls import reverse
 
 from .research_import import _resolved, import_franchise_research
 from .research_workbench import create_research_workspace
+from .research_jobs import (
+    ResearchCommandResult,
+    ResearchJobError,
+    build_research_command,
+    claim_next_job,
+    process_research_job,
+    queue_research_job,
+)
 
 from datacollector.agents.reviewer import HumanReviewer
 from datacollector.schemas import HumanReviewDecision, NormalizerMode
@@ -20,6 +30,7 @@ from .models import (
     FranchiseResearchClaim,
     FranchiseResearchField,
     FranchiseResearchImport,
+    FranchiseResearchJob,
     FranchiseResearchSource,
     FranchiseResearchTask,
     FranchiseResearchValue,
@@ -203,3 +214,147 @@ class FranchiseResearchImportTests(TestCase):
         )
         self.assertEqual(workspace.stage_summary[-2]["key"], "review")
         self.assertIn("estimated_cost_usd", workspace.cost_summary)
+
+    def test_paid_job_queue_builds_only_bounded_typed_command_and_records_failure(self):
+        category, _ = FranchiseCategory.objects.get_or_create(
+            slug="job-test",
+            defaults={"name": "Job test"},
+        )
+        franchise = Franchise.objects.create(
+            name="Job Brand",
+            slug="job-brand",
+            category=category,
+            short_description="Job fixture",
+        )
+        workspace = FranchiseResearchWorkspace.objects.create(
+            franchise=franchise,
+            normalization_id=self.normalized.normalization_id,
+            plan_run_id=self.normalized.plan_run_id,
+            target_country=self.normalized.target_country,
+            depth=self.normalized.depth.value,
+            iteration=self.normalized.iteration,
+            normalized_reference=str(self.lineage["normalized_path"]),
+            normalized_sha256=self.lineage["normalized_sha256"],
+        )
+        check_path = Path(self.temporary_directory.name) / "check-current.json"
+        check_path.write_text("checker fixture", encoding="utf-8")
+        check_sha256 = hashlib.sha256(check_path.read_bytes()).hexdigest()
+        configuration = {
+            "policy": "advance",
+            "max_cost_usd": "0.75",
+            "max_rounds": 1,
+            "normalize_incomplete": False,
+            "max_search_calls": 8,
+            "max_extractor_api_calls": 12,
+        }
+        with (
+            patch(
+                "franchises.research_jobs._current_check",
+                return_value=(check_path, check_sha256),
+            ),
+            patch(
+                "franchises.research_jobs.load_checker_results",
+                return_value=(self.checker, check_sha256),
+            ),
+        ):
+            job = queue_research_job(
+                workspace,
+                kind=FranchiseResearchJob.KIND_LOOP,
+                configuration=configuration,
+            )
+            with self.assertRaises(ResearchJobError):
+                queue_research_job(
+                    workspace,
+                    kind=FranchiseResearchJob.KIND_LOOP,
+                    configuration=configuration,
+                )
+            command = build_research_command(job)
+
+        self.assertIsInstance(command, list)
+        self.assertIn("--max-cost-usd", command)
+        self.assertIn("0.75", command)
+        self.assertIn("--advance-with-documented-gaps", command)
+        self.assertNotIn("--free", command)
+        claimed = claim_next_job()
+        self.assertEqual(claimed.pk, job.pk)
+        with patch("franchises.research_jobs.build_research_command", return_value=command):
+            process_research_job(
+                claimed,
+                runner=lambda _job, _command: ResearchCommandResult(1, "provider failed"),
+            )
+        job.refresh_from_db()
+        self.assertEqual(job.status, FranchiseResearchJob.STATUS_FAILED)
+        self.assertEqual(job.error_code, "ResearchJobError")
+        self.assertTrue(workspace.events.filter(event_type="job_failed").exists())
+
+    def test_successful_normalizer_job_records_exact_cost_and_result_workspace(self):
+        category, _ = FranchiseCategory.objects.get_or_create(
+            slug="job-success-test",
+            defaults={"name": "Job success test"},
+        )
+        franchise = Franchise.objects.create(
+            name="Successful Job Brand",
+            slug="successful-job-brand",
+            category=category,
+            short_description="Successful job fixture",
+        )
+        workspace = FranchiseResearchWorkspace.objects.create(
+            franchise=franchise,
+            normalization_id=self.normalized.normalization_id,
+            plan_run_id=self.normalized.plan_run_id,
+            target_country=self.normalized.target_country,
+            depth=self.normalized.depth.value,
+            iteration=self.normalized.iteration,
+            normalized_reference=str(self.lineage["normalized_path"]),
+            normalized_sha256=self.lineage["normalized_sha256"],
+        )
+        job = FranchiseResearchJob.objects.create(
+            workspace=workspace,
+            kind=FranchiseResearchJob.KIND_NORMALIZE,
+            status=FranchiseResearchJob.STATUS_RUNNING,
+            input_reference=str(self.lineage["check_path"]),
+            input_sha256=self.lineage["check_sha256"],
+            configuration={"normalize_incomplete": True},
+        )
+        normalized_path = Path(self.temporary_directory.name) / "normalized-new.json"
+        normalized_path.write_text("fixture", encoding="utf-8")
+        output = json.dumps(
+            {
+                "normalized_path": str(normalized_path),
+                "usage_totals": {
+                    "api_attempts_recorded": 1,
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "reasoning_tokens": 5,
+                    "total_tokens": 120,
+                    "tool_calls": 0,
+                    "tool_cost_usd": "0",
+                    "estimated_cost_usd": "0.01250000",
+                },
+            }
+        )
+        with (
+            patch(
+                "franchises.research_jobs.build_research_command",
+                return_value=["python", "-m", "datacollector", "normalize"],
+            ),
+            patch(
+                "franchises.research_jobs.load_normalizer_results",
+                return_value=(self.normalized, "d" * 64),
+            ),
+            patch(
+                "franchises.research_jobs.create_research_workspace",
+                return_value=(workspace, False),
+            ),
+        ):
+            process_research_job(
+                job,
+                runner=lambda _job, _command: ResearchCommandResult(0, output),
+            )
+        job.refresh_from_db()
+        self.assertEqual(job.status, FranchiseResearchJob.STATUS_SUCCEEDED)
+        self.assertEqual(job.progress_percent, 100)
+        self.assertEqual(job.cost_summary["estimated_cost_usd"], "0.01250000")
+        self.assertEqual(job.result_workspace, workspace)
+        self.assertEqual(job.result_normalized_sha256, "d" * 64)
+        self.assertTrue(workspace.events.filter(event_type="job_succeeded").exists())

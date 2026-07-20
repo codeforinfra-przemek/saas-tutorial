@@ -12,6 +12,7 @@ from .models import (
     FranchiseResearchImport,
     FranchiseResearchDocument,
     FranchiseResearchEvent,
+    FranchiseResearchJob,
     FranchiseResearchReviewField,
     FranchiseResearchSource,
     FranchiseResearchTask,
@@ -252,6 +253,21 @@ class FranchiseResearchDocumentAdmin(admin.ModelAdmin):
     list_filter = ("document_type", "access_level", "status")
     search_fields = ("original_name", "workspace__franchise__name", "sha256")
     readonly_fields = ("sha256", "size_bytes", "uploaded_by", "created_at")
+
+
+@admin.register(FranchiseResearchJob)
+class FranchiseResearchJobAdmin(admin.ModelAdmin):
+    list_display = (
+        "workspace",
+        "kind",
+        "status",
+        "current_stage",
+        "progress_percent",
+        "queued_at",
+    )
+    list_filter = ("kind", "status")
+    search_fields = ("workspace__franchise__name", "job_id", "error_code")
+    readonly_fields = tuple(field.name for field in FranchiseResearchJob._meta.fields)
 
 
 for research_model in (

@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -14,6 +15,7 @@ from franchises.models import (
     Franchise,
     FranchiseCategory,
     FranchiseResearchDocument,
+    FranchiseResearchJob,
     FranchiseResearchReviewField,
     FranchiseResearchWorkspace,
 )
@@ -316,3 +318,97 @@ class ResearchWorkbenchViewTests(TestCase):
         response = self.client.get(download)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Disposition"], 'attachment; filename="agreement.pdf"')
+
+    def test_staff_can_queue_a_bounded_paid_job_from_friendly_form(self):
+        queue_url = reverse(
+            "backoffice:research_workbench_job_queue",
+            args=[self.workspace.workspace_id],
+        )
+        self.client.force_login(self.staff)
+        with patch("backoffice.views.queue_research_job") as queue:
+            queue.return_value.get_kind_display.return_value = "Kontynuuj research"
+            response = self.client.post(
+                queue_url,
+                {
+                    "kind": "loop",
+                    "policy": "advance",
+                    "max_cost_usd": "0.75",
+                    "max_rounds": "1",
+                    "normalize_incomplete": "on",
+                    "max_search_calls": "8",
+                    "max_extractor_api_calls": "12",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(queue.call_args.kwargs["kind"], "loop")
+        self.assertEqual(
+            queue.call_args.kwargs["configuration"],
+            {
+                "policy": "advance",
+                "max_cost_usd": "0.75",
+                "max_rounds": 1,
+                "normalize_incomplete": True,
+                "max_search_calls": 8,
+                "max_extractor_api_calls": 12,
+            },
+        )
+
+    def test_job_status_and_cancel_are_staff_only(self):
+        job = FranchiseResearchJob.objects.create(
+            workspace=self.workspace,
+            kind=FranchiseResearchJob.KIND_LOOP,
+            input_reference="/tmp/check.json",
+            input_sha256="b" * 64,
+            configuration={},
+            requested_by=self.staff,
+        )
+        status_url = reverse(
+            "backoffice:research_workbench_job_status",
+            args=[self.workspace.workspace_id, job.job_id],
+        )
+        cancel_url = reverse(
+            "backoffice:research_workbench_job_cancel",
+            args=[self.workspace.workspace_id, job.job_id],
+        )
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(status_url).status_code, 302)
+        self.client.force_login(self.staff)
+        response = self.client.get(status_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "queued")
+        self.assertEqual(self.client.get(cancel_url).status_code, 405)
+        self.assertEqual(self.client.post(cancel_url).status_code, 302)
+        job.refresh_from_db()
+        self.assertEqual(job.status, FranchiseResearchJob.STATUS_CANCELLED)
+
+    def test_manual_value_can_reference_private_document_without_ai_processing(self):
+        document = FranchiseResearchDocument.objects.create(
+            workspace=self.workspace,
+            file="fixture/agreement.pdf",
+            original_name="agreement.pdf",
+            document_type=FranchiseResearchDocument.TYPE_CONTRACT,
+            access_level=FranchiseResearchDocument.ACCESS_RESTRICTED,
+            size_bytes=100,
+            sha256="c" * 64,
+            uploaded_by=self.staff,
+        )
+        edit = reverse(
+            "backoffice:research_workbench_field_edit",
+            args=[self.workspace.workspace_id, self.missing.pk],
+        )
+        self.client.force_login(self.staff)
+        self.client.post(
+            edit,
+            {
+                "reviewer_value": "250 000 PLN",
+                "reviewer_note": "Potwierdzone w poufnej umowie.",
+                "supporting_documents": [str(document.pk)],
+            },
+        )
+        self.missing.refresh_from_db()
+        document.refresh_from_db()
+        self.assertEqual(
+            list(self.missing.supporting_documents.all()),
+            [document],
+        )
+        self.assertEqual(document.status, FranchiseResearchDocument.STATUS_READY)

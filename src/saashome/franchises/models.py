@@ -920,6 +920,11 @@ class FranchiseResearchReviewField(models.Model):
         related_name="research_field_decisions",
     )
     decided_at = models.DateTimeField(null=True, blank=True)
+    supporting_documents = models.ManyToManyField(
+        "FranchiseResearchDocument",
+        blank=True,
+        related_name="supported_review_fields",
+    )
     sort_order = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1047,6 +1052,97 @@ class FranchiseResearchEvent(models.Model):
     class Meta:
         ordering = ["-created_at", "-id"]
         indexes = [models.Index(fields=["workspace", "created_at"])]
+
+
+class FranchiseResearchJob(models.Model):
+    KIND_LOOP = "loop"
+    KIND_CHECK = "check"
+    KIND_NORMALIZE = "normalize"
+    KIND_CHOICES = (
+        (KIND_LOOP, "Kontynuuj research"),
+        (KIND_CHECK, "Ponów kontrolę jakości"),
+        (KIND_NORMALIZE, "Utwórz nowy draft danych"),
+    )
+    STATUS_QUEUED = "queued"
+    STATUS_RUNNING = "running"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = (
+        (STATUS_QUEUED, "W kolejce"),
+        (STATUS_RUNNING, "W trakcie"),
+        (STATUS_SUCCEEDED, "Zakończone"),
+        (STATUS_FAILED, "Błąd"),
+        (STATUS_CANCELLED, "Anulowane"),
+    )
+
+    job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    workspace = models.ForeignKey(
+        FranchiseResearchWorkspace,
+        on_delete=models.CASCADE,
+        related_name="jobs",
+    )
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_QUEUED,
+    )
+    input_reference = models.TextField()
+    input_sha256 = models.CharField(max_length=64)
+    configuration = models.JSONField(default=dict)
+    current_stage = models.CharField(max_length=120, default="Oczekiwanie na worker")
+    progress_percent = models.PositiveSmallIntegerField(default=0)
+    log = models.TextField(blank=True)
+    result_summary = models.JSONField(default=dict)
+    cost_summary = models.JSONField(default=dict)
+    result_loop_reference = models.TextField(blank=True)
+    result_loop_sha256 = models.CharField(max_length=64, blank=True)
+    result_check_reference = models.TextField(blank=True)
+    result_check_sha256 = models.CharField(max_length=64, blank=True)
+    result_normalized_reference = models.TextField(blank=True)
+    result_normalized_sha256 = models.CharField(max_length=64, blank=True)
+    result_workspace = models.ForeignKey(
+        FranchiseResearchWorkspace,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="source_jobs",
+    )
+    error_code = models.CharField(max_length=80, blank=True)
+    error_message = models.TextField(blank=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="requested_research_jobs",
+    )
+    queued_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-queued_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace"],
+                condition=models.Q(status__in=["queued", "running"]),
+                name="unique_active_research_job_per_workspace",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["status", "queued_at"]),
+            models.Index(fields=["workspace", "queued_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.workspace.franchise} {self.kind} {self.status}"
+
+    @property
+    def is_active(self):
+        return self.status in {self.STATUS_QUEUED, self.STATUS_RUNNING}
 
 
 @receiver(post_delete, sender=FranchiseResearchDocument)

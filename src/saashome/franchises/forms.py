@@ -9,6 +9,7 @@ from .models import (
     FranchiseCategory,
     FranchiseLocation,
     FranchiseResearchDocument,
+    FranchiseResearchJob,
     FranchiseResearchReviewField,
     FranchiseUpdateRequest,
 )
@@ -355,9 +356,16 @@ class FranchiseAssetForm(forms.ModelForm):
 
 
 class ResearchReviewFieldForm(forms.ModelForm):
+    supporting_documents = forms.ModelMultipleChoiceField(
+        queryset=FranchiseResearchDocument.objects.none(),
+        required=False,
+        label="Dokumenty potwierdzające",
+        widget=forms.CheckboxSelectMultiple,
+    )
+
     class Meta:
         model = FranchiseResearchReviewField
-        fields = ("reviewer_value", "reviewer_note")
+        fields = ("reviewer_value", "reviewer_note", "supporting_documents")
         labels = {
             "reviewer_value": "Wartość po korekcie",
             "reviewer_note": "Notatka redakcyjna",
@@ -369,6 +377,10 @@ class ResearchReviewFieldForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        if self.instance and self.instance.workspace_id:
+            self.fields["supporting_documents"].queryset = (
+                self.instance.workspace.documents.all()
+            )
         self.fields["reviewer_value"].widget.attrs.update(
             {
                 "class": FIELD_CLASSES,
@@ -450,3 +462,62 @@ class ResearchWorkspaceDecisionForm(forms.Form):
         required=False,
         label="Rozumiem, że nieuzupełnione pola pozostaną udokumentowanymi brakami.",
     )
+
+
+class ResearchJobForm(forms.Form):
+    POLICY_REPAIR = "repair"
+    POLICY_ADVANCE = "advance"
+    POLICY_CHOICES = (
+        (POLICY_REPAIR, "Pogłęb aktualnie badane braki"),
+        (POLICY_ADVANCE, "Przejdź do kolejnego zakresu z udokumentowanymi brakami"),
+    )
+
+    kind = forms.ChoiceField(
+        choices=FranchiseResearchJob.KIND_CHOICES,
+        label="Co uruchomić?",
+        initial=FranchiseResearchJob.KIND_LOOP,
+    )
+    policy = forms.ChoiceField(
+        choices=POLICY_CHOICES,
+        label="Strategia kontynuacji",
+        initial=POLICY_REPAIR,
+    )
+    max_cost_usd = forms.DecimalField(
+        label="Maksymalny koszt tego uruchomienia (USD)",
+        min_value=0.10,
+        max_value=10,
+        decimal_places=2,
+        initial=0.90,
+    )
+    max_rounds = forms.IntegerField(
+        label="Maksymalna liczba rund",
+        min_value=1,
+        max_value=3,
+        initial=1,
+    )
+    normalize_incomplete = forms.BooleanField(
+        required=False,
+        label="Po runie przygotuj draft również wtedy, gdy pozostaną braki",
+    )
+    max_search_calls = forms.IntegerField(
+        label="Limit wywołań wyszukiwarki",
+        min_value=1,
+        max_value=30,
+        initial=10,
+    )
+    max_extractor_api_calls = forms.IntegerField(
+        label="Limit wywołań Extractora",
+        min_value=1,
+        max_value=50,
+        initial=15,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            if isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs["class"] = (
+                    "h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                )
+            else:
+                field.widget.attrs["class"] = FIELD_CLASSES

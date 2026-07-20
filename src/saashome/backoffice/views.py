@@ -6,6 +6,7 @@ from django.core.paginator import Paginator
 from django.db import IntegrityError
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -15,14 +16,21 @@ from django.views.decorators.http import require_POST
 from billing.models import OrganizationSubscription, Plan
 from franchises.forms import (
     ResearchDocumentUploadForm,
+    ResearchJobForm,
     ResearchReviewFieldForm,
     ResearchWorkspaceDecisionForm,
 )
 from franchises.models import (
     FranchiseResearchDocument,
     FranchiseResearchEvent,
+    FranchiseResearchJob,
     FranchiseResearchReviewField,
     FranchiseResearchWorkspace,
+)
+from franchises.research_jobs import (
+    ResearchJobError,
+    cancel_queued_job,
+    queue_research_job,
 )
 
 from .forms import SalesActivityForm, SalesOpportunityStageForm
@@ -189,7 +197,9 @@ def research_workbench_detail_view(request, workspace_id):
     decision_filter = request.GET.get("decision", "").strip()
     data_filter = request.GET.get("data", "").strip()
     q = request.GET.get("q", "").strip()
-    fields = workspace.review_fields.select_related("decided_by")
+    fields = workspace.review_fields.select_related("decided_by").prefetch_related(
+        "supporting_documents"
+    )
     valid_decisions = {item[0] for item in FranchiseResearchReviewField.DECISION_CHOICES}
     if decision_filter in valid_decisions:
         fields = fields.filter(decision=decision_filter)
@@ -242,6 +252,13 @@ def research_workbench_detail_view(request, workspace_id):
             rendered["status"] = "current"
             rendered["summary"] = "gotowe do eksportu/importu"
         stages.append(rendered)
+    jobs = workspace.jobs.select_related("requested_by", "result_workspace")[:10]
+    active_job = workspace.jobs.filter(
+        status__in=[
+            FranchiseResearchJob.STATUS_QUEUED,
+            FranchiseResearchJob.STATUS_RUNNING,
+        ]
+    ).first()
     return render(
         request,
         "backoffice/research_workbench_detail.html",
@@ -258,6 +275,9 @@ def research_workbench_detail_view(request, workspace_id):
             workspace_form=ResearchWorkspaceDecisionForm(
                 initial={"reviewer_notes": workspace.reviewer_notes}
             ),
+            job_form=ResearchJobForm(),
+            jobs=jobs,
+            active_job=active_job,
             documents=workspace.documents.select_related("uploaded_by"),
             events=workspace.events.select_related("actor")[:20],
         ),
@@ -328,6 +348,7 @@ def research_workbench_field_action_view(request, workspace_id, pk, action):
 def research_workbench_field_edit_view(request, workspace_id, pk):
     workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
     field = get_object_or_404(workspace.review_fields, pk=pk)
+    previous_document_ids = set(field.supporting_documents.values_list("id", flat=True))
     form = ResearchReviewFieldForm(request.POST, instance=field)
     if not form.is_valid():
         messages.error(request, "Nie udało się zapisać korekty. Sprawdź wpisane dane.")
@@ -339,6 +360,18 @@ def research_workbench_field_edit_view(request, workspace_id, pk):
         field.decided_by = request.user
         field.decided_at = timezone.now()
         field.save()
+        form.save_m2m()
+        current_document_ids = set(
+            field.supporting_documents.values_list("id", flat=True)
+        )
+        impacted_document_ids = previous_document_ids | current_document_ids
+        for document in workspace.documents.filter(id__in=impacted_document_ids):
+            document.status = (
+                FranchiseResearchDocument.STATUS_READY
+                if document.supported_review_fields.exists()
+                else FranchiseResearchDocument.STATUS_PENDING
+            )
+            document.save(update_fields=["status"])
         _reopen_workspace_if_needed(workspace)
         FranchiseResearchEvent.objects.create(
             workspace=workspace,
@@ -392,6 +425,94 @@ def research_workbench_document_upload_view(request, workspace_id):
     )
     messages.success(request, "Dokument dodano bezpiecznie. Czeka na analizę.")
     return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
+
+
+@staff_member_required
+@require_POST
+def research_workbench_job_queue_view(request, workspace_id):
+    workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
+    form = ResearchJobForm(request.POST)
+    if not form.is_valid():
+        messages.error(
+            request,
+            "Nie udało się uruchomić researchu: "
+            + " ".join(error for errors in form.errors.values() for error in errors),
+        )
+        return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
+    data = form.cleaned_data
+    configuration = {
+        "policy": data["policy"],
+        "max_cost_usd": str(data["max_cost_usd"]),
+        "max_rounds": data["max_rounds"],
+        "normalize_incomplete": data["normalize_incomplete"],
+        "max_search_calls": data["max_search_calls"],
+        "max_extractor_api_calls": data["max_extractor_api_calls"],
+    }
+    try:
+        job = queue_research_job(
+            workspace,
+            kind=data["kind"],
+            configuration=configuration,
+            requested_by=request.user,
+        )
+    except (ResearchJobError, OSError, ValueError) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            f"Zadanie „{job.get_kind_display()}” trafiło do kolejki. "
+            "Postęp pojawi się w tym widoku.",
+        )
+    return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
+
+
+@staff_member_required
+@require_POST
+def research_workbench_job_cancel_view(request, workspace_id, job_id):
+    job = get_object_or_404(
+        FranchiseResearchJob.objects.select_related("workspace"),
+        workspace__workspace_id=workspace_id,
+        job_id=job_id,
+    )
+    try:
+        cancel_queued_job(job, actor=request.user)
+    except ResearchJobError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "Zadanie zostało anulowane przed uruchomieniem.")
+    return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
+
+
+@staff_member_required
+def research_workbench_job_status_view(request, workspace_id, job_id):
+    job = get_object_or_404(
+        FranchiseResearchJob.objects.select_related("result_workspace"),
+        workspace__workspace_id=workspace_id,
+        job_id=job_id,
+    )
+    result_url = (
+        reverse(
+            "backoffice:research_workbench_detail",
+            args=[job.result_workspace.workspace_id],
+        )
+        if job.result_workspace_id
+        else ""
+    )
+    return JsonResponse(
+        {
+            "job_id": str(job.job_id),
+            "status": job.status,
+            "status_label": job.get_status_display(),
+            "stage": job.current_stage,
+            "progress": job.progress_percent,
+            "cost": job.cost_summary.get("estimated_cost_usd"),
+            "tokens": job.cost_summary.get("total_tokens", 0),
+            "error": job.error_message,
+            "log_tail": job.log[-4000:],
+            "result_url": result_url,
+            "is_active": job.is_active,
+        }
+    )
 
 
 @staff_member_required

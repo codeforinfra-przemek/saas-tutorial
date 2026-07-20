@@ -930,6 +930,28 @@ review artifact and Importer described below.
 
 The command is idempotent by `normalization_id` and exact Normalizer bytes.
 
+Run one database-backed worker as a separate process to execute jobs queued from
+the Workbench UI:
+
+```bash
+.venv/bin/python src/saashome/manage.py process_research_jobs
+```
+
+Use `--once` for an operational smoke test or a scheduler that starts one job at
+a time. The web request never performs a paid model call. It stores only typed
+limits and a selected strategy; the worker reconstructs a closed argument list,
+revalidates the exact Checker SHA-256 and plan lineage, and prevents two active
+jobs for the same workspace. While it runs, the UI polls a staff-only status
+endpoint and shows the current Resolver/Executor/Extractor/Checker/Normalizer
+stage. Exact usage and cost are attached after completion. A new Normalizer
+artifact creates a new Workbench instead of overwriting the reviewed draft.
+
+Uploaded private, confidential and deal-room documents remain human-only under
+the research-profile policy. Researchers can attach them to a corrected field as
+supporting evidence, but the public research worker never sends their bytes to
+OpenAI. Automated private-document analysis would require a separate opt-in
+policy and consent boundary.
+
 Create a portable HTML report without making another model or network call:
 
 ```bash
