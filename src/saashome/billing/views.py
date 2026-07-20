@@ -334,7 +334,8 @@ def subscription_request_review_view(request, pk, decision):
 
 @vendor_required
 @require_POST
-def checkout_view(request, plan_slug):
+def checkout_view(request, plan_slug=None):
+    plan_slug = plan_slug or request.POST.get("plan_slug", "")
     plan = get_object_or_404(
         Plan,
         slug=plan_slug,

@@ -5,41 +5,63 @@
 {% block content %}
 <section class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div class="max-w-3xl"><p class="text-xs font-extrabold uppercase text-brand-700">Widoczność per franczyza</p><h1 class="mt-2 text-3xl font-black text-slate-950 sm:text-4xl">Pakiety dla franczyzodawców</h1><p class="mt-3 text-sm leading-6 text-slate-600">Plan działa dla jednej franczyzy. Możesz niezależnie przedłużać, zmieniać lub kończyć każdą subskrypcję.</p></div>
+        <div class="max-w-3xl"><p class="text-xs font-extrabold uppercase text-brand-700">Widoczność per franczyza</p><h1 class="mt-2 text-3xl font-black text-slate-950 sm:text-4xl">Pakiety dla franczyzodawców</h1><p class="mt-3 text-sm leading-6 text-slate-600">Najpierw wybierz franczyzę i okres. Następnie zaznacz pakiet i przejdź do bezpiecznej płatności Stripe.</p></div>
         <a href="{% url 'billing:vendor_billing' %}" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-5 text-sm font-extrabold text-white hover:bg-slate-800">Moje rozliczenia</a>
     </div>
-    <div class="mt-8 grid gap-5 lg:grid-cols-3">
-    {% for plan in plans %}
-        <article class="flex h-full flex-col rounded-lg border bg-white p-6 shadow-sm {% if plan.slug == 'growth' %}border-emerald-400 ring-2 ring-emerald-100{% else %}border-slate-200{% endif %}">
-            <div class="flex items-start justify-between gap-3"><div><p class="text-xs font-extrabold uppercase text-brand-700">{{ forloop.counter }} poziom</p><h2 class="mt-1 text-2xl font-black text-slate-950">{{ plan.name }}</h2></div>{% if plan.slug == 'growth' %}<span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">Najczęściej wybierany</span>{% endif %}</div>
-            <p class="mt-4 min-h-14 text-sm leading-6 text-slate-600">{{ plan.description }}</p>
-            <p class="mt-5 text-3xl font-black text-slate-950">{{ plan.price_monthly|floatformat:0 }} <span class="text-base">PLN</span></p><p class="text-xs text-slate-500">miesięcznie za jedną franczyzę</p>
-            <ul class="mt-6 space-y-2.5 text-sm text-slate-700">
-                <li>✓ Opis do {{ plan.max_description_length }} znaków</li><li>✓ {{ plan.max_gallery_images }} zdjęć i {{ plan.max_documents_per_franchise }} dokumentów</li><li>✓ Dostęp do leadów</li>
-                <li>{% if plan.can_view_analytics %}✓{% else %}–{% endif %} Analityka profilu</li><li>{% if plan.can_be_promoted %}✓{% else %}–{% endif %} Wyższa pozycja i etykieta Promowane</li><li>{% if plan.can_feature_on_homepage %}✓{% else %}–{% endif %} Wyróżnienie na stronie i w kategorii</li><li>{% if plan.can_receive_priority_leads %}✓{% else %}–{% endif %} Priorytetowa obsługa leadów</li><li>{% if plan.has_priority_support %}✓{% else %}–{% endif %} Priorytetowe wsparcie</li>
-            </ul>
-            <div class="mt-auto pt-6">
-                {% if manageable_franchises and plan.stripe_price_monthly_id or manageable_franchises and plan.stripe_price_yearly_id %}
-                    <form method="post" action="{% url 'billing:checkout' plan.slug %}" class="space-y-3">
-                        {% csrf_token %}
-                        <label for="franchise-{{ plan.pk }}" class="block text-xs font-extrabold uppercase text-slate-500">Franczyza</label>
-                        <select id="franchise-{{ plan.pk }}" name="franchise_id" required class="block min-h-11 w-full rounded-lg border-slate-300 bg-white text-sm font-semibold text-slate-800 focus:border-emerald-500 focus:ring-emerald-500">
-                            {% for franchise in manageable_franchises %}<option value="{{ franchise.pk }}">{{ franchise.name }}</option>{% endfor %}
-                        </select>
-                        <div class="grid grid-cols-2 gap-2">
-                            {% if plan.stripe_price_monthly_id %}<button name="billing_interval" value="monthly" class="min-h-11 rounded-lg bg-slate-950 px-3 text-sm font-extrabold text-white hover:bg-slate-800">Kup miesięcznie</button>{% endif %}
-                            {% if plan.stripe_price_yearly_id %}<button name="billing_interval" value="yearly" class="min-h-11 rounded-lg bg-emerald-600 px-3 text-sm font-extrabold text-white hover:bg-emerald-700">Kup rocznie</button>{% endif %}
-                        </div>
-                    </form>
-                {% elif not manageable_franchises %}
-                    <p class="rounded-lg bg-slate-50 p-3 text-sm font-semibold text-slate-600">Zakup może rozpocząć wyłącznie owner organizacji.</p>
-                {% else %}
-                    <a href="{% url 'billing:subscriptions' %}" class="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-slate-300 px-4 text-sm font-extrabold text-slate-800 hover:bg-slate-50">Zamów manualnie</a>
-                {% endif %}
+
+    {% if manageable_franchises %}
+    <form id="pricing-selection" method="post" action="{% url 'billing:checkout_selected_plan' %}" class="mt-8">
+        {% csrf_token %}
+        <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="grid gap-5 lg:grid-cols-2">
+                <div><label for="pricing-franchise" class="text-xs font-extrabold uppercase tracking-wide text-slate-500">Franczyza</label><select id="pricing-franchise" name="franchise_id" required class="mt-2 block min-h-11 w-full rounded-lg border-slate-300 bg-white text-sm font-semibold text-slate-800 focus:border-emerald-500 focus:ring-emerald-500">{% for franchise in manageable_franchises %}<option value="{{ franchise.pk }}">{{ franchise.name }}</option>{% endfor %}</select></div>
+                <fieldset><legend class="text-xs font-extrabold uppercase tracking-wide text-slate-500">Okres rozliczeniowy</legend><div class="mt-2 grid grid-cols-2 gap-2"><label class="cursor-pointer"><input class="peer sr-only" type="radio" name="billing_interval" value="monthly" checked><span class="flex min-h-11 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 peer-checked:border-slate-950 peer-checked:bg-slate-950 peer-checked:text-white">Miesięcznie</span></label><label class="cursor-pointer"><input class="peer sr-only" type="radio" name="billing_interval" value="yearly"><span class="flex min-h-11 items-center justify-center rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-sm font-bold text-emerald-800 peer-checked:border-emerald-600 peer-checked:bg-emerald-600 peer-checked:text-white">Rocznie</span></label></div></fieldset>
             </div>
-        </article>
-    {% empty %}<p class="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">Brak planów. Uruchom <code>python manage.py seed_plans</code>.</p>{% endfor %}
-    </div>
+        </section>
+
+        <div class="mt-5 grid gap-5 lg:grid-cols-3">
+        {% for plan in plans %}
+            <article class="pricing-plan-card flex h-full flex-col rounded-lg border bg-white p-6 shadow-sm {% if plan.slug == 'growth' %}border-emerald-400 ring-2 ring-emerald-100{% else %}border-slate-200{% endif %}" data-plan-card data-monthly="{% if plan.stripe_price_monthly_id %}true{% else %}false{% endif %}" data-yearly="{% if plan.stripe_price_yearly_id %}true{% else %}false{% endif %}">
+                <div class="flex items-start justify-between gap-3"><div><p class="text-xs font-extrabold uppercase text-brand-700">{{ forloop.counter }} poziom</p><h2 class="mt-1 text-2xl font-black text-slate-950">{{ plan.name }}</h2></div>{% if plan.slug == 'growth' %}<span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">Najczęściej wybierany</span>{% endif %}</div>
+                <p class="mt-4 min-h-14 text-sm leading-6 text-slate-600">{{ plan.description }}</p>
+                <p class="mt-5 text-3xl font-black text-slate-950"><span data-monthly-price>{{ plan.price_monthly|floatformat:0 }}</span> <span class="text-base">PLN</span></p><p class="text-xs text-slate-500">miesięcznie · rocznie {{ plan.price_yearly|floatformat:0 }} PLN</p>
+                <ul class="mt-6 space-y-2.5 text-sm text-slate-700"><li>✓ Opis do {{ plan.max_description_length }} znaków</li><li>✓ {{ plan.max_gallery_images }} zdjęć i {{ plan.max_documents_per_franchise }} dokumentów</li><li>✓ Dostęp do leadów</li><li>{% if plan.can_view_analytics %}✓{% else %}–{% endif %} Analityka profilu</li><li>{% if plan.can_be_promoted %}✓{% else %}–{% endif %} Wyższa pozycja i etykieta Promowane</li><li>{% if plan.can_feature_on_homepage %}✓{% else %}–{% endif %} Wyróżnienie na stronie i w kategorii</li><li>{% if plan.can_receive_priority_leads %}✓{% else %}–{% endif %} Priorytetowa obsługa leadów</li><li>{% if plan.has_priority_support %}✓{% else %}–{% endif %} Priorytetowe wsparcie</li></ul>
+                <div class="mt-auto pt-6">{% if plan.stripe_price_monthly_id or plan.stripe_price_yearly_id %}<label class="block cursor-pointer"><input type="radio" name="plan_slug" value="{{ plan.slug }}" class="peer sr-only" required><span class="flex min-h-11 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-extrabold text-slate-800 transition peer-checked:border-emerald-600 peer-checked:bg-emerald-600 peer-checked:text-white">Wybierz pakiet {{ plan.name }}</span></label>{% else %}<p class="rounded-lg bg-slate-50 p-3 text-sm font-semibold text-slate-600">Ten pakiet jest dostępny w zamówieniu manualnym.</p>{% endif %}</div>
+            </article>
+        {% empty %}<p class="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">Brak planów. Uruchom <code>python manage.py seed_plans</code>.</p>{% endfor %}
+        </div>
+        <section class="mt-6 flex flex-col gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p class="text-sm font-black text-emerald-900">Gotowe do zakupu?</p><p id="pricing-selection-summary" class="mt-1 text-sm text-emerald-800">Wybierz pakiet, aby kontynuować.</p></div><button type="submit" class="min-h-11 rounded-lg bg-emerald-600 px-6 text-sm font-extrabold text-white hover:bg-emerald-700">Przejdź do bezpiecznej płatności</button></section>
+    </form>
+    {% else %}
+        <div class="mt-8 rounded-lg border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">Zakup może rozpocząć wyłącznie owner organizacji, który ma przypisaną franczyzę.</div>
+    {% endif %}
     <p class="mt-6 text-xs leading-5 text-slate-500">Płatność obsługuje bezpieczna strona Stripe Checkout. Dane karty nie trafiają do SaaS Home. Aktywacja następuje po potwierdzeniu płatności przez Stripe.</p>
 </section>
+{% endblock %}
+
+{% block extra_body %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("pricing-selection");
+    if (!form) return;
+    const cards = form.querySelectorAll("[data-plan-card]");
+    const summary = document.getElementById("pricing-selection-summary");
+    const franchise = document.getElementById("pricing-franchise");
+    function refresh() {
+        const interval = form.querySelector('input[name="billing_interval"]:checked').value;
+        cards.forEach(function (card) {
+            const available = card.dataset[interval] === "true";
+            const input = card.querySelector('input[name="plan_slug"]');
+            card.classList.toggle("opacity-45", !available);
+            card.classList.toggle("pointer-events-none", !available);
+            if (input) { input.disabled = !available; if (!available) input.checked = false; }
+        });
+        const selected = form.querySelector('input[name="plan_slug"]:checked');
+        summary.textContent = selected ? franchise.options[franchise.selectedIndex].text + " · " + selected.value + " · " + (interval === "yearly" ? "rocznie" : "miesięcznie") : "Wybierz pakiet, aby kontynuować.";
+    }
+    form.querySelectorAll('input[name="billing_interval"], input[name="plan_slug"]').forEach(function (input) { input.addEventListener("change", refresh); });
+    franchise.addEventListener("change", refresh);
+    refresh();
+});
+</script>
 {% endblock %}

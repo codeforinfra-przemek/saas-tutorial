@@ -23,6 +23,7 @@ urlpatterns = [
     path("pricing/", pricing_view, name="pricing"),
     path("pricing/investor/", investor_services_view, name="investor_services"),
     path("pricing/vendor/", vendor_pricing_view, name="vendor_pricing"),
+    path("billing/checkout/", checkout_view, name="checkout_selected_plan"),
     path("billing/checkout/<slug:plan_slug>/", checkout_view, name="checkout"),
     path("billing/success/", billing_success_view, name="success"),
     path("billing/customer-portal/", customer_portal_view, name="customer_portal"),
