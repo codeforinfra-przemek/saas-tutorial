@@ -7,6 +7,8 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 from datacollector.agents.checker import CheckerAgent
 from datacollector.agents.normalizer import NormalizerAgent, NormalizerValidationError
 from datacollector.cli import main
@@ -204,6 +206,34 @@ class NormalizerAgentTests(TestCase):
         )
         self.assertFalse(results.publishable)
         self.assertTrue(results.ready_for_human_review)
+
+    def test_typed_money_draft_uses_decimal_strings(self):
+        value = NormalizerValueDraft(
+            task_id="task-money",
+            target_field="fees.initial",
+            claim_ids=["claim-aaaaaaaaaaaaaaaa"],
+            value_type=NormalizedValueType.MONEY,
+            canonical_text="100 000–150 000 PLN",
+            number_min="100000",
+            number_max="150000",
+            currency="PLN",
+            precision=NormalizationPrecision.RANGE,
+        )
+
+        self.assertEqual(value.number_min, "100000")
+        self.assertEqual(value.currency, "PLN")
+
+    def test_typed_date_draft_rejects_impossible_calendar_date(self):
+        with self.assertRaises(ValidationError):
+            NormalizerValueDraft(
+                task_id="task-date",
+                target_field="documents.issue_dates",
+                claim_ids=["claim-aaaaaaaaaaaaaaaa"],
+                value_type=NormalizedValueType.DATE,
+                canonical_text="2026-02-31",
+                date_value="2026-02-31",
+                precision=NormalizationPrecision.EXACT,
+            )
 
     def test_paid_normalizer_groups_equivalent_claims_and_records_usage(self):
         results = self._run(FixtureNormalizerLLM(), mode=NormalizerMode.PAID)

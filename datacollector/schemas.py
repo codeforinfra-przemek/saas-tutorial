@@ -3834,10 +3834,19 @@ class NormalizerValueDraft(ClosedModel):
     claim_ids: list[str] = Field(min_length=1, max_length=50)
     value_type: NormalizedValueType
     canonical_text: str = Field(min_length=1, max_length=2000)
-    number_min: Decimal | None = None
-    number_max: Decimal | None = None
+    number_min: str | None = Field(
+        default=None,
+        pattern=r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$",
+    )
+    number_max: str | None = Field(
+        default=None,
+        pattern=r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$",
+    )
     boolean_value: bool | None = None
-    date_value: date | None = None
+    date_value: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+    )
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     unit: str | None = Field(default=None, max_length=100)
     precision: NormalizationPrecision
@@ -3856,11 +3865,15 @@ class NormalizerValueDraft(ClosedModel):
         if numeric:
             if self.number_min is None or self.boolean_value is not None or self.date_value:
                 raise ValueError("Numeric normalization requires only numeric values.")
-            if self.number_max is not None and self.number_max < self.number_min:
+            number_min = Decimal(self.number_min)
+            number_max = (
+                Decimal(self.number_max) if self.number_max is not None else None
+            )
+            if number_max is not None and number_max < number_min:
                 raise ValueError("Normalizer number_max cannot be below number_min.")
             if self.value_type == NormalizedValueType.INTEGER and any(
                 value != value.to_integral_value()
-                for value in (self.number_min, self.number_max)
+                for value in (number_min, number_max)
                 if value is not None
             ):
                 raise ValueError("Integer normalization requires integral values.")
@@ -3889,6 +3902,10 @@ class NormalizerValueDraft(ClosedModel):
                 or self.currency is not None
             ):
                 raise ValueError("Date normalization requires only date_value.")
+            try:
+                date.fromisoformat(self.date_value)
+            except ValueError as exc:
+                raise ValueError("Date normalization requires a real ISO date.") from exc
         elif any(
             value is not None
             for value in (
@@ -3903,7 +3920,7 @@ class NormalizerValueDraft(ClosedModel):
         if self.precision == NormalizationPrecision.RANGE and (
             not numeric
             or self.number_max is None
-            or self.number_max == self.number_min
+            or Decimal(self.number_max) == Decimal(self.number_min)
         ):
             raise ValueError("Range precision requires two distinct numeric bounds.")
         return self
@@ -3914,8 +3931,21 @@ class NormalizerDraft(ClosedModel):
     warnings: list[str] = Field(default_factory=list, max_length=20)
 
 
-class NormalizedValue(NormalizerValueDraft):
+class NormalizedValue(ClosedModel):
     normalized_value_id: str = Field(pattern=r"^normalized-value-[a-f0-9]{16}$")
+    task_id: str
+    target_field: str = Field(min_length=1, max_length=500)
+    claim_ids: list[str] = Field(min_length=1, max_length=50)
+    value_type: NormalizedValueType
+    canonical_text: str = Field(min_length=1, max_length=2000)
+    number_min: Decimal | None = None
+    number_max: Decimal | None = None
+    boolean_value: bool | None = None
+    date_value: date | None = None
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    unit: str | None = Field(default=None, max_length=100)
+    precision: NormalizationPrecision
+    notes: str = Field(default="", max_length=1000)
     raw_value_texts: list[str] = Field(min_length=1, max_length=50)
     citation_ids: list[str] = Field(min_length=1, max_length=200)
     source_ids: list[str] = Field(min_length=1, max_length=200)
@@ -3923,7 +3953,23 @@ class NormalizedValue(NormalizerValueDraft):
 
     @model_validator(mode="after")
     def validate_normalized_provenance(self) -> "NormalizedValue":
+        NormalizerValueDraft(
+            task_id=self.task_id,
+            target_field=self.target_field,
+            claim_ids=self.claim_ids,
+            value_type=self.value_type,
+            canonical_text=self.canonical_text,
+            number_min=(str(self.number_min) if self.number_min is not None else None),
+            number_max=(str(self.number_max) if self.number_max is not None else None),
+            boolean_value=self.boolean_value,
+            date_value=(self.date_value.isoformat() if self.date_value else None),
+            currency=self.currency,
+            unit=self.unit,
+            precision=self.precision,
+            notes=self.notes,
+        )
         for values in (
+            self.claim_ids,
             self.raw_value_texts,
             self.citation_ids,
             self.source_ids,

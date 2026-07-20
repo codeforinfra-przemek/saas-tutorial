@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -504,13 +505,37 @@ class NormalizerAgent:
             )
             values.append(
                 NormalizedValue(
-                    **item.model_dump(mode="python"),
                     normalized_value_id=_stable_id(
                         "normalized-value",
                         item.task_id,
                         item.target_field,
                         *sorted(item.claim_ids),
                     ),
+                    task_id=item.task_id,
+                    target_field=item.target_field,
+                    claim_ids=item.claim_ids,
+                    value_type=item.value_type,
+                    canonical_text=item.canonical_text,
+                    number_min=(
+                        Decimal(item.number_min)
+                        if item.number_min is not None
+                        else None
+                    ),
+                    number_max=(
+                        Decimal(item.number_max)
+                        if item.number_max is not None
+                        else None
+                    ),
+                    boolean_value=item.boolean_value,
+                    date_value=(
+                        date.fromisoformat(item.date_value)
+                        if item.date_value is not None
+                        else None
+                    ),
+                    currency=item.currency,
+                    unit=item.unit,
+                    precision=item.precision,
+                    notes=item.notes,
                     raw_value_texts=_deduplicate(
                         [claim.value_text for claim in claims]
                     ),
