@@ -42,6 +42,7 @@ urlpatterns = [
     path('auth/', include('allauth.urls')),
     path('accounts/', include('accounts.urls')),
     path('', include('analytics.urls')),
+    path('', include('backoffice.urls')),
     path('', include('billing.urls')),
     path('', include('content.urls')),
     path('', include('seo.urls')),

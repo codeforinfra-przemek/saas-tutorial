@@ -100,8 +100,8 @@ class FranchiseSubscriptionRequestAdmin(admin.ModelAdmin):
 
 @admin.register(OrganizationSubscription)
 class OrganizationSubscriptionAdmin(admin.ModelAdmin):
-    list_display = ("organization", "plan", "status", "manual_payment_status", "starts_at", "ends_at")
-    list_filter = ("status", "manual_payment_status", "plan", "starts_at", "ends_at")
+    list_display = ("organization", "plan", "billing_interval", "status", "manual_payment_status", "starts_at", "ends_at")
+    list_filter = ("status", "billing_interval", "manual_payment_status", "plan", "starts_at", "ends_at")
     search_fields = ("organization__name", "plan__name", "admin_notes")
     readonly_fields = ("created_at", "updated_at")
 

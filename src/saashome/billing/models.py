@@ -287,6 +287,16 @@ class OrganizationSubscription(models.Model):
         (PAYMENT_PAID, "Paid"),
         (PAYMENT_OVERDUE, "Overdue"),
     )
+    INTERVAL_MONTHLY = "monthly"
+    INTERVAL_YEARLY = "yearly"
+    INTERVAL_MANUAL = "manual"
+    INTERVAL_CUSTOM = "custom"
+    BILLING_INTERVAL_CHOICES = (
+        (INTERVAL_MONTHLY, "Monthly"),
+        (INTERVAL_YEARLY, "Yearly"),
+        (INTERVAL_MANUAL, "Manual"),
+        (INTERVAL_CUSTOM, "Custom"),
+    )
 
     organization = models.ForeignKey(
         "accounts.Organization",
@@ -295,6 +305,12 @@ class OrganizationSubscription(models.Model):
     )
     plan = models.ForeignKey(Plan, on_delete=models.PROTECT, related_name="subscriptions")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    billing_interval = models.CharField(
+        max_length=20,
+        choices=BILLING_INTERVAL_CHOICES,
+        blank=True,
+        default=INTERVAL_MONTHLY,
+    )
     starts_at = models.DateTimeField()
     ends_at = models.DateTimeField(null=True, blank=True)
     manual_payment_status = models.CharField(

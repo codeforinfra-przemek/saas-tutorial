@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+
+{% block topbar_title %}<div><p class="text-[10px] font-extrabold uppercase tracking-wide text-brand-700">Internal</p><h1 class="text-lg font-black text-slate-950">{{ page_title }}</h1></div>{% endblock %}
+
+{% block content %}<section class="mx-auto w-full max-w-7xl px-5 py-7 sm:px-8 lg:px-10">{% include "backoffice/partials/internal_nav.html" %}{% block internal_content %}{% endblock %}</section>{% endblock %}

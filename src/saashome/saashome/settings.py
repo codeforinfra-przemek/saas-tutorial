@@ -98,6 +98,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.github',
     'accounts',
     'analytics',
+    'backoffice',
     'billing',
     'content',
     'seo',
