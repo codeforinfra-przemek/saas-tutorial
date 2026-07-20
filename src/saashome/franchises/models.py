@@ -91,10 +91,14 @@ class Franchise(models.Model):
     DATA_STATUS_DEMO = "demo"
     DATA_STATUS_VENDOR = "vendor"
     DATA_STATUS_EDITOR_VERIFIED = "editor_verified"
+    DATA_STATUS_RESEARCH_REVIEWED = "research_reviewed"
+    DATA_STATUS_RESEARCH_WITH_GAPS = "research_with_gaps"
     DATA_STATUS_CHOICES = [
         (DATA_STATUS_DEMO, "Dane demonstracyjne"),
         (DATA_STATUS_VENDOR, "Dane przekazane przez franczyzodawcę"),
         (DATA_STATUS_EDITOR_VERIFIED, "Dane zweryfikowane przez redakcję"),
+        (DATA_STATUS_RESEARCH_REVIEWED, "Research zatwierdzony przez redakcję"),
+        (DATA_STATUS_RESEARCH_WITH_GAPS, "Research zatwierdzony z brakami"),
     ]
 
     name = models.CharField(max_length=180)
@@ -394,3 +398,359 @@ class FranchiseUpdateRequest(models.Model):
         if feedback:
             self.admin_feedback = feedback
         self.save(update_fields=["status", "reviewed_by", "reviewed_at", "admin_feedback", "updated_at"])
+
+
+class FranchiseResearchImport(models.Model):
+    DECISION_APPROVED = "approved"
+    DECISION_APPROVED_WITH_GAPS = "approved_with_gaps"
+    DECISION_CHOICES = (
+        (DECISION_APPROVED, "Approved"),
+        (DECISION_APPROVED_WITH_GAPS, "Approved with gaps"),
+    )
+
+    franchise = models.ForeignKey(
+        Franchise,
+        on_delete=models.CASCADE,
+        related_name="research_imports",
+    )
+    review_id = models.UUIDField(unique=True)
+    normalization_id = models.UUIDField(unique=True)
+    plan_run_id = models.UUIDField()
+    search_id = models.UUIDField()
+    extraction_id = models.UUIDField()
+    check_id = models.UUIDField()
+    target_country = models.CharField(max_length=2)
+    depth = models.CharField(max_length=30)
+    decision = models.CharField(max_length=30, choices=DECISION_CHOICES)
+    reviewer = models.CharField(max_length=300)
+    reviewer_notes = models.TextField(blank=True)
+    incomplete_input_acknowledged = models.BooleanField(default=False)
+    checker_passed = models.BooleanField()
+    scope_complete = models.BooleanField()
+    quality_score = models.PositiveSmallIntegerField()
+    quality_threshold = models.PositiveSmallIntegerField()
+    planned_tasks = models.PositiveIntegerField()
+    evaluated_tasks = models.PositiveIntegerField()
+    planned_fields = models.PositiveIntegerField()
+    evaluated_fields = models.PositiveIntegerField()
+    normalized_values_count = models.PositiveIntegerField()
+    source_count = models.PositiveIntegerField()
+    claim_count = models.PositiveIntegerField()
+    citation_count = models.PositiveIntegerField()
+    review_reference = models.TextField()
+    review_sha256 = models.CharField(max_length=64)
+    normalized_reference = models.TextField()
+    normalized_sha256 = models.CharField(max_length=64)
+    is_current = models.BooleanField(default=True)
+    imported_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-imported_at"]
+        indexes = [
+            models.Index(fields=["franchise", "is_current"]),
+            models.Index(fields=["plan_run_id"]),
+            models.Index(fields=["decision", "imported_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.franchise} research {self.normalization_id}"
+
+    @property
+    def field_coverage_percent(self):
+        if not self.planned_fields:
+            return 0
+        return round(self.evaluated_fields * 100 / self.planned_fields)
+
+
+class FranchiseResearchArtifact(models.Model):
+    TYPE_PLAN = "plan"
+    TYPE_SEARCH = "search"
+    TYPE_EXTRACTION = "extraction"
+    TYPE_CHECK = "check"
+    TYPE_NORMALIZATION = "normalization"
+    TYPE_REVIEW = "review"
+    TYPE_CHOICES = (
+        (TYPE_PLAN, "Plan"),
+        (TYPE_SEARCH, "Search"),
+        (TYPE_EXTRACTION, "Extraction"),
+        (TYPE_CHECK, "Check"),
+        (TYPE_NORMALIZATION, "Normalization"),
+        (TYPE_REVIEW, "Review"),
+    )
+
+    research_import = models.ForeignKey(
+        FranchiseResearchImport,
+        on_delete=models.CASCADE,
+        related_name="artifacts",
+    )
+    artifact_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    external_id = models.CharField(max_length=100)
+    schema_version = models.CharField(max_length=30, blank=True)
+    prompt_version = models.CharField(max_length=60, blank=True)
+    reference = models.TextField()
+    sha256 = models.CharField(max_length=64)
+    payload = models.JSONField()
+
+    class Meta:
+        ordering = ["artifact_type"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["research_import", "artifact_type"],
+                name="unique_research_artifact_type_per_import",
+            )
+        ]
+
+
+class FranchiseResearchTask(models.Model):
+    research_import = models.ForeignKey(
+        FranchiseResearchImport,
+        on_delete=models.CASCADE,
+        related_name="tasks",
+    )
+    task_id = models.CharField(max_length=200)
+    catalog_question_id = models.CharField(max_length=200)
+    section_id = models.CharField(max_length=120)
+    title = models.CharField(max_length=500)
+    question = models.TextField()
+    requirement = models.CharField(max_length=30)
+    priority = models.CharField(max_length=30)
+    status = models.CharField(max_length=40)
+    is_evaluated = models.BooleanField(default=False)
+    sort_order = models.PositiveIntegerField(default=0)
+    raw_payload = models.JSONField()
+
+    class Meta:
+        ordering = ["sort_order", "task_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["research_import", "task_id"],
+                name="unique_research_task_per_import",
+            )
+        ]
+
+
+class FranchiseResearchField(models.Model):
+    task = models.ForeignKey(
+        FranchiseResearchTask,
+        on_delete=models.CASCADE,
+        related_name="fields",
+    )
+    target_field = models.CharField(max_length=500)
+    requirement = models.CharField(max_length=30)
+    priority = models.CharField(max_length=30)
+    status = models.CharField(max_length=40)
+    checker_status = models.CharField(max_length=40)
+    is_evaluated = models.BooleanField(default=False)
+    is_critical = models.BooleanField(default=False)
+    normalized_field_id = models.CharField(max_length=100, blank=True)
+    accepted_claim_ids = models.JSONField(default=list)
+    needs_review_claim_ids = models.JSONField(default=list)
+    rejected_claim_ids = models.JSONField(default=list)
+    notes = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ["task__sort_order", "target_field"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["task", "target_field"],
+                name="unique_research_field_per_task",
+            )
+        ]
+        indexes = [models.Index(fields=["target_field", "status"])]
+
+
+class FranchiseResearchSource(models.Model):
+    research_import = models.ForeignKey(
+        FranchiseResearchImport,
+        on_delete=models.CASCADE,
+        related_name="sources",
+    )
+    source_id = models.CharField(max_length=100)
+    canonical_url = models.URLField(max_length=4000)
+    title = models.CharField(max_length=500, blank=True)
+    source_type = models.CharField(max_length=60)
+    origin = models.CharField(max_length=60)
+    provider_observed = models.BooleanField(default=False)
+    retrieval_status = models.CharField(max_length=60, blank=True)
+    task_ids = models.JSONField(default=list)
+    raw_payload = models.JSONField()
+
+    class Meta:
+        ordering = ["source_type", "title", "source_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["research_import", "source_id"],
+                name="unique_research_source_per_import",
+            )
+        ]
+
+
+class FranchiseResearchClaim(models.Model):
+    research_import = models.ForeignKey(
+        FranchiseResearchImport,
+        on_delete=models.CASCADE,
+        related_name="claims",
+    )
+    field = models.ForeignKey(
+        FranchiseResearchField,
+        on_delete=models.SET_NULL,
+        related_name="claims",
+        null=True,
+        blank=True,
+    )
+    claim_id = models.CharField(max_length=100)
+    task_id = models.CharField(max_length=200)
+    target_field = models.CharField(max_length=500)
+    value_text = models.TextField()
+    asserted_by_text = models.TextField(blank=True)
+    as_of_text = models.CharField(max_length=300, blank=True)
+    unit_text = models.CharField(max_length=300, blank=True)
+    currency_text = models.CharField(max_length=100, blank=True)
+    publication_date_text = models.CharField(max_length=300, blank=True)
+    effective_date_text = models.CharField(max_length=300, blank=True)
+    notes = models.TextField(blank=True)
+    checker_verdict = models.CharField(max_length=40, blank=True)
+    semantic_fit = models.CharField(max_length=40, blank=True)
+    source_support = models.CharField(max_length=40, blank=True)
+    issue_codes = models.JSONField(default=list)
+    is_eligible = models.BooleanField(default=False)
+    is_excluded = models.BooleanField(default=False)
+    raw_payload = models.JSONField()
+
+    class Meta:
+        ordering = ["task_id", "target_field", "claim_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["research_import", "claim_id"],
+                name="unique_research_claim_per_import",
+            )
+        ]
+        indexes = [models.Index(fields=["target_field", "checker_verdict"])]
+
+
+class FranchiseResearchCitation(models.Model):
+    research_import = models.ForeignKey(
+        FranchiseResearchImport,
+        on_delete=models.CASCADE,
+        related_name="citations",
+    )
+    source = models.ForeignKey(
+        FranchiseResearchSource,
+        on_delete=models.SET_NULL,
+        related_name="citations",
+        null=True,
+        blank=True,
+    )
+    citation_id = models.CharField(max_length=100)
+    passage_id = models.CharField(max_length=100)
+    document_id = models.CharField(max_length=100)
+    quote = models.TextField()
+    locator = models.CharField(max_length=500, blank=True)
+    text_sha256 = models.CharField(max_length=64)
+    start_char = models.PositiveIntegerField(null=True, blank=True)
+    end_char = models.PositiveIntegerField(null=True, blank=True)
+    raw_payload = models.JSONField()
+
+    class Meta:
+        ordering = ["source_id", "citation_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["research_import", "citation_id"],
+                name="unique_research_citation_per_import",
+            )
+        ]
+
+
+class FranchiseResearchClaimCitation(models.Model):
+    claim = models.ForeignKey(
+        FranchiseResearchClaim,
+        on_delete=models.CASCADE,
+        related_name="claim_citations",
+    )
+    citation = models.ForeignKey(
+        FranchiseResearchCitation,
+        on_delete=models.CASCADE,
+        related_name="citation_claims",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["claim", "citation"],
+                name="unique_research_claim_citation",
+            )
+        ]
+
+
+class FranchiseResearchValue(models.Model):
+    research_import = models.ForeignKey(
+        FranchiseResearchImport,
+        on_delete=models.CASCADE,
+        related_name="values",
+    )
+    field = models.ForeignKey(
+        FranchiseResearchField,
+        on_delete=models.CASCADE,
+        related_name="values",
+    )
+    normalized_value_id = models.CharField(max_length=100)
+    value_type = models.CharField(max_length=30)
+    canonical_text = models.TextField()
+    number_min_text = models.CharField(max_length=200, blank=True)
+    number_max_text = models.CharField(max_length=200, blank=True)
+    boolean_value = models.BooleanField(null=True, blank=True)
+    date_value = models.DateField(null=True, blank=True)
+    currency = models.CharField(max_length=10, blank=True)
+    unit = models.CharField(max_length=100, blank=True)
+    precision = models.CharField(max_length=30)
+    notes = models.TextField(blank=True)
+    raw_value_texts = models.JSONField(default=list)
+    citation_ids = models.JSONField(default=list)
+    source_ids = models.JSONField(default=list)
+    needs_corroboration = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["field__task__sort_order", "field__target_field", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["research_import", "normalized_value_id"],
+                name="unique_research_value_per_import",
+            )
+        ]
+
+    @property
+    def display_value(self):
+        if self.value_type in {"integer", "decimal", "money", "percentage"}:
+            rendered = self.number_min_text
+            if self.number_max_text and self.number_max_text != self.number_min_text:
+                rendered = f"{rendered} – {self.number_max_text}"
+            suffix = self.currency or self.unit
+            if self.value_type == "percentage" and not suffix:
+                suffix = "%"
+            return f"{rendered} {suffix}".strip()
+        if self.value_type == "boolean":
+            return "Tak" if self.boolean_value else "Nie"
+        if self.value_type == "date" and self.date_value:
+            return self.date_value.isoformat()
+        return self.canonical_text
+
+
+class FranchiseResearchValueClaim(models.Model):
+    value = models.ForeignKey(
+        FranchiseResearchValue,
+        on_delete=models.CASCADE,
+        related_name="value_claims",
+    )
+    claim = models.ForeignKey(
+        FranchiseResearchClaim,
+        on_delete=models.CASCADE,
+        related_name="claim_values",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["value", "claim"],
+                name="unique_research_value_claim",
+            )
+        ]

@@ -36,6 +36,7 @@ RESOLVER_PROMPT_VERSION = "resolver-system-v2"
 EXECUTOR_SCHEMA_VERSION = "1.0.0"
 NORMALIZER_SCHEMA_VERSION = "1.1.0"
 NORMALIZER_PROMPT_VERSION = "normalizer-system-v2"
+HUMAN_REVIEW_SCHEMA_VERSION = "1.0.0"
 
 
 class ClosedModel(BaseModel):
@@ -4331,4 +4332,109 @@ class NormalizerResults(ClosedModel):
             or not self.failed_attempts[0].token_usage_unknown
         ):
             raise ValueError("Unknown Normalizer usage must be marked explicitly.")
+        return self
+
+
+class HumanReviewDecision(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    APPROVED_WITH_GAPS = "approved_with_gaps"
+    CHANGES_REQUESTED = "changes_requested"
+    REJECTED = "rejected"
+
+
+class HumanReviewCoverage(ClosedModel):
+    planned_tasks: int = Field(ge=1)
+    evaluated_tasks: int = Field(ge=0)
+    planned_fields: int = Field(ge=1)
+    evaluated_fields: int = Field(ge=0)
+    fields_with_values: int = Field(ge=0)
+    unresolved_fields: int = Field(ge=0)
+    critical_missing_fields: int = Field(ge=0)
+    unevaluated_critical_fields: int = Field(ge=0)
+    normalized_values: int = Field(ge=0)
+    accepted_claims: int = Field(ge=0)
+    excluded_claims: int = Field(ge=0)
+    sources: int = Field(ge=0)
+    citations: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_review_coverage(self) -> "HumanReviewCoverage":
+        if self.evaluated_tasks > self.planned_tasks:
+            raise ValueError("Human Review evaluated task count exceeds the plan.")
+        if self.evaluated_fields > self.planned_fields:
+            raise ValueError("Human Review evaluated field count exceeds the plan.")
+        if self.fields_with_values > self.evaluated_fields:
+            raise ValueError("Human Review populated field count is inconsistent.")
+        return self
+
+
+class HumanReviewResults(ClosedModel):
+    """Immutable human gate over one exact Normalizer artifact."""
+
+    schema_version: Literal["1.0.0"] = HUMAN_REVIEW_SCHEMA_VERSION
+    review_id: str
+    normalization_id: str
+    normalized_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    normalized_reference: str = Field(min_length=1)
+    report_reference: str = Field(min_length=1)
+    created_at: datetime
+    iteration: int = Field(ge=1)
+    brand_name: str = Field(min_length=1, max_length=300)
+    target_country: str = Field(pattern=r"^[A-Z]{2}$")
+    depth: ResearchDepth
+    decision: HumanReviewDecision
+    reviewer: str | None = Field(default=None, max_length=300)
+    reviewer_notes: str = Field(default="", max_length=10_000)
+    incomplete_input_acknowledged: bool = False
+    input_checker_passed: bool
+    input_scope_complete: bool
+    input_quality_score: int = Field(ge=0, le=100)
+    input_quality_threshold: int = Field(ge=0, le=100)
+    approved_for_import: bool
+    coverage: HumanReviewCoverage
+    warnings: list[str]
+
+    @model_validator(mode="after")
+    def validate_human_review(self) -> "HumanReviewResults":
+        for value, field_name in (
+            (self.review_id, "review_id"),
+            (self.normalization_id, "normalization_id"),
+        ):
+            try:
+                parsed = UUID(value)
+            except (ValueError, AttributeError) as exc:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.") from exc
+            if parsed.version != 4:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.")
+        if len(self.warnings) != len(set(self.warnings)):
+            raise ValueError("Human Review warnings must be unique.")
+        approved = self.decision in {
+            HumanReviewDecision.APPROVED,
+            HumanReviewDecision.APPROVED_WITH_GAPS,
+        }
+        if self.approved_for_import != approved:
+            raise ValueError("Human Review import approval is inconsistent.")
+        if self.decision == HumanReviewDecision.PENDING:
+            if self.reviewer is not None or self.incomplete_input_acknowledged:
+                raise ValueError("Pending Human Review cannot contain a decision signer.")
+        elif self.reviewer is None or not self.reviewer.strip():
+            raise ValueError("A final Human Review decision requires a reviewer.")
+        if self.decision == HumanReviewDecision.APPROVED and (
+            not self.input_checker_passed or not self.input_scope_complete
+        ):
+            raise ValueError(
+                "Incomplete research requires approved_with_gaps, not approved."
+            )
+        if self.decision == HumanReviewDecision.APPROVED_WITH_GAPS:
+            if self.input_checker_passed and self.input_scope_complete:
+                raise ValueError("Complete research should use approved.")
+            if not self.incomplete_input_acknowledged:
+                raise ValueError(
+                    "Approval with gaps requires explicit incomplete-input acknowledgement."
+                )
+        elif self.incomplete_input_acknowledged:
+            raise ValueError(
+                "Incomplete-input acknowledgement is valid only for approval with gaps."
+            )
         return self

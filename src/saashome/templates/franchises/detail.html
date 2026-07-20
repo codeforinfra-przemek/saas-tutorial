@@ -48,6 +48,10 @@
                                         {% url "franchises:profile" franchise.slug as data_profile_url %}
                                         {% include "components/button.html" with href=data_profile_url label="Pełny profil danych" variant="secondary" size="small" only %}
                                     {% endif %}
+                                    {% if latest_research %}
+                                        {% url "franchises:research_detail" franchise.slug as research_detail_url %}
+                                        {% include "components/button.html" with href=research_detail_url label="Raport researchu" variant="secondary" size="small" only %}
+                                    {% endif %}
                                     {% include "components/button.html" with href="#request-info" label="Poproś o informacje" size="small" only %}
                                     {% include "shortlists/partials/save_button.html" %}
                                 </div>

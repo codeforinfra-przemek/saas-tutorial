@@ -17,6 +17,7 @@ from ..schemas import (
     CheckerResults,
     ExecutorResults,
     ExtractionResults,
+    HumanReviewResults,
     NormalizerResults,
     ResearchPlan,
     ResolverResults,
@@ -460,6 +461,63 @@ def save_normalizer_results(
     )
     _write_immutable_text(result_path, rendered)
     return result_path
+
+
+def human_review_stem(iteration: int, decision: str) -> str:
+    stem = "review" if iteration == 1 else f"review-r{iteration:03d}"
+    return f"{stem}-{decision.replace('_', '-')}"
+
+
+def human_review_paths_for(
+    iteration: int,
+    decision: str,
+    directory: Path | str,
+) -> tuple[Path, Path]:
+    stem = human_review_stem(iteration, decision)
+    root = Path(directory)
+    return root / f"{stem}.json", root / f"{stem}.html"
+
+
+def load_human_review_results(
+    path: Path | str,
+) -> tuple[HumanReviewResults, str]:
+    review_path = Path(path)
+    raw_review = review_path.read_bytes()
+    results = HumanReviewResults.model_validate_json(raw_review)
+    return results, hashlib.sha256(raw_review).hexdigest()
+
+
+def save_human_review_results(
+    results: HumanReviewResults,
+    report_html: str,
+    normalized_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> tuple[Path, Path]:
+    """Save immutable review JSON and its portable report beside Normalizer."""
+
+    directory = (
+        Path(output_dir) if output_dir is not None else Path(normalized_path).parent
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    review_path, report_path = human_review_paths_for(
+        results.iteration,
+        results.decision.value,
+        directory,
+    )
+    if Path(results.report_reference).resolve() != report_path.resolve():
+        raise ValueError("Human Review report reference does not match output path.")
+    if review_path.exists() or report_path.exists():
+        existing = review_path if review_path.exists() else report_path
+        raise FileExistsError(
+            f"Artifact already exists and will not be overwritten: {existing}"
+        )
+    _write_immutable_text(report_path, report_html)
+    _write_immutable_text(
+        review_path,
+        json.dumps(results.model_dump(mode="json"), ensure_ascii=False, indent=2)
+        + "\n",
+    )
+    return review_path, report_path
 
 
 @contextmanager

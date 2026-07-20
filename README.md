@@ -391,3 +391,14 @@ cd src/saashome
 python manage.py backfill_revenue_events --dry-run
 python manage.py backfill_revenue_events
 ```
+
+To populate the internal dashboard with safe, repeatable demonstration data
+(subscriptions, revenue events, accounts, contacts, opportunities and follow-up
+activities), run:
+
+```bash
+python manage.py seed_backoffice_demo
+```
+
+The command updates its own demo records instead of duplicating them, so it can
+be run again after a local database reset.

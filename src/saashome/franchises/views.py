@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.forms.utils import ErrorList
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -26,7 +26,17 @@ from visits.models import Visit
 from visits.services import create_visit
 
 from .forms import FranchiseLocationForm, FranchiseManagementForm
-from .models import Franchise, FranchiseAsset, FranchiseCategory, FranchiseLocation
+from .models import (
+    Franchise,
+    FranchiseAsset,
+    FranchiseCategory,
+    FranchiseLocation,
+    FranchiseResearchClaimCitation,
+    FranchiseResearchField,
+    FranchiseResearchTask,
+    FranchiseResearchValue,
+    FranchiseResearchValueClaim,
+)
 from .presentation import category_visual, decorate_categories
 
 def management_context(**kwargs):
@@ -301,6 +311,7 @@ def franchise_detail_view(request, slug, data_only=False):
                 lead_form.add_error(None, " ".join(error_messages))
 
     plan = get_franchise_plan(franchise)
+    latest_research = franchise.research_imports.filter(is_current=True).first()
     approved_assets = franchise.assets.filter(status=FranchiseAsset.STATUS_APPROVED)
     similar_franchises = apply_promotion_flags(
         Franchise.objects.filter(is_active=True, category=franchise.category)
@@ -335,6 +346,7 @@ def franchise_detail_view(request, slug, data_only=False):
         "show_website": bool(franchise.website_url and (not franchise.organization_id or (plan and plan.can_show_website))),
         "is_saved": is_franchise_saved_by_user(request.user, franchise),
         "similar_franchises": similar_franchises,
+        "latest_research": latest_research,
         "breadcrumbs": breadcrumbs,
         "json_ld": json.dumps(
             [get_franchise_schema(franchise, request), get_breadcrumb_schema(breadcrumbs)], ensure_ascii=False
@@ -342,6 +354,79 @@ def franchise_detail_view(request, slug, data_only=False):
     }
     context.update(get_franchise_seo(franchise, request))
     return render(request, "franchises/detail.html", context)
+
+
+def franchise_research_detail_view(request, slug):
+    franchise = get_object_or_404(
+        Franchise.objects.select_related("category"),
+        slug=slug,
+        is_active=True,
+    )
+    value_claims = FranchiseResearchValueClaim.objects.select_related(
+        "claim"
+    ).prefetch_related(
+        Prefetch(
+            "claim__claim_citations",
+            queryset=FranchiseResearchClaimCitation.objects.select_related(
+                "citation",
+                "citation__source",
+            ),
+        )
+    )
+    values = FranchiseResearchValue.objects.prefetch_related(
+        Prefetch("value_claims", queryset=value_claims)
+    )
+    fields = FranchiseResearchField.objects.prefetch_related(
+        Prefetch("values", queryset=values)
+    )
+    tasks = FranchiseResearchTask.objects.prefetch_related(
+        Prefetch("fields", queryset=fields)
+    )
+    research_import = get_object_or_404(
+        franchise.research_imports.prefetch_related(
+            Prefetch("tasks", queryset=tasks),
+            "sources",
+        ),
+        is_current=True,
+    )
+    normalization_artifact = research_import.artifacts.filter(
+        artifact_type="normalization"
+    ).first()
+    normalized_payload = normalization_artifact.payload if normalization_artifact else {}
+    context = {
+        "site_name": "SaaS Home",
+        "page_title": f"Pełny raport danych — {franchise.name}",
+        "active_page": "franchises",
+        "franchise": franchise,
+        "research_import": research_import,
+        "research_tasks": research_import.tasks.all(),
+        "research_sources": research_import.sources.all(),
+        "research_warnings": normalized_payload.get("warnings", []),
+        "critical_missing_fields": normalized_payload.get(
+            "critical_missing_fields", []
+        ),
+        "unevaluated_critical_fields": normalized_payload.get(
+            "unevaluated_critical_fields", []
+        ),
+        "breadcrumbs": [
+            {"name": "Start", "url": request.build_absolute_uri(reverse("home"))},
+            {
+                "name": "Franczyzy",
+                "url": request.build_absolute_uri(reverse("franchises:list")),
+            },
+            {
+                "name": franchise.name,
+                "url": request.build_absolute_uri(franchise.get_absolute_url()),
+            },
+            {
+                "name": "Pełny raport danych",
+                "url": request.build_absolute_uri(
+                    reverse("franchises:research_detail", args=[franchise.slug])
+                ),
+            },
+        ],
+    }
+    return render(request, "franchises/research_detail.html", context)
 
 
 @staff_required

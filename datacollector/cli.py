@@ -22,6 +22,11 @@ from .agents.executor import (
 )
 from .agents.normalizer import NormalizerAgent, NormalizerValidationError
 from .agents.planner import PlannerAgent, PlannerValidationError
+from .agents.reviewer import (
+    HumanReviewer,
+    HumanReviewValidationError,
+    render_review_html,
+)
 from .agents.resolver import ResolverAgent, ResolverValidationError
 from .agents.searcher import SearcherAgent, SearcherValidationError
 from .catalog import CatalogError, load_question_catalog, select_questions
@@ -49,6 +54,7 @@ from .schemas import (
     CheckerNextAction,
     ExecutorMode,
     ExtractionAttemptFailure,
+    HumanReviewDecision,
     NormalizerMode,
     PlannerInput,
     ResearchDepth,
@@ -61,10 +67,13 @@ from .storage.json_store import (
     extraction_results_filename_for,
     reconciled_extraction_results_filename_for,
     load_extraction_results,
+    load_human_review_results,
     load_checker_results,
+    load_normalizer_results,
     load_research_plan,
     resolver_results_filename_for,
     normalizer_results_filename_for,
+    human_review_paths_for,
     load_resolver_results,
     load_search_results,
     reserve_artifact,
@@ -72,6 +81,7 @@ from .storage.json_store import (
     save_checker_results,
     save_extraction_results,
     save_normalizer_results,
+    save_human_review_results,
     save_reconciled_extraction_results,
     save_executor_results,
     save_research_plan,
@@ -105,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Auditable franchise research loop "
             "(Planner + Searcher + Extractor + Checker + Resolver + Executor + "
-            "Normalizer)."
+            "Normalizer + Human Review)."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -647,6 +657,42 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         help="Artifact directory; defaults to the Checker directory.",
+    )
+
+    review_parser = subparsers.add_parser(
+        "review",
+        help="Create a readable Human Review report and immutable decision artifact.",
+    )
+    review_parser.add_argument(
+        "--normalized",
+        type=Path,
+        required=True,
+        help="Exact Normalizer artifact to inspect and decide.",
+    )
+    review_parser.add_argument(
+        "--decision",
+        choices=[decision.value for decision in HumanReviewDecision],
+        default=HumanReviewDecision.PENDING.value,
+        help="Review decision (default: pending report only).",
+    )
+    review_parser.add_argument(
+        "--reviewer",
+        help="Human reviewer name or stable team identifier; required for a final decision.",
+    )
+    review_parser.add_argument(
+        "--notes",
+        default="",
+        help="Human review notes stored in the immutable decision artifact.",
+    )
+    review_parser.add_argument(
+        "--acknowledge-incomplete",
+        action="store_true",
+        help="Explicit acknowledgement required for approved_with_gaps.",
+    )
+    review_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Artifact directory; defaults to the Normalizer directory.",
     )
 
     reconcile_parser = subparsers.add_parser(
@@ -2449,6 +2495,103 @@ def _run_normalize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_review(args: argparse.Namespace) -> int:
+    normalized, normalized_sha256 = load_normalizer_results(args.normalized)
+    plan_path = Path(normalized.plan_reference)
+    search_path = Path(normalized.search_reference)
+    extraction_path = Path(normalized.extraction_reference)
+    check_path = Path(normalized.check_reference)
+    plan, plan_sha256 = load_research_plan(plan_path)
+    search_results, search_sha256 = load_search_results(search_path)
+    extraction_results, extraction_sha256 = load_extraction_results(extraction_path)
+    checker_results, check_sha256 = load_checker_results(check_path)
+    decision = HumanReviewDecision(args.decision)
+    result_directory = args.output_dir or args.normalized.parent
+    review_path, report_path = human_review_paths_for(
+        normalized.iteration,
+        decision.value,
+        result_directory,
+    )
+    reviewer = HumanReviewer()
+    with reserve_artifact(review_path), reserve_artifact(report_path):
+        results = reviewer.create_review(
+            plan,
+            search_results,
+            extraction_results,
+            checker_results,
+            normalized,
+            plan_sha256=plan_sha256,
+            search_sha256=search_sha256,
+            extraction_sha256=extraction_sha256,
+            check_sha256=check_sha256,
+            normalized_sha256=normalized_sha256,
+            normalized_reference=str(args.normalized.resolve()),
+            report_reference=str(report_path.resolve()),
+            decision=decision,
+            reviewer=args.reviewer,
+            reviewer_notes=args.notes,
+            acknowledge_incomplete=args.acknowledge_incomplete,
+        )
+        report_html = render_review_html(
+            results,
+            plan,
+            search_results,
+            extraction_results,
+            checker_results,
+            normalized,
+        )
+        saved_review_path, saved_report_path = save_human_review_results(
+            results,
+            report_html,
+            args.normalized,
+            output_dir=result_directory,
+        )
+
+    if results.approved_for_import:
+        next_command = (
+            ".venv/bin/python src/saashome/manage.py import_franchise_research "
+            f"--review {saved_review_path}"
+        )
+        if decision == HumanReviewDecision.APPROVED_WITH_GAPS:
+            next_command += " --allow-approved-with-gaps"
+    elif decision == HumanReviewDecision.PENDING:
+        next_decision = (
+            HumanReviewDecision.APPROVED.value
+            if results.input_checker_passed and results.input_scope_complete
+            else HumanReviewDecision.APPROVED_WITH_GAPS.value
+        )
+        next_command = (
+            ".venv/bin/python -m datacollector review "
+            f"--normalized {args.normalized} --decision {next_decision} "
+            '--reviewer "<name>"'
+        )
+        if next_decision == HumanReviewDecision.APPROVED_WITH_GAPS.value:
+            next_command += " --acknowledge-incomplete"
+    else:
+        next_command = "Return the documented gaps to Resolver/Searcher."
+
+    summary = {
+        "review_id": results.review_id,
+        "normalization_id": results.normalization_id,
+        "normalized_sha256": results.normalized_sha256,
+        "brand": results.brand_name,
+        "iteration": results.iteration,
+        "decision": results.decision.value,
+        "reviewer": results.reviewer,
+        "approved_for_import": results.approved_for_import,
+        "input_checker_passed": results.input_checker_passed,
+        "input_scope_complete": results.input_scope_complete,
+        "input_quality_score": results.input_quality_score,
+        "coverage": results.coverage.model_dump(mode="json"),
+        "warnings": results.warnings,
+        "review_path": str(saved_review_path),
+        "report_path": str(saved_report_path),
+        "next_command": next_command,
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _run_reconcile(args: argparse.Namespace) -> int:
     current, current_sha256 = load_extraction_results(args.extractions)
     if current.generated_by != "executor":
@@ -2606,6 +2749,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_execute(args)
         if args.command == "normalize":
             return _run_normalize(args)
+        if args.command == "review":
+            return _run_review(args)
         if args.command == "reconcile":
             return _run_reconcile(args)
         if args.command == "questions":
@@ -2621,6 +2766,7 @@ def main(argv: list[str] | None = None) -> int:
         ExtractorValidationError,
         NormalizerProviderError,
         NormalizerValidationError,
+        HumanReviewValidationError,
         ExecutorProviderError,
         ExecutorValidationError,
         SearcherProviderError,

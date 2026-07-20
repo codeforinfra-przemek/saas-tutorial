@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}{{ block.super }} | Raport researchu {{ franchise.name }}{% endblock %}
+
+{% block content %}
+<main class="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    {% include "seo/partials/breadcrumbs.html" %}
+
+    <header class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="border-b border-slate-200 bg-slate-950 px-6 py-7 text-white sm:px-8">
+            <p class="text-xs font-extrabold uppercase tracking-[0.18em] text-brand-300">Audytowalny raport danych</p>
+            <div class="mt-2 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h1 class="text-3xl font-black tracking-tight sm:text-4xl">{{ franchise.name }}</h1>
+                    <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Wszystkie zdobyte wartości, braki, statusy Checkera, cytaty i źródła z aktualnie zatwierdzonego importu.</p>
+                </div>
+                <a href="{{ franchise.get_absolute_url }}" class="rounded-lg border border-slate-600 px-4 py-2 text-sm font-extrabold text-white hover:border-white">← Profil franczyzy</a>
+            </div>
+        </div>
+
+        <div class="grid gap-px bg-slate-200 sm:grid-cols-2 lg:grid-cols-6">
+            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Decyzja</p><p class="mt-1 font-black {% if research_import.decision == 'approved' %}text-emerald-700{% else %}text-amber-700{% endif %}">{{ research_import.get_decision_display }}</p></div>
+            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Jakość</p><p class="mt-1 text-2xl font-black">{{ research_import.quality_score }}/{{ research_import.quality_threshold }}</p></div>
+            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Zadania</p><p class="mt-1 text-2xl font-black">{{ research_import.evaluated_tasks }}/{{ research_import.planned_tasks }}</p></div>
+            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Pola ocenione</p><p class="mt-1 text-2xl font-black">{{ research_import.evaluated_fields }}/{{ research_import.planned_fields }}</p></div>
+            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Wartości</p><p class="mt-1 text-2xl font-black">{{ research_import.normalized_values_count }}</p></div>
+            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Źródła</p><p class="mt-1 text-2xl font-black">{{ research_import.source_count }}</p></div>
+        </div>
+    </header>
+
+    {% if research_import.decision == 'approved_with_gaps' %}
+        <div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">
+            <strong>Zatwierdzono z brakami.</strong> Ten raport nie osiągnął pełnego progu jakości ani pokrycia. Brak wartości nie oznacza odpowiedzi negatywnej.
+        </div>
+    {% endif %}
+
+    <section class="mt-6 grid gap-5 lg:grid-cols-3">
+        <div class="rounded-xl border border-slate-200 bg-white p-5 lg:col-span-2">
+            <h2 class="text-lg font-black text-slate-950">Decyzja człowieka</h2>
+            <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                <div><dt class="font-bold text-slate-500">Reviewer</dt><dd class="mt-1 text-slate-950">{{ research_import.reviewer }}</dd></div>
+                <div><dt class="font-bold text-slate-500">Data importu</dt><dd class="mt-1 text-slate-950">{{ research_import.imported_at|date:"Y-m-d H:i" }}</dd></div>
+                <div><dt class="font-bold text-slate-500">Kraj / głębokość</dt><dd class="mt-1 text-slate-950">{{ research_import.target_country }} / {{ research_import.depth }}</dd></div>
+                <div><dt class="font-bold text-slate-500">Pokrycie pól</dt><dd class="mt-1 text-slate-950">{{ research_import.field_coverage_percent }}%</dd></div>
+            </dl>
+            <p class="mt-4 whitespace-pre-line rounded-lg bg-slate-50 p-4 text-sm leading-6 text-slate-700">{{ research_import.reviewer_notes|default:"Brak dodatkowej notatki reviewera." }}</p>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-white p-5">
+            <h2 class="text-lg font-black text-slate-950">Proweniencja</h2>
+            <dl class="mt-4 space-y-3 text-xs text-slate-600">
+                <div><dt class="font-bold">Plan run</dt><dd class="mt-1 break-all font-mono">{{ research_import.plan_run_id }}</dd></div>
+                <div><dt class="font-bold">Normalization</dt><dd class="mt-1 break-all font-mono">{{ research_import.normalization_id }}</dd></div>
+                <div><dt class="font-bold">Review</dt><dd class="mt-1 break-all font-mono">{{ research_import.review_id }}</dd></div>
+            </dl>
+        </div>
+    </section>
+
+    {% if research_warnings or critical_missing_fields or unevaluated_critical_fields %}
+    <section class="mt-6 rounded-xl border border-red-200 bg-white p-5">
+        <h2 class="text-lg font-black text-red-900">Ograniczenia i krytyczne braki</h2>
+        {% if research_warnings %}<ul class="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-700">{% for warning in research_warnings %}<li>{{ warning }}</li>{% endfor %}</ul>{% endif %}
+        {% if critical_missing_fields %}<details class="mt-4 rounded-lg bg-red-50 p-4"><summary class="cursor-pointer font-bold text-red-900">Brakujące pola krytyczne ({{ critical_missing_fields|length }})</summary><div class="mt-3 flex flex-wrap gap-2">{% for field in critical_missing_fields %}<code class="rounded bg-white px-2 py-1 text-xs text-red-800">{{ field }}</code>{% endfor %}</div></details>{% endif %}
+        {% if unevaluated_critical_fields %}<details class="mt-3 rounded-lg bg-amber-50 p-4"><summary class="cursor-pointer font-bold text-amber-900">Nieocenione pola krytyczne ({{ unevaluated_critical_fields|length }})</summary><div class="mt-3 flex flex-wrap gap-2">{% for field in unevaluated_critical_fields %}<code class="rounded bg-white px-2 py-1 text-xs text-amber-800">{{ field }}</code>{% endfor %}</div></details>{% endif %}
+    </section>
+    {% endif %}
+
+    <section class="mt-8">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+            <div><p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Pełny zakres planu</p><h2 class="mt-1 text-2xl font-black text-slate-950">Zdobyte informacje i braki</h2></div>
+            <p class="text-sm text-slate-500">{{ research_import.claim_count }} claimów · {{ research_import.citation_count }} cytatów</p>
+        </div>
+
+        <div class="mt-5 space-y-4">
+        {% for task in research_tasks %}
+            <details class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" {% if task.is_evaluated %}open{% endif %}>
+                <summary class="flex cursor-pointer list-none flex-wrap items-center gap-3 px-5 py-4">
+                    <span class="mr-auto font-black text-slate-950">{{ forloop.counter }}. {{ task.title }}</span>
+                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">{{ task.requirement }}</span>
+                    {% if task.is_evaluated %}<span class="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">{{ task.status }}</span>{% else %}<span class="rounded-full bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700">nieocenione</span>{% endif %}
+                </summary>
+                <div class="border-t border-slate-100 px-5 py-5">
+                    <p class="text-sm leading-6 text-slate-600">{{ task.question }}</p>
+                    <div class="mt-5 space-y-4">
+                    {% for field in task.fields.all %}
+                        <article class="rounded-xl border {% if field.status == 'missing' or field.status == 'unevaluated' or field.status == 'conflicting' %}border-red-200 bg-red-50/30{% else %}border-slate-200 bg-slate-50/50{% endif %} p-4">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <h3 class="mr-auto break-all font-mono text-sm font-black text-slate-950">{{ field.target_field }}</h3>
+                                <span class="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-700">{{ field.status }}</span>
+                                <span class="rounded-full bg-white px-2.5 py-1 text-xs text-slate-500">checker: {{ field.checker_status }}</span>
+                            </div>
+                            {% if field.notes %}<ul class="mt-3 list-disc pl-5 text-xs leading-5 text-slate-600">{% for note in field.notes %}<li>{{ note }}</li>{% endfor %}</ul>{% endif %}
+                            <div class="mt-3 space-y-3">
+                            {% for value in field.values.all %}
+                                <div class="rounded-lg border border-slate-200 bg-white p-4">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <p class="mr-auto text-base font-black text-slate-950">{{ value.display_value }}</p>
+                                        <span class="rounded-full bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">{{ value.value_type }}</span>
+                                        <span class="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">{{ value.precision }}</span>
+                                        {% if value.needs_corroboration %}<span class="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-800">wymaga potwierdzenia</span>{% endif %}
+                                    </div>
+                                    {% if value.canonical_text != value.display_value %}<p class="mt-2 text-sm text-slate-600">{{ value.canonical_text }}</p>{% endif %}
+                                    {% if value.notes %}<p class="mt-2 text-xs text-slate-500">{{ value.notes }}</p>{% endif %}
+                                    {% for value_claim in value.value_claims.all %}
+                                        <details class="mt-3 rounded-lg bg-slate-50 p-3">
+                                            <summary class="cursor-pointer text-xs font-bold text-slate-700">Claim i dowody: {{ value_claim.claim.value_text|truncatechars:120 }}</summary>
+                                            <p class="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">{{ value_claim.claim.value_text }}</p>
+                                            <div class="mt-3 space-y-2">
+                                            {% for claim_citation in value_claim.claim.claim_citations.all %}
+                                                <blockquote class="rounded-lg border-l-4 border-brand-300 bg-white p-3 text-xs leading-5 text-slate-600">
+                                                    <p class="whitespace-pre-line">{{ claim_citation.citation.quote }}</p>
+                                                    <footer class="mt-2 font-bold">
+                                                        {% if claim_citation.citation.source %}<a href="{{ claim_citation.citation.source.canonical_url }}" target="_blank" rel="noopener" class="text-brand-700 hover:underline">{{ claim_citation.citation.source.title|default:claim_citation.citation.source.canonical_url }}</a>{% else %}Źródło niezaimportowane{% endif %}
+                                                        · {{ claim_citation.citation.locator }}
+                                                    </footer>
+                                                </blockquote>
+                                            {% empty %}<p class="text-xs text-red-700">Brak powiązanego cytatu.</p>{% endfor %}
+                                            </div>
+                                        </details>
+                                    {% endfor %}
+                                </div>
+                            {% empty %}<p class="rounded-lg bg-white p-3 text-sm font-bold text-red-700">Brak zaakceptowanej wartości.</p>{% endfor %}
+                            </div>
+                        </article>
+                    {% endfor %}
+                    </div>
+                </div>
+            </details>
+        {% endfor %}
+        </div>
+    </section>
+
+    <section class="mt-8 rounded-xl border border-slate-200 bg-white p-5">
+        <h2 class="text-xl font-black text-slate-950">Rejestr źródeł</h2>
+        <div class="mt-4 overflow-x-auto">
+            <table class="w-full min-w-[760px] text-left text-sm">
+                <thead class="border-b border-slate-200 text-xs uppercase text-slate-500"><tr><th class="px-3 py-3">Źródło</th><th class="px-3 py-3">Typ</th><th class="px-3 py-3">Pobranie</th><th class="px-3 py-3">Zadania</th></tr></thead>
+                <tbody class="divide-y divide-slate-100">
+                {% for source in research_sources %}<tr><td class="px-3 py-3"><a href="{{ source.canonical_url }}" target="_blank" rel="noopener" class="font-bold text-brand-700 hover:underline">{{ source.title|default:source.canonical_url }}</a><p class="mt-1 max-w-xl break-all text-xs text-slate-400">{{ source.canonical_url }}</p></td><td class="px-3 py-3">{{ source.source_type }}</td><td class="px-3 py-3">{{ source.retrieval_status|default:"nie pobrano" }}</td><td class="px-3 py-3 text-xs text-slate-500">{{ source.task_ids|join:", " }}</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <p class="mt-6 rounded-xl bg-slate-100 p-4 text-xs leading-5 text-slate-600">Raport przedstawia stan dowodów, a nie rekomendację inwestycyjną ani poradę prawną. Brak danych oznacza brak zweryfikowanej informacji w badanym zakresie.</p>
+</main>
+{% endblock %}

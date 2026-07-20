@@ -1,8 +1,9 @@
-# Franchise AI research loop — Planner through Normalizer
+# Franchise AI research loop — Planner through Human Review and Importer
 
 This is a standalone, local worker for auditable franchise research. It is kept
 outside Django intentionally: long-running and paid agent work must not execute
-inside a web request. No result is written to the production `Franchise` model.
+inside a web request. Only a separately signed Human Review artifact may cross
+the boundary into Django through the idempotent Importer.
 
 The planned loop is:
 
@@ -11,8 +12,8 @@ Planner → Searcher → Extractor → Checker ↔ Resolver → Executor → Che
         → Normalizer → human review → Importer
 ```
 
-Planner, Searcher, Extractor, Checker, Resolver, Executor and Normalizer are
-implemented.
+Planner, Searcher, Extractor, Checker, Resolver, Executor, Normalizer, Human
+Review and Importer are implemented.
 Planner combines:
 
 - a deterministic, versioned question catalog covering all 23 FTC FDD Items;
@@ -666,6 +667,67 @@ needs-review partitions, unresolved contradictions, missing fields and
 corroboration requirements. The only next action is `human_review`. A later
 Importer must consume a separately approved review artifact, never raw
 Normalizer output.
+
+## Human Review report and decision
+
+Create a portable HTML report without making another model or network call:
+
+```bash
+.venv/bin/python -m datacollector review \
+  --normalized datacollector/data/runs/zabka/<run>/normalized-r014.json
+```
+
+This writes immutable `review-r014-pending.json` and
+`review-r014-pending.html`. The report shows the whole planned task/field scope,
+accepted values, missing and unevaluated fields, Checker status, raw claims,
+exact citation quotes and the complete source register. A pending decision does
+not authorize import.
+
+Complete research uses `approved`. Incomplete research cannot use that label;
+an explicit gaps decision and acknowledgement are required:
+
+```bash
+.venv/bin/python -m datacollector review \
+  --normalized datacollector/data/runs/zabka/<run>/normalized-r014.json \
+  --decision approved_with_gaps \
+  --reviewer "Reviewer name" \
+  --notes "Why this incomplete dataset may enter the review database." \
+  --acknowledge-incomplete
+```
+
+`changes_requested` and `rejected` are also final, signed decisions but never
+authorize import. Import approval requires a successful paid Normalizer; free
+smoke-test artifacts may be inspected but cannot cross the database boundary.
+
+## Import approved research into Django
+
+Apply migrations once, then import the signed review artifact:
+
+```bash
+.venv/bin/python src/saashome/manage.py migrate
+.venv/bin/python src/saashome/manage.py import_franchise_research \
+  --review datacollector/data/runs/zabka/<run>/review-r014-approved-with-gaps.json \
+  --allow-approved-with-gaps
+```
+
+Use `--franchise-slug <slug>` to target an existing profile and
+`--category-slug <slug>` when a new profile needs a specific category. Import is
+transactional and idempotent by Normalizer/review identity. It stores all six
+source artifacts losslessly and indexes every plan task, target field, source,
+claim, citation and normalized value in relational models. Repeating the exact
+command does not duplicate data. A newer approved import becomes current while
+older imports remain immutable history.
+
+The detailed Django view is available at:
+
+```text
+/franchises/<slug>/research/
+```
+
+It displays the review decision, coverage and quality, all acquired values,
+missing/unevaluated fields, evidence quotes and source links. Only safe,
+single-valued mappings update the compact `Franchise` profile; the research
+models remain the lossless source of truth.
 
 ## Token and cost accounting
 

@@ -1,6 +1,20 @@
 from django.contrib import admin
 
-from .models import Franchise, FranchiseAsset, FranchiseCategory, FranchiseLocation, FranchiseUpdateRequest
+from .models import (
+    Franchise,
+    FranchiseAsset,
+    FranchiseCategory,
+    FranchiseLocation,
+    FranchiseResearchArtifact,
+    FranchiseResearchCitation,
+    FranchiseResearchClaim,
+    FranchiseResearchField,
+    FranchiseResearchImport,
+    FranchiseResearchSource,
+    FranchiseResearchTask,
+    FranchiseResearchValue,
+    FranchiseUpdateRequest,
+)
 
 
 @admin.register(FranchiseCategory)
@@ -187,3 +201,33 @@ class FranchiseUpdateRequestAdmin(admin.ModelAdmin):
             update_request.reject(reviewed_by=request.user, feedback="Rejected by admin.")
             rejected_count += 1
         self.message_user(request, f"Rejected {rejected_count} update request(s).")
+
+
+@admin.register(FranchiseResearchImport)
+class FranchiseResearchImportAdmin(admin.ModelAdmin):
+    list_display = (
+        "franchise",
+        "decision",
+        "quality_score",
+        "scope_complete",
+        "reviewer",
+        "is_current",
+        "imported_at",
+    )
+    list_filter = ("decision", "checker_passed", "scope_complete", "is_current")
+    search_fields = ("franchise__name", "reviewer", "normalization_id", "review_id")
+    readonly_fields = tuple(
+        field.name for field in FranchiseResearchImport._meta.fields
+    )
+
+
+for research_model in (
+    FranchiseResearchArtifact,
+    FranchiseResearchTask,
+    FranchiseResearchField,
+    FranchiseResearchSource,
+    FranchiseResearchClaim,
+    FranchiseResearchCitation,
+    FranchiseResearchValue,
+):
+    admin.site.register(research_model)

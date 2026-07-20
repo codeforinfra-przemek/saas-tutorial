@@ -13,6 +13,7 @@ from .views import (
     franchise_manage_detail_view,
     franchise_manage_edit_view,
     franchise_manage_list_view,
+    franchise_research_detail_view,
 )
 from leads.views import create_lead_view
 
@@ -33,5 +34,6 @@ urlpatterns = [
     path("manage/locations/<int:pk>/delete/", franchise_location_delete_view, name="location_delete"),
     path("<slug:slug>/request-info/", create_lead_view, name="lead_create"),
     path("<slug:slug>/profile/", franchise_detail_view, {"data_only": True}, name="profile"),
+    path("<slug:slug>/research/", franchise_research_detail_view, name="research_detail"),
     path("<slug:slug>/", franchise_detail_view, name="detail"),
 ]
