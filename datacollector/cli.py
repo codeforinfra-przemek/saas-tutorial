@@ -3057,7 +3057,7 @@ def _run_loop(args: argparse.Namespace) -> int:
                     max_queries_per_item=args.max_queries_per_item,
                     model=args.model,
                     allow_round_limit=policy.allow_plan_repair_limit,
-                    force_scope_expansion=force_scope_expansion,
+                    advance_with_documented_gaps=force_scope_expansion,
                     output_dir=None,
                 ),
             )

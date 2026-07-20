@@ -1305,6 +1305,61 @@ class CollectorCliTests(TestCase):
             )
             self.assertTrue(Path(summary["loop_path"]).is_file())
 
+    def test_loop_passes_documented_gap_advance_to_resolver_stage(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, _, extraction_path = self.create_checker_cli_fixture(
+                temporary_directory
+            )
+            check_stdout = StringIO()
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAICheckerClient",
+                    return_value=CliFixtureChecker(),
+                ),
+                redirect_stdout(check_stdout),
+            ):
+                self.assertEqual(
+                    main(["check", "--extractions", str(extraction_path)]),
+                    0,
+                )
+            check_path = Path(json.loads(check_stdout.getvalue())["check_path"])
+            observed_flags = []
+
+            def stop_at_resolver(args):
+                observed_flags.append(args.advance_with_documented_gaps)
+                raise OSError("fixture stops after checking Resolver arguments")
+
+            with (
+                patch(
+                    "datacollector.cli._consecutive_gap_repair_rounds",
+                    return_value=99,
+                ),
+                patch("datacollector.cli._run_resolve", side_effect=stop_at_resolver),
+                redirect_stdout(StringIO()),
+                redirect_stderr(StringIO()),
+            ):
+                exit_code = main(
+                    [
+                        "loop",
+                        "--check",
+                        str(check_path),
+                        "--advance-with-documented-gaps",
+                        "--max-rounds",
+                        "1",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(observed_flags, [True])
+
     def test_paid_check_preserves_failed_attempt_in_final_artifact(self):
         with TemporaryDirectory() as temporary_directory:
             _, _, extraction_path = self.create_checker_cli_fixture(
