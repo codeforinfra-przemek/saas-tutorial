@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from .research_import import import_franchise_research
+from .research_import import _resolved, import_franchise_research
 
 from datacollector.agents.reviewer import HumanReviewer
 from datacollector.schemas import HumanReviewDecision, NormalizerMode
@@ -118,6 +118,22 @@ class FranchiseResearchImportTests(TestCase):
         )
         self.assertEqual(imported.franchise.data_status, "research_reviewed")
         self.assertTrue(imported.franchise.is_verified)
+
+    def test_repository_relative_review_path_resolves_from_django_directory(self):
+        root = Path(self.temporary_directory.name)
+        django_directory = root / "src" / "saashome"
+        django_directory.mkdir(parents=True)
+        review_path = root / "datacollector" / "data" / "review.json"
+        review_path.parent.mkdir(parents=True)
+        review_path.write_text("{}", encoding="utf-8")
+
+        with (
+            patch("franchises.research_import.REPOSITORY_ROOT", root),
+            patch("franchises.research_import.Path.cwd", return_value=django_directory),
+        ):
+            resolved = _resolved("datacollector/data/review.json")
+
+        self.assertEqual(resolved, review_path.resolve())
 
     def test_super_detailed_view_shows_values_gaps_and_evidence(self):
         with patch(

@@ -31,7 +31,7 @@ EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
 CHECKER_SCHEMA_VERSION = "1.2.0"
 CHECKER_PROMPT_VERSION = "checker-system-v3"
 CHECKER_SCORING_VERSION = "checker-scoring-v2"
-RESOLVER_SCHEMA_VERSION = "1.1.0"
+RESOLVER_SCHEMA_VERSION = "1.2.0"
 RESOLVER_PROMPT_VERSION = "resolver-system-v2"
 EXECUTOR_SCHEMA_VERSION = "1.0.0"
 NORMALIZER_SCHEMA_VERSION = "1.1.0"
@@ -3297,7 +3297,7 @@ class ResolverAttemptFailure(ClosedModel):
 class ResolverResults(ClosedModel):
     """Bounded repair plan consumed by the next Searcher/Extractor round."""
 
-    schema_version: Literal["1.0.0", "1.1.0"] = RESOLVER_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = RESOLVER_SCHEMA_VERSION
     prompt_version: Literal["resolver-system-v1", "resolver-system-v2"] = (
         RESOLVER_PROMPT_VERSION
     )
@@ -3324,6 +3324,7 @@ class ResolverResults(ClosedModel):
     target_country: str = Field(pattern=r"^[A-Z]{2}$")
     depth: ResearchDepth
     limits: ResolverLimits
+    scope_expansion_override: bool = False
     available_source_ids: list[str]
     selected_follow_up_ids: list[str]
     deferred_follow_up_ids: list[str]
@@ -3365,6 +3366,23 @@ class ResolverResults(ClosedModel):
         ):
             if len(values) != len(set(values)):
                 raise ValueError(f"Resolver {field_name} values must be unique.")
+        if self.scope_expansion_override:
+            if self.schema_version != "1.2.0" or not self.work_items:
+                raise ValueError(
+                    "Resolver scope-expansion override requires schema 1.2 work."
+                )
+            if any(
+                item.reason
+                not in {
+                    CheckerFollowUpReason.SCOPE_NOT_STARTED,
+                    CheckerFollowUpReason.SOURCE_NOT_EVALUATED,
+                }
+                for item in self.work_items
+            ):
+                raise ValueError(
+                    "Resolver scope-expansion override may schedule only deferred "
+                    "scope work."
+                )
         if set(self.selected_follow_up_ids) & set(self.deferred_follow_up_ids):
             raise ValueError("Resolver selected and deferred follow-ups overlap.")
         if any(

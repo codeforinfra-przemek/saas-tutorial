@@ -2,7 +2,7 @@
 
 This is a standalone, local worker for auditable franchise research. It is kept
 outside Django intentionally: long-running and paid agent work must not execute
-inside a web request. Only a separately signed Human Review artifact may cross
+inside a web request. Only a separately approved Human Review artifact may cross
 the boundary into Django through the idempotent Importer.
 
 The planned loop is:
@@ -37,6 +37,9 @@ plans retrieval and research; it never claims that planned work has already run.
 Executor runs those exact batches through the existing workers, preserves
 predecessor lineage, deduplicates retrieval, and materializes merged Searcher and
 Extractor artifacts for a new Checker pass. Executor itself makes no model call.
+Loop Orchestrator composes paid Checker, Resolver and Executor stages into bounded
+cycles, expands into the next plan batch when the selected scope is ready, records
+incremental cost, and stops on quality, budget, stagnation or round limits.
 Normalizer consumes one successful paid Checker artifact, admits only accepted
 and grounded claims, creates typed staging values with exact claim/citation/source
 provenance, and always routes the result to human review. It cannot publish or
@@ -518,7 +521,10 @@ checks. Once that count reaches the Planner's `max_rounds`, Resolver stops
 locally and routes the scope to human review instead of starting another costly
 loop. `--allow-round-limit` is an explicit emergency override for a deliberately
 approved extra round; the resulting artifact records that override in its
-warnings.
+warnings. When the gaps are documented but public research is exhausted,
+`--advance-with-documented-gaps` schedules the next unevaluated plan batch
+instead. It preserves every unresolved field as a final approval blocker and is
+mutually exclusive with spending another gap-repair round.
 
 ## Run Executor: paid execution with optional local smoke test
 
@@ -606,6 +612,65 @@ If it returns `research_next_batch`, run Resolver against that Checker artifact;
 Resolver schedules and Executor merges the next bounded plan batch. Normalizer
 is allowed only after the required plan scope has passed or a human explicitly
 accepts documented gaps.
+
+## Run Loop Orchestrator: bounded paid automation
+
+The Orchestrator replaces manual Resolver → Executor → Checker repetition. It
+starts from one exact Checker artifact and runs only paid agent variants. A cycle
+either repairs the selected scope or, after `selected_scope_ready=true`, adds the
+next plan-ordered task batch. It never approves or imports data.
+
+Start with conservative limits:
+
+```bash
+.venv/bin/python -m datacollector loop \
+  --check datacollector/data/runs/zabka/<run>/check-r012.json \
+  --max-rounds 2 \
+  --max-cost-usd 1.00 \
+  --max-stagnant-rounds 2 \
+  --max-search-tasks 5 \
+  --max-search-calls 10 \
+  --max-extractor-api-calls 20
+```
+
+Each invocation writes a separate immutable `loop-<id>.json` manifest. It
+records every newly executed stage, before/after quality and scope counts,
+provider attempts, tokens, tool calls, incremental estimated USD cost, the exact
+stop reason and the final Checker reference. Pre-existing artifact usage is not
+charged again in the loop total.
+
+Stops include `checker_passed`, `max_rounds`, `plan_repair_limit`, `no_progress`,
+`budget_exhausted`, `cost_unknown` and `human_review_required`. The cost ceiling
+is evaluated between complete cycles so the final already-started cycle may
+produce a bounded overshoot; the manifest states this explicitly. Unknown usage
+stops subsequent automatic spend.
+
+The Planner's gap-repair limit remains a separate safety gate. If public research
+for the selected scope is exhausted, advance to the next batch while retaining
+all current gaps:
+
+```bash
+.venv/bin/python -m datacollector loop \
+  --check datacollector/data/runs/zabka/<run>/check-r012.json \
+  --advance-with-documented-gaps \
+  --max-rounds 1 \
+  --max-cost-usd 0.75
+```
+
+This is a scope-progression override, not acceptance: missing documents and
+unverified critical fields remain visible and prevent Checker pass. Use
+`--allow-plan-repair-limit` instead only when another attempt at the same gaps is
+deliberately justified. The two options are mutually exclusive and neither
+bypasses budget or stagnation stops. Loop progress now counts quality-gate
+improvements and newly evaluated tasks; merely collecting more URLs or raw claims
+does not hide stagnation. Regressions in critical gaps, contradictions, verified
+fields or quality are recorded separately in every round.
+
+When Checker passes, Orchestrator runs the paid Normalizer automatically unless
+`--skip-normalize` is supplied.
+For a deliberately incomplete review draft, `--normalize-incomplete` is required;
+it is not run after a budget or unknown-cost stop. Human Review remains mandatory
+in both cases.
 
 ## Run Normalizer: typed staging data, never publication
 

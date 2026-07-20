@@ -50,7 +50,24 @@ class FranchiseResearchImportError(ValueError):
 
 
 def _resolved(path: str | Path) -> Path:
-    return Path(path).expanduser().resolve()
+    candidate = Path(path).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+
+    working_directory_candidate = (Path.cwd() / candidate).resolve()
+    if working_directory_candidate.exists():
+        return working_directory_candidate
+
+    # Management commands are commonly invoked from settings.BASE_DIR
+    # (src/saashome), while datacollector prints paths relative to the repository
+    # root. Accept both forms without weakening the lineage/hash validation.
+    repository_candidate = (REPOSITORY_ROOT / candidate).resolve()
+    if repository_candidate.exists():
+        return repository_candidate
+
+    # Preserve the conventional current-working-directory error location when
+    # neither candidate exists, so CommandError remains easy to diagnose.
+    return working_directory_candidate
 
 
 def _artifact_metadata(value, external_id: str) -> tuple[str, str, str]:

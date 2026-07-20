@@ -1186,6 +1186,125 @@ class CollectorCliTests(TestCase):
             )
             self.assertEqual(len(artifact["agent_usage"]), 1)
 
+    def test_loop_stops_at_plan_repair_limit_without_provider_spend(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, _, extraction_path = self.create_checker_cli_fixture(
+                temporary_directory
+            )
+            check_stdout = StringIO()
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAICheckerClient",
+                    return_value=CliFixtureChecker(),
+                ),
+                redirect_stdout(check_stdout),
+            ):
+                self.assertEqual(
+                    main(["check", "--extractions", str(extraction_path)]),
+                    0,
+                )
+            check_path = Path(json.loads(check_stdout.getvalue())["check_path"])
+
+            loop_stdout = StringIO()
+            with (
+                patch(
+                    "datacollector.cli._consecutive_gap_repair_rounds",
+                    return_value=99,
+                ),
+                redirect_stdout(loop_stdout),
+            ):
+                exit_code = main(
+                    [
+                        "loop",
+                        "--check",
+                        str(check_path),
+                        "--max-rounds",
+                        "1",
+                        "--skip-normalize",
+                    ]
+                )
+
+            summary = json.loads(loop_stdout.getvalue())
+            artifact = json.loads(
+                Path(summary["loop_path"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(summary["rounds_completed"], 0)
+            self.assertEqual(summary["stop_reason"], "plan_repair_limit")
+            self.assertEqual(summary["usage_totals"]["total_tokens"], 0)
+            self.assertEqual(summary["usage_totals"]["estimated_cost_usd"], "0")
+            self.assertEqual(artifact["policy"]["allow_plan_repair_limit"], False)
+            self.assertEqual(artifact["recommended_next_action"], "inspect_gaps")
+
+    def test_loop_upgrades_free_checker_and_records_incremental_cost(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, _, extraction_path = self.create_checker_cli_fixture(
+                temporary_directory
+            )
+            free_stdout = StringIO()
+            with redirect_stdout(free_stdout):
+                self.assertEqual(
+                    main(
+                        [
+                            "check",
+                            "--extractions",
+                            str(extraction_path),
+                            "--free",
+                        ]
+                    ),
+                    0,
+                )
+            free_check_path = Path(
+                json.loads(free_stdout.getvalue())["check_path"]
+            )
+
+            loop_stdout = StringIO()
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAICheckerClient",
+                    return_value=CliFixtureChecker(),
+                ),
+                redirect_stdout(loop_stdout),
+            ):
+                exit_code = main(
+                    [
+                        "loop",
+                        "--check",
+                        str(free_check_path),
+                        "--max-rounds",
+                        "1",
+                        "--skip-normalize",
+                    ]
+                )
+
+            summary = json.loads(loop_stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(summary["rounds_completed"], 1)
+            self.assertEqual(summary["rounds"][0]["action"], "run_paid_checker")
+            self.assertEqual(summary["stop_reason"], "max_rounds")
+            self.assertEqual(summary["usage_totals"]["total_tokens"], 120)
+            self.assertEqual(
+                summary["usage_totals"]["estimated_cost_usd"],
+                "0.00055000",
+            )
+            self.assertTrue(Path(summary["loop_path"]).is_file())
+
     def test_paid_check_preserves_failed_attempt_in_final_artifact(self):
         with TemporaryDirectory() as temporary_directory:
             _, _, extraction_path = self.create_checker_cli_fixture(

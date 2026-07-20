@@ -438,6 +438,89 @@ class ResolverAgentTests(TestCase):
             any("previously unevaluated" in warning for warning in results.warnings)
         )
 
+    def test_exhausted_repairs_can_explicitly_advance_with_documented_gaps(self):
+        second_task = checker_fixtures.CheckerAgentTests.second_task
+        plan_payload = self.plan.model_dump(mode="python")
+        plan_payload["tasks"] = [self.plan.tasks[0], second_task]
+        expanded_plan = ResearchPlan.model_validate(plan_payload)
+        expanded_search = self.search_results.model_copy(
+            update={"unselected_task_ids": [second_task.task_id]}
+        )
+        checker = self.checker_results.model_copy(
+            update={
+                "unevaluated_task_ids": [second_task.task_id],
+                "scope_complete": False,
+            }
+        )
+
+        llm = FixtureResolverLLM()
+        results = ResolverAgent(llm).create_resolution_results(
+            expanded_plan,
+            expanded_search,
+            self.extraction_results,
+            checker,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            search_sha256=checker_fixtures.SEARCH_SHA256,
+            extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            check_sha256=CHECK_SHA256,
+            check_reference=CHECK_REFERENCE,
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            search_reference=checker_fixtures.SEARCH_REFERENCE,
+            extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            iteration=4,
+            max_search_tasks=1,
+            completed_gap_rounds=expanded_plan.stop_conditions.max_rounds,
+            force_scope_expansion=True,
+        )
+
+        self.assertTrue(results.scope_expansion_override)
+        self.assertEqual(results.strategy_source, ResolverStrategySource.OPENAI)
+        self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(results.search_task_ids, [second_task.task_id])
+        self.assertEqual(
+            results.work_items[0].reason,
+            CheckerFollowUpReason.SCOPE_NOT_STARTED,
+        )
+        self.assertTrue(
+            any("unresolved selected-scope gaps" in item for item in results.warnings)
+        )
+
+    def test_scope_expansion_override_is_rejected_before_repair_limit(self):
+        second_task = checker_fixtures.CheckerAgentTests.second_task
+        plan_payload = self.plan.model_dump(mode="python")
+        plan_payload["tasks"] = [self.plan.tasks[0], second_task]
+        expanded_plan = ResearchPlan.model_validate(plan_payload)
+        expanded_search = self.search_results.model_copy(
+            update={"unselected_task_ids": [second_task.task_id]}
+        )
+        checker = self.checker_results.model_copy(
+            update={
+                "unevaluated_task_ids": [second_task.task_id],
+                "scope_complete": False,
+            }
+        )
+        with self.assertRaisesRegex(
+            ResolverValidationError,
+            "after the Planner repair-round limit",
+        ):
+            ResolverAgent().create_resolution_results(
+                expanded_plan,
+                expanded_search,
+                self.extraction_results,
+                checker,
+                plan_sha256=checker_fixtures.PLAN_SHA256,
+                search_sha256=checker_fixtures.SEARCH_SHA256,
+                extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+                check_sha256=CHECK_SHA256,
+                check_reference=CHECK_REFERENCE,
+                plan_reference=checker_fixtures.PLAN_REFERENCE,
+                search_reference=checker_fixtures.SEARCH_REFERENCE,
+                extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+                iteration=4,
+                completed_gap_rounds=0,
+                force_scope_expansion=True,
+            )
+
     def test_ready_selected_scope_processes_known_source_before_new_tasks(self):
         source = checker_fixtures.CheckerAgentTests._make_source(
             4, SourceType.OFFICIAL

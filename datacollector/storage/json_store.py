@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from ..loop import LoopRunResults
 from ..schemas import (
     AgentFailureArtifact,
     CheckerResults,
@@ -485,6 +486,43 @@ def load_human_review_results(
     raw_review = review_path.read_bytes()
     results = HumanReviewResults.model_validate_json(raw_review)
     return results, hashlib.sha256(raw_review).hexdigest()
+
+
+def loop_results_filename(results: LoopRunResults) -> str:
+    return f"loop-{results.loop_id[:8]}.json"
+
+
+def load_loop_results(path: Path | str) -> tuple[LoopRunResults, str]:
+    """Load one orchestration manifest and return its exact byte hash."""
+
+    loop_path = Path(path)
+    raw_loop = loop_path.read_bytes()
+    results = LoopRunResults.model_validate_json(raw_loop)
+    return results, hashlib.sha256(raw_loop).hexdigest()
+
+
+def save_loop_results(
+    results: LoopRunResults,
+    reference_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> Path:
+    """Store a bounded orchestration manifest without replacing prior runs."""
+
+    directory = (
+        Path(output_dir) if output_dir is not None else Path(reference_path).parent
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    result_path = directory / loop_results_filename(results)
+    rendered = (
+        json.dumps(
+            results.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    _write_immutable_text(result_path, rendered)
+    return result_path
 
 
 def save_human_review_results(

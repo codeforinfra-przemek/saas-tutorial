@@ -103,6 +103,7 @@ class ResolverAgent:
         max_queries_per_item: int = DEFAULT_MAX_QUERIES_PER_ITEM,
         completed_gap_rounds: int = 0,
         allow_round_limit: bool = False,
+        force_scope_expansion: bool = False,
     ) -> ResolverResults:
         resolved_iteration = iteration or checker_results.iteration
         self._validate_inputs(
@@ -123,6 +124,7 @@ class ResolverAgent:
             max_source_actions=max_source_actions,
             max_search_tasks=max_search_tasks,
             max_queries_per_item=max_queries_per_item,
+            force_scope_expansion=force_scope_expansion,
         )
         if completed_gap_rounds < 0:
             raise ResolverValidationError(
@@ -133,6 +135,7 @@ class ResolverAgent:
             == CheckerNextAction.RESOLVE_GAPS
             and completed_gap_rounds >= plan.stop_conditions.max_rounds
             and not allow_round_limit
+            and not force_scope_expansion
         ):
             raise ResolverValidationError(
                 "Resolver gap-repair limit reached: "
@@ -147,10 +150,19 @@ class ResolverAgent:
             max_search_tasks=max_search_tasks,
             max_queries_per_item=max_queries_per_item,
         )
-        expanding_scope = (
+        expanding_scope = force_scope_expansion or (
             checker_results.recommended_next_action
             == CheckerNextAction.RESEARCH_NEXT_BATCH
         )
+        if force_scope_expansion and (
+            checker_results.recommended_next_action
+            != CheckerNextAction.RESOLVE_GAPS
+            or completed_gap_rounds < plan.stop_conditions.max_rounds
+        ):
+            raise ResolverValidationError(
+                "Forced scope expansion requires a resolve_gaps Checker after "
+                "the Planner repair-round limit has been exhausted."
+            )
         if expanding_scope:
             ordered_follow_ups = self._build_scope_expansion_follow_ups(
                 plan,
@@ -202,12 +214,22 @@ class ResolverAgent:
         )
 
         warnings: list[str] = []
-        if completed_gap_rounds >= plan.stop_conditions.max_rounds:
+        if (
+            completed_gap_rounds >= plan.stop_conditions.max_rounds
+            and not force_scope_expansion
+            and allow_round_limit
+        ):
             warnings.append(
                 "Resolver round-limit override was explicitly enabled after "
                 f"{completed_gap_rounds} completed gap-repair round(s)."
             )
         if expanding_scope:
+            if force_scope_expansion:
+                warnings.append(
+                    "A human explicitly advanced to the next research batch with "
+                    "unresolved selected-scope gaps after exhausting the Planner "
+                    "repair-round limit; all gaps remain blocking final approval."
+                )
             if checker_results.unevaluated_source_ids:
                 warnings.append(
                     f"Scheduled {len(selected_follow_ups)} known but unevaluated "
@@ -392,6 +414,7 @@ class ResolverAgent:
             "target_country": plan.planner_input.target_country,
             "depth": plan.planner_input.depth,
             "limits": limits,
+            "scope_expansion_override": force_scope_expansion,
             "available_source_ids": available_source_ids,
             "selected_follow_up_ids": selected_follow_up_ids,
             "deferred_follow_up_ids": deferred_follow_up_ids,
@@ -1003,6 +1026,7 @@ class ResolverAgent:
         max_source_actions: int,
         max_search_tasks: int,
         max_queries_per_item: int,
+        force_scope_expansion: bool,
     ) -> None:
         for value, label in (
             (plan_sha256, "Plan"),
@@ -1034,7 +1058,17 @@ class ResolverAgent:
                 or checker_results.unevaluated_source_ids
             )
         )
-        if not (repair_ready or expansion_ready):
+        forced_expansion_ready = (
+            force_scope_expansion
+            and not checker_results.passed
+            and checker_results.recommended_next_action
+            == CheckerNextAction.RESOLVE_GAPS
+            and bool(
+                checker_results.unevaluated_task_ids
+                or checker_results.unevaluated_source_ids
+            )
+        )
+        if not (repair_ready or expansion_ready or forced_expansion_ready):
             raise ResolverValidationError(
                 "Checker artifact contains neither repair work nor a ready "
                 "scope-expansion batch for Resolver."

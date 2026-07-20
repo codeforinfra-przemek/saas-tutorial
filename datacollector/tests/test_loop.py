@@ -14,3 +14,10 @@ class LoopBlueprintTests(TestCase):
         )
         self.assertTrue(policy.require_human_review_before_import)
         self.assertFalse(policy.publish_automatically)
+
+    def test_exhausted_scope_choices_are_mutually_exclusive(self):
+        with self.assertRaisesRegex(ValueError, "cannot both continue gap repair"):
+            LoopPolicy(
+                allow_plan_repair_limit=True,
+                advance_with_documented_gaps=True,
+            )

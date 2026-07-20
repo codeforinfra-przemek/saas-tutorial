@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+from contextlib import redirect_stdout
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
+from io import StringIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -47,6 +50,15 @@ from .llm.protocol import (
     NormalizerProviderError,
     ResolverProviderError,
 )
+from .loop import (
+    LoopNextAction,
+    LoopPolicy,
+    LoopRoundResult,
+    LoopRunResults,
+    LoopStageUsage,
+    LoopStopReason,
+    LoopValidationError,
+)
 from .schemas import (
     AgentFailureArtifact,
     AgentIterationUsage,
@@ -67,7 +79,9 @@ from .storage.json_store import (
     extraction_results_filename_for,
     reconciled_extraction_results_filename_for,
     load_extraction_results,
+    load_executor_results,
     load_human_review_results,
+    load_loop_results,
     load_checker_results,
     load_normalizer_results,
     load_research_plan,
@@ -82,6 +96,7 @@ from .storage.json_store import (
     save_extraction_results,
     save_normalizer_results,
     save_human_review_results,
+    save_loop_results,
     save_reconciled_extraction_results,
     save_executor_results,
     save_research_plan,
@@ -109,13 +124,23 @@ def _nonnegative_int(value: str) -> int:
     return parsed
 
 
+def _positive_decimal(value: str) -> Decimal:
+    try:
+        parsed = Decimal(value)
+    except Exception as exc:
+        raise argparse.ArgumentTypeError("must be a decimal number") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m datacollector",
         description=(
             "Auditable franchise research loop "
             "(Planner + Searcher + Extractor + Checker + Resolver + Executor + "
-            "Normalizer + Human Review)."
+            "Loop Orchestrator + Normalizer + Human Review)."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -465,12 +490,21 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_parser.add_argument(
         "--model", help="Override OPENAI_MODEL for this Resolver invocation."
     )
-    resolve_parser.add_argument(
+    resolver_exhausted_scope_policy = resolve_parser.add_mutually_exclusive_group()
+    resolver_exhausted_scope_policy.add_argument(
         "--allow-round-limit",
         action="store_true",
         help=(
             "Explicitly override the plan max_rounds safety gate after inspecting "
             "the complete predecessor lineage."
+        ),
+    )
+    resolver_exhausted_scope_policy.add_argument(
+        "--advance-with-documented-gaps",
+        action="store_true",
+        help=(
+            "After the Planner repair limit, preserve unresolved selected-scope "
+            "gaps and schedule the next unevaluated research batch."
         ),
     )
     resolve_parser.add_argument(
@@ -591,6 +625,171 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         help="Artifact directory; defaults to the Resolver directory.",
+    )
+
+    loop_parser = subparsers.add_parser(
+        "loop",
+        help=(
+            "Run bounded paid Checker → Resolver → Executor cycles and optionally "
+            "normalize a passing result."
+        ),
+    )
+    loop_parser.add_argument(
+        "--check",
+        type=Path,
+        required=True,
+        help="Exact paid Checker artifact from which to continue the loop.",
+    )
+    loop_parser.add_argument(
+        "--max-rounds",
+        type=_positive_int,
+        default=3,
+        help="Maximum additional repair or scope-expansion cycles (default: 3).",
+    )
+    loop_parser.add_argument(
+        "--max-cost-usd",
+        type=_positive_decimal,
+        default=Decimal("1.00"),
+        help=(
+            "Maximum incremental estimated cost for this invocation (default: "
+            "1.00); evaluated after each complete cycle."
+        ),
+    )
+    loop_parser.add_argument(
+        "--min-quality-improvement",
+        type=_nonnegative_int,
+        default=1,
+        help="Minimum positive score increase counted as quality progress (default: 1).",
+    )
+    loop_parser.add_argument(
+        "--max-stagnant-rounds",
+        type=_positive_int,
+        default=2,
+        help="Stop after this many consecutive cycles with no measurable progress.",
+    )
+    exhausted_scope_policy = loop_parser.add_mutually_exclusive_group()
+    exhausted_scope_policy.add_argument(
+        "--allow-plan-repair-limit",
+        action="store_true",
+        help=(
+            "Explicitly continue resolve_gaps after the Planner max_rounds gate; "
+            "the override is recorded in the loop manifest."
+        ),
+    )
+    exhausted_scope_policy.add_argument(
+        "--advance-with-documented-gaps",
+        action="store_true",
+        help=(
+            "After exhausting selected-scope repairs, preserve its gaps and "
+            "research the next unevaluated task batch."
+        ),
+    )
+    loop_parser.add_argument(
+        "--max-follow-ups",
+        type=_positive_int,
+        default=30,
+        help="Resolver follow-up ceiling per cycle (default: 30).",
+    )
+    loop_parser.add_argument(
+        "--max-source-actions",
+        type=_positive_int,
+        default=10,
+        help="Resolver known-source action ceiling per cycle (default: 10).",
+    )
+    loop_parser.add_argument(
+        "--max-search-tasks",
+        type=_positive_int,
+        default=5,
+        help="Maximum new plan tasks introduced per cycle (default: 5).",
+    )
+    loop_parser.add_argument(
+        "--max-queries-per-item",
+        type=_positive_int,
+        default=3,
+        help="Maximum Resolver queries retained per work item (default: 3).",
+    )
+    loop_parser.add_argument(
+        "--max-search-calls",
+        type=_positive_int,
+        default=10,
+        help="Executor paid web-search tool-call ceiling per cycle (default: 10).",
+    )
+    loop_parser.add_argument(
+        "--max-extractor-api-calls",
+        type=_positive_int,
+        default=20,
+        help="Executor paid Extractor request ceiling per cycle (default: 20).",
+    )
+    loop_parser.add_argument(
+        "--max-checker-claims",
+        type=_positive_int,
+        default=500,
+        help="Maximum claims audited by each Checker pass (default: 500).",
+    )
+    loop_parser.add_argument(
+        "--max-checker-evidence-chars",
+        type=_positive_int,
+        default=500_000,
+        help="Maximum evidence characters supplied to each Checker (default: 500000).",
+    )
+    loop_parser.add_argument(
+        "--max-document-bytes",
+        type=_positive_int,
+        default=40 * 1024 * 1024,
+        help="Executor hard per-document download cap (default: 40 MiB).",
+    )
+    loop_parser.add_argument(
+        "--max-document-chars",
+        type=_positive_int,
+        default=250_000,
+        help="Maximum selected text stored per document (default: 250000).",
+    )
+    loop_parser.add_argument(
+        "--max-pdf-scan-chars",
+        type=_positive_int,
+        default=2_000_000,
+        help="Maximum locally parsed PDF text before selection (default: 2000000).",
+    )
+    loop_parser.add_argument(
+        "--max-passages-per-task",
+        type=_positive_int,
+        default=6,
+        help="Maximum evidence passages per task/document (default: 6).",
+    )
+    loop_parser.add_argument(
+        "--max-evidence-chars-per-extractor-call",
+        type=_positive_int,
+        default=100_000,
+        help="Hard evidence cap per paid Extractor request (default: 100000).",
+    )
+    loop_parser.add_argument(
+        "--normalize-incomplete",
+        action="store_true",
+        help=(
+            "After a non-budget stop, explicitly create an incomplete paid "
+            "Normalizer draft for Human Review."
+        ),
+    )
+    loop_parser.add_argument(
+        "--skip-normalize",
+        action="store_true",
+        help="Do not automatically normalize even when the final Checker passes.",
+    )
+    loop_parser.add_argument(
+        "--max-normalizer-claims",
+        type=_positive_int,
+        default=500,
+        help="Maximum accepted claims normalized after the loop (default: 500).",
+    )
+    loop_parser.add_argument(
+        "--max-normalizer-input-chars",
+        type=_positive_int,
+        default=500_000,
+        help="Maximum Normalizer value/evidence input characters (default: 500000).",
+    )
+    loop_parser.add_argument(
+        "--model",
+        help="Override OPENAI_MODEL for all paid stages in this invocation.",
     )
 
     normalize_parser = subparsers.add_parser(
@@ -1803,6 +2002,7 @@ def _run_resolve(args: argparse.Namespace) -> int:
                 max_queries_per_item=args.max_queries_per_item,
                 completed_gap_rounds=completed_gap_rounds,
                 allow_round_limit=args.allow_round_limit,
+                force_scope_expansion=args.advance_with_documented_gaps,
             )
         except ResolverProviderError as exc:
             requested_model = (
@@ -1884,6 +2084,7 @@ def _run_resolve(args: argparse.Namespace) -> int:
         "model": results.model,
         "iteration": results.iteration,
         "provider_executed": results.provider_executed,
+        "scope_expansion_override": results.scope_expansion_override,
         "selected_follow_ups": len(results.selected_follow_up_ids),
         "deferred_follow_ups": len(results.deferred_follow_up_ids),
         "work_item_actions": action_counts,
@@ -2495,6 +2696,706 @@ def _run_normalize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _invoke_loop_stage(handler, args: argparse.Namespace) -> dict[str, object]:
+    """Run an existing immutable CLI stage while retaining one final JSON output."""
+
+    output = StringIO()
+    with redirect_stdout(output):
+        exit_code = handler(args)
+    if exit_code != 0:
+        raise LoopValidationError(
+            f"Orchestrated stage {handler.__name__} returned {exit_code}."
+        )
+    rendered = output.getvalue().strip()
+    if not rendered:
+        raise LoopValidationError(
+            f"Orchestrated stage {handler.__name__} returned no summary."
+        )
+    parsed = json.loads(rendered)
+    if not isinstance(parsed, dict):
+        raise LoopValidationError(
+            f"Orchestrated stage {handler.__name__} returned invalid JSON."
+        )
+    return parsed
+
+
+def _next_loop_iteration(directory: Path, minimum: int) -> int:
+    """Allocate a monotonic iteration above every artifact already in the run."""
+
+    observed = [minimum]
+    pattern = re.compile(r"-r(\d+)(?:-|\.)")
+    for artifact in directory.glob("*.json"):
+        match = pattern.search(artifact.name)
+        if match is not None:
+            observed.append(int(match.group(1)))
+    return max(observed) + 1
+
+
+def _loop_stage_usage(
+    stage: str,
+    iteration: int,
+    artifact_reference: Path,
+    summary: dict[str, object],
+) -> LoopStageUsage:
+    raw_totals = summary.get("usage_totals")
+    if not isinstance(raw_totals, dict):
+        raise LoopValidationError(
+            f"Orchestrated {stage} summary omitted usage_totals."
+        )
+    estimated = raw_totals.get("estimated_cost_usd")
+    api_attempts = int(raw_totals.get("api_attempts_recorded", 0))
+    api_calls_with_usage = int(raw_totals.get("api_calls_with_usage", 0))
+    return LoopStageUsage(
+        stage=stage,
+        iteration=iteration,
+        artifact_reference=str(artifact_reference.resolve()),
+        api_attempts_recorded=api_attempts,
+        api_calls_with_usage=api_calls_with_usage,
+        input_tokens=int(raw_totals.get("input_tokens", 0)),
+        output_tokens=int(raw_totals.get("output_tokens", 0)),
+        reasoning_tokens=int(raw_totals.get("reasoning_tokens", 0)),
+        total_tokens=int(raw_totals.get("total_tokens", 0)),
+        tool_calls=int(raw_totals.get("tool_calls", 0)),
+        tool_cost_usd=Decimal(str(raw_totals.get("tool_cost_usd", "0"))),
+        estimated_cost_usd=(
+            Decimal(str(estimated)) if estimated is not None else None
+        ),
+        token_usage_unknown=(
+            estimated is None and api_attempts > api_calls_with_usage
+        ),
+    )
+
+
+def _loop_stages(
+    rounds: list[LoopRoundResult],
+    post_loop_usage: list[LoopStageUsage] | None = None,
+) -> list[LoopStageUsage]:
+    return [
+        *(stage for round_result in rounds for stage in round_result.stage_usage),
+        *(post_loop_usage or []),
+    ]
+
+
+def _loop_usage_totals(stages: list[LoopStageUsage]) -> dict[str, object]:
+    known_costs = [stage.estimated_cost_usd for stage in stages]
+    estimated_cost = (
+        sum((cost for cost in known_costs if cost is not None), Decimal("0"))
+        if all(cost is not None for cost in known_costs)
+        else None
+    )
+    return {
+        "api_attempts": sum(stage.api_attempts_recorded for stage in stages),
+        "input_tokens": sum(stage.input_tokens for stage in stages),
+        "output_tokens": sum(stage.output_tokens for stage in stages),
+        "reasoning_tokens": sum(stage.reasoning_tokens for stage in stages),
+        "total_tokens": sum(stage.total_tokens for stage in stages),
+        "tool_calls": sum(stage.tool_calls for stage in stages),
+        "tool_cost_usd": sum(
+            (stage.tool_cost_usd for stage in stages), Decimal("0")
+        ),
+        "estimated_cost_usd": estimated_cost,
+    }
+
+
+def _loop_progress(
+    before,
+    after,
+    *,
+    min_quality_improvement: int,
+) -> tuple[bool, list[str], list[str]]:
+    reasons: list[str] = []
+    regressions: list[str] = []
+    quality_delta = after.quality_score - before.quality_score
+    critical_delta = len(after.critical_missing_fields) - len(
+        before.critical_missing_fields
+    )
+    contradiction_delta = len(after.contradictions) - len(before.contradictions)
+    before_verified = sum(
+        field.status.value == "verified"
+        for task in before.task_results
+        for field in task.field_results
+    )
+    after_verified = sum(
+        field.status.value == "verified"
+        for task in after.task_results
+        for field in task.field_results
+    )
+    verified_delta = after_verified - before_verified
+    if (
+        quality_delta > 0
+        and quality_delta >= min_quality_improvement
+        and critical_delta <= 0
+    ):
+        reasons.append(f"quality_score+{quality_delta}")
+    if critical_delta < 0:
+        reasons.append(f"critical_missing{critical_delta}")
+    elif critical_delta > 0:
+        regressions.append(f"critical_missing+{critical_delta}")
+    if contradiction_delta < 0:
+        reasons.append(f"contradictions{contradiction_delta}")
+    elif contradiction_delta > 0:
+        regressions.append(f"contradictions+{contradiction_delta}")
+    if verified_delta > 0:
+        reasons.append(f"verified_fields+{verified_delta}")
+    elif verified_delta < 0:
+        regressions.append(f"verified_fields{verified_delta}")
+    evaluated_task_increase = len(after.selected_task_ids) - len(
+        before.selected_task_ids
+    )
+    if evaluated_task_increase > 0:
+        reasons.append(f"evaluated_tasks+{evaluated_task_increase}")
+    if not before.selected_scope_ready and after.selected_scope_ready:
+        reasons.append("selected_scope_ready")
+    if quality_delta < 0:
+        regressions.append(f"quality_score{quality_delta}")
+    return bool(reasons), reasons, regressions
+
+
+def _make_loop_round(
+    *,
+    number: int,
+    action: CheckerNextAction | str,
+    before,
+    before_path: Path,
+    before_sha256: str,
+    after,
+    after_path: Path,
+    after_sha256: str,
+    resolution_path: Path | None,
+    execution_path: Path | None,
+    stage_usage: list[LoopStageUsage],
+    min_quality_improvement: int,
+) -> LoopRoundResult:
+    progress, reasons, regressions = _loop_progress(
+        before,
+        after,
+        min_quality_improvement=min_quality_improvement,
+    )
+    return LoopRoundResult(
+        round_number=number,
+        checker_action=(action.value if isinstance(action, CheckerNextAction) else action),
+        starting_check_id=before.check_id,
+        starting_check_reference=str(before_path.resolve()),
+        starting_check_sha256=before_sha256,
+        ending_check_id=after.check_id,
+        ending_check_reference=str(after_path.resolve()),
+        ending_check_sha256=after_sha256,
+        resolution_reference=(
+            str(resolution_path.resolve()) if resolution_path is not None else None
+        ),
+        execution_reference=(
+            str(execution_path.resolve()) if execution_path is not None else None
+        ),
+        quality_before=before.quality_score,
+        quality_after=after.quality_score,
+        quality_delta=after.quality_score - before.quality_score,
+        evaluated_tasks_before=len(before.selected_task_ids),
+        evaluated_tasks_after=len(after.selected_task_ids),
+        evaluated_sources_before=len(before.selected_source_ids),
+        evaluated_sources_after=len(after.selected_source_ids),
+        evaluated_claims_before=len(before.selected_claim_ids),
+        evaluated_claims_after=len(after.selected_claim_ids),
+        critical_missing_before=len(before.critical_missing_fields),
+        critical_missing_after=len(after.critical_missing_fields),
+        contradictions_before=len(before.contradictions),
+        contradictions_after=len(after.contradictions),
+        verified_fields_before=sum(
+            field.status.value == "verified"
+            for task in before.task_results
+            for field in task.field_results
+        ),
+        verified_fields_after=sum(
+            field.status.value == "verified"
+            for task in after.task_results
+            for field in task.field_results
+        ),
+        selected_scope_ready_before=before.selected_scope_ready,
+        selected_scope_ready_after=after.selected_scope_ready,
+        progress_detected=progress,
+        progress_reasons=reasons,
+        regression_reasons=regressions,
+        stage_usage=stage_usage,
+    )
+
+
+def _run_loop(args: argparse.Namespace) -> int:
+    """Run bounded paid repair and scope-expansion cycles from one Checker."""
+
+    started_at = datetime.now(timezone.utc)
+    initial_path = args.check.resolve()
+    initial_check, initial_check_sha256 = load_checker_results(initial_path)
+    plan_path = Path(initial_check.plan_reference)
+    plan, plan_sha256 = load_research_plan(plan_path)
+    if (
+        initial_check.plan_run_id != plan.run_id
+        or initial_check.plan_sha256 != plan_sha256
+    ):
+        raise CheckerValidationError(
+            "Loop starting Checker does not match its exact Planner artifact."
+        )
+
+    policy = LoopPolicy(
+        quality_threshold=initial_check.quality_threshold,
+        max_rounds=args.max_rounds,
+        max_estimated_cost_usd=args.max_cost_usd,
+        min_quality_improvement=args.min_quality_improvement,
+        max_stagnant_rounds=args.max_stagnant_rounds,
+        allow_plan_repair_limit=args.allow_plan_repair_limit,
+        advance_with_documented_gaps=args.advance_with_documented_gaps,
+    )
+    run_directory = initial_path.parent
+    next_iteration = _next_loop_iteration(
+        run_directory,
+        minimum=initial_check.iteration,
+    )
+    current = initial_check
+    current_path = initial_path
+    current_sha256 = initial_check_sha256
+    rounds: list[LoopRoundResult] = []
+    stagnant_rounds = 0
+    stop_reason: LoopStopReason | None = None
+    warnings = [
+        "The cost ceiling is evaluated between complete agent cycles; the final "
+        "in-flight cycle can make recorded cost exceed the configured ceiling."
+    ]
+    if policy.allow_plan_repair_limit:
+        warnings.append(
+            "A human explicitly allowed resolve_gaps beyond the Planner repair-round "
+            "limit for this orchestration session."
+        )
+    if policy.advance_with_documented_gaps:
+        warnings.append(
+            "A human explicitly allowed progression to unevaluated plan tasks while "
+            "retaining exhausted selected-scope gaps as unresolved."
+        )
+
+    while len(rounds) < policy.max_rounds:
+        if current.passed:
+            stop_reason = LoopStopReason.CHECKER_PASSED
+            break
+
+        stages_before = _loop_stages(rounds)
+        totals_before = _loop_usage_totals(stages_before)
+        known_cost_before = totals_before["estimated_cost_usd"]
+        if known_cost_before is None:
+            stop_reason = LoopStopReason.COST_UNKNOWN
+            break
+        if known_cost_before >= policy.max_estimated_cost_usd:
+            stop_reason = LoopStopReason.BUDGET_EXHAUSTED
+            break
+
+        action = current.recommended_next_action
+        force_scope_expansion = False
+        if action == CheckerNextAction.RESOLVE_GAPS:
+            extraction, _ = load_extraction_results(current.extraction_reference)
+            repair_rounds = _consecutive_gap_repair_rounds(extraction)
+            if repair_rounds >= plan.stop_conditions.max_rounds:
+                force_scope_expansion = (
+                    policy.advance_with_documented_gaps
+                    and bool(
+                        current.unevaluated_task_ids
+                        or current.unevaluated_source_ids
+                    )
+                )
+                if not policy.allow_plan_repair_limit and not force_scope_expansion:
+                    stop_reason = LoopStopReason.PLAN_REPAIR_LIMIT
+                    break
+
+        before = current
+        before_path = current_path
+        before_sha256 = current_sha256
+        stage_usage: list[LoopStageUsage] = []
+        resolution_path: Path | None = None
+        execution_path: Path | None = None
+
+        if action in {
+            CheckerNextAction.RUN_PAID_CHECKER,
+            CheckerNextAction.RETRY_CHECKER,
+        }:
+            check_iteration = next_iteration
+            check_summary = _invoke_loop_stage(
+                _run_check,
+                argparse.Namespace(
+                    extractions=Path(current.extraction_reference),
+                    plan=None,
+                    sources=None,
+                    offline=False,
+                    iteration=check_iteration,
+                    max_claims=args.max_checker_claims,
+                    max_evidence_chars=args.max_checker_evidence_chars,
+                    model=args.model,
+                ),
+            )
+            current_path = Path(str(check_summary["check_path"]))
+            current, current_sha256 = load_checker_results(current_path)
+            stage_usage.append(
+                _loop_stage_usage(
+                    "checker",
+                    check_iteration,
+                    current_path,
+                    check_summary,
+                )
+            )
+            next_iteration = check_iteration + 1
+        elif action in {
+            CheckerNextAction.RESOLVE_GAPS,
+            CheckerNextAction.RESEARCH_NEXT_BATCH,
+        }:
+            resolution_iteration = next_iteration
+            resolution_summary = _invoke_loop_stage(
+                _run_resolve,
+                argparse.Namespace(
+                    check=current_path,
+                    plan=None,
+                    sources=None,
+                    extractions=None,
+                    offline=False,
+                    iteration=resolution_iteration,
+                    max_follow_ups=args.max_follow_ups,
+                    max_source_actions=args.max_source_actions,
+                    max_search_tasks=args.max_search_tasks,
+                    max_queries_per_item=args.max_queries_per_item,
+                    model=args.model,
+                    allow_round_limit=policy.allow_plan_repair_limit,
+                    force_scope_expansion=force_scope_expansion,
+                    output_dir=None,
+                ),
+            )
+            resolution_path = Path(str(resolution_summary["resolution_path"]))
+            resolution, _ = load_resolver_results(resolution_path)
+            stage_usage.append(
+                _loop_stage_usage(
+                    "resolver",
+                    resolution_iteration,
+                    resolution_path,
+                    resolution_summary,
+                )
+            )
+            next_iteration = resolution_iteration + 1
+
+            if resolution.ready_for_execution:
+                execution_iteration = next_iteration
+                execution_summary = _invoke_loop_stage(
+                    _run_execute,
+                    argparse.Namespace(
+                        resolution=resolution_path,
+                        plan=None,
+                        sources=None,
+                        extractions=None,
+                        check=None,
+                        offline=False,
+                        iteration=execution_iteration,
+                        max_search_calls=args.max_search_calls,
+                        min_queries_per_task=1,
+                        max_retry_tasks=0,
+                        retry_search_calls=1,
+                        max_document_bytes=args.max_document_bytes,
+                        max_document_chars=args.max_document_chars,
+                        max_pdf_scan_chars=args.max_pdf_scan_chars,
+                        max_passages_per_task=args.max_passages_per_task,
+                        max_evidence_chars_per_call=(
+                            args.max_evidence_chars_per_extractor_call
+                        ),
+                        max_extractor_api_calls=args.max_extractor_api_calls,
+                        model=args.model,
+                        output_dir=None,
+                    ),
+                )
+                execution_path = Path(str(execution_summary["execution_path"]))
+                execution, _ = load_executor_results(execution_path)
+                stage_usage.append(
+                    _loop_stage_usage(
+                        "executor",
+                        execution_iteration,
+                        execution_path,
+                        execution_summary,
+                    )
+                )
+                next_iteration = execution_iteration + 1
+
+                if execution.ready_for_checker:
+                    current_path = Path(str(execution_summary["extractions_path"]))
+                    check_summary = _invoke_loop_stage(
+                        _run_check,
+                        argparse.Namespace(
+                            extractions=current_path,
+                            plan=None,
+                            sources=None,
+                            offline=False,
+                            iteration=execution_iteration,
+                            max_claims=args.max_checker_claims,
+                            max_evidence_chars=args.max_checker_evidence_chars,
+                            model=args.model,
+                        ),
+                    )
+                    current_path = Path(str(check_summary["check_path"]))
+                    current, current_sha256 = load_checker_results(current_path)
+                    stage_usage.append(
+                        _loop_stage_usage(
+                            "checker",
+                            execution_iteration,
+                            current_path,
+                            check_summary,
+                        )
+                    )
+                else:
+                    stop_reason = LoopStopReason.HUMAN_REVIEW_REQUIRED
+            else:
+                stop_reason = LoopStopReason.HUMAN_REVIEW_REQUIRED
+        else:
+            stop_reason = LoopStopReason.HUMAN_REVIEW_REQUIRED
+            break
+
+        round_result = _make_loop_round(
+            number=len(rounds) + 1,
+            action=(
+                "advance_with_documented_gaps"
+                if force_scope_expansion
+                else action
+            ),
+            before=before,
+            before_path=before_path,
+            before_sha256=before_sha256,
+            after=current,
+            after_path=current_path,
+            after_sha256=current_sha256,
+            resolution_path=resolution_path,
+            execution_path=execution_path,
+            stage_usage=stage_usage,
+            min_quality_improvement=policy.min_quality_improvement,
+        )
+        rounds.append(round_result)
+        stagnant_rounds = 0 if round_result.progress_detected else stagnant_rounds + 1
+
+        if stop_reason is not None:
+            break
+        if current.passed:
+            stop_reason = LoopStopReason.CHECKER_PASSED
+            break
+        totals_after = _loop_usage_totals(_loop_stages(rounds))
+        known_cost_after = totals_after["estimated_cost_usd"]
+        if known_cost_after is None:
+            stop_reason = LoopStopReason.COST_UNKNOWN
+            break
+        if known_cost_after >= policy.max_estimated_cost_usd:
+            stop_reason = LoopStopReason.BUDGET_EXHAUSTED
+            break
+        if stagnant_rounds >= policy.max_stagnant_rounds:
+            stop_reason = LoopStopReason.NO_PROGRESS
+            break
+
+    if stop_reason is None:
+        stop_reason = (
+            LoopStopReason.CHECKER_PASSED
+            if current.passed
+            else LoopStopReason.MAX_ROUNDS
+        )
+
+    post_loop_usage: list[LoopStageUsage] = []
+    normalization_reference: str | None = None
+    stages_before_normalizer = _loop_stages(rounds)
+    cost_before_normalizer = _loop_usage_totals(stages_before_normalizer)[
+        "estimated_cost_usd"
+    ]
+    budget_allows_normalizer = (
+        cost_before_normalizer is not None
+        and cost_before_normalizer < policy.max_estimated_cost_usd
+    )
+    should_normalize = (
+        current.passed and not args.skip_normalize and budget_allows_normalizer
+    ) or (
+        not current.passed
+        and args.normalize_incomplete
+        and stop_reason
+        not in {LoopStopReason.BUDGET_EXHAUSTED, LoopStopReason.COST_UNKNOWN}
+        and budget_allows_normalizer
+    )
+    if should_normalize:
+        normalizer_iteration = _next_loop_iteration(
+            run_directory,
+            minimum=next_iteration - 1,
+        )
+        normalizer_summary = _invoke_loop_stage(
+            _run_normalize,
+            argparse.Namespace(
+                check=current_path,
+                plan=None,
+                sources=None,
+                extractions=None,
+                offline=False,
+                iteration=normalizer_iteration,
+                max_claims=args.max_normalizer_claims,
+                max_input_chars=args.max_normalizer_input_chars,
+                allow_incomplete=not current.passed,
+                model=args.model,
+                output_dir=None,
+            ),
+        )
+        normalized_path = Path(str(normalizer_summary["normalized_path"]))
+        normalization_reference = str(normalized_path.resolve())
+        post_loop_usage.append(
+            _loop_stage_usage(
+                "normalizer",
+                normalizer_iteration,
+                normalized_path,
+                normalizer_summary,
+            )
+        )
+    elif current.passed and not args.skip_normalize and not budget_allows_normalizer:
+        warnings.append(
+            "Checker passed, but Normalizer was not started because the loop cost "
+            "ceiling had been reached or exact cost was unknown."
+        )
+
+    all_stages = _loop_stages(rounds, post_loop_usage)
+    totals = _loop_usage_totals(all_stages)
+    if (
+        totals["estimated_cost_usd"] is not None
+        and totals["estimated_cost_usd"] > policy.max_estimated_cost_usd
+    ):
+        warnings.append(
+            "Recorded incremental cost exceeded the configured ceiling during the "
+            "last already-started agent cycle."
+        )
+
+    if normalization_reference is not None:
+        recommended_next_action = LoopNextAction.HUMAN_REVIEW
+    elif current.passed:
+        recommended_next_action = LoopNextAction.NORMALIZE
+    elif stop_reason in {
+        LoopStopReason.MAX_ROUNDS,
+        LoopStopReason.BUDGET_EXHAUSTED,
+    }:
+        recommended_next_action = LoopNextAction.RESUME_LOOP
+    else:
+        recommended_next_action = LoopNextAction.INSPECT_GAPS
+
+    results = LoopRunResults(
+        loop_id=str(uuid4()),
+        plan_run_id=plan.run_id,
+        plan_reference=str(plan_path.resolve()),
+        plan_sha256=plan_sha256,
+        brand_name=plan.planner_input.brand_name,
+        started_at=started_at,
+        completed_at=datetime.now(timezone.utc),
+        initial_check_id=initial_check.check_id,
+        initial_check_reference=str(initial_path),
+        initial_check_sha256=initial_check_sha256,
+        final_check_id=current.check_id,
+        final_check_reference=str(current_path.resolve()),
+        final_check_sha256=current_sha256,
+        policy=policy,
+        rounds=rounds,
+        post_loop_usage=post_loop_usage,
+        stop_reason=stop_reason,
+        final_quality_score=current.quality_score,
+        final_quality_threshold=current.quality_threshold,
+        final_scope_complete=current.scope_complete,
+        final_checker_passed=current.passed,
+        incremental_api_attempts=int(totals["api_attempts"]),
+        incremental_input_tokens=int(totals["input_tokens"]),
+        incremental_output_tokens=int(totals["output_tokens"]),
+        incremental_reasoning_tokens=int(totals["reasoning_tokens"]),
+        incremental_total_tokens=int(totals["total_tokens"]),
+        incremental_tool_calls=int(totals["tool_calls"]),
+        incremental_tool_cost_usd=Decimal(str(totals["tool_cost_usd"])),
+        incremental_estimated_cost_usd=totals["estimated_cost_usd"],
+        normalization_reference=normalization_reference,
+        recommended_next_action=recommended_next_action,
+        warnings=warnings,
+    )
+    loop_path = save_loop_results(results, initial_path)
+    _, loop_sha256 = load_loop_results(loop_path)
+
+    if normalization_reference is not None:
+        next_command = (
+            ".venv/bin/python -m datacollector review --normalized "
+            f"{normalization_reference}"
+        )
+    elif recommended_next_action == LoopNextAction.NORMALIZE:
+        next_command = (
+            ".venv/bin/python -m datacollector normalize --check "
+            f"{current_path.resolve()}"
+        )
+    elif recommended_next_action == LoopNextAction.RESUME_LOOP:
+        repair_override = (
+            " --allow-plan-repair-limit"
+            if policy.allow_plan_repair_limit
+            else (
+                " --advance-with-documented-gaps"
+                if policy.advance_with_documented_gaps
+                else ""
+            )
+        )
+        next_command = (
+            ".venv/bin/python -m datacollector loop --check "
+            f"{current_path.resolve()} --max-rounds {policy.max_rounds} "
+            f"--max-cost-usd {policy.max_estimated_cost_usd}"
+            f"{repair_override}"
+        )
+    else:
+        next_command = None
+
+    summary = {
+        "loop_id": results.loop_id,
+        "brand": results.brand_name,
+        "initial_check_id": results.initial_check_id,
+        "final_check_id": results.final_check_id,
+        "rounds_completed": len(results.rounds),
+        "rounds": [
+            {
+                "round": item.round_number,
+                "action": item.checker_action,
+                "quality_before": item.quality_before,
+                "quality_after": item.quality_after,
+                "quality_delta": item.quality_delta,
+                "evaluated_tasks_before": item.evaluated_tasks_before,
+                "evaluated_tasks_after": item.evaluated_tasks_after,
+                "progress_detected": item.progress_detected,
+                "progress_reasons": item.progress_reasons,
+                "regression_reasons": item.regression_reasons,
+                "critical_missing_before": item.critical_missing_before,
+                "critical_missing_after": item.critical_missing_after,
+                "contradictions_before": item.contradictions_before,
+                "contradictions_after": item.contradictions_after,
+                "selected_scope_ready_before": item.selected_scope_ready_before,
+                "selected_scope_ready_after": item.selected_scope_ready_after,
+                "resolution_path": item.resolution_reference,
+                "execution_path": item.execution_reference,
+                "check_path": item.ending_check_reference,
+            }
+            for item in results.rounds
+        ],
+        "stop_reason": results.stop_reason.value,
+        "final_quality_score": results.final_quality_score,
+        "quality_threshold": results.final_quality_threshold,
+        "scope_complete": results.final_scope_complete,
+        "checker_passed": results.final_checker_passed,
+        "usage_totals": {
+            "api_attempts_recorded": results.incremental_api_attempts,
+            "input_tokens": results.incremental_input_tokens,
+            "output_tokens": results.incremental_output_tokens,
+            "reasoning_tokens": results.incremental_reasoning_tokens,
+            "total_tokens": results.incremental_total_tokens,
+            "tool_calls": results.incremental_tool_calls,
+            "tool_cost_usd": str(results.incremental_tool_cost_usd),
+            "estimated_cost_usd": (
+                str(results.incremental_estimated_cost_usd)
+                if results.incremental_estimated_cost_usd is not None
+                else None
+            ),
+        },
+        "normalization_path": results.normalization_reference,
+        "recommended_next_action": results.recommended_next_action.value,
+        "warnings": results.warnings,
+        "loop_path": str(loop_path),
+        "loop_sha256": loop_sha256,
+        "next_command": next_command,
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _run_review(args: argparse.Namespace) -> int:
     normalized, normalized_sha256 = load_normalizer_results(args.normalized)
     plan_path = Path(normalized.plan_reference)
@@ -2747,6 +3648,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_resolve(args)
         if args.command == "execute":
             return _run_execute(args)
+        if args.command == "loop":
+            return _run_loop(args)
         if args.command == "normalize":
             return _run_normalize(args)
         if args.command == "review":
@@ -2767,6 +3670,7 @@ def main(argv: list[str] | None = None) -> int:
         NormalizerProviderError,
         NormalizerValidationError,
         HumanReviewValidationError,
+        LoopValidationError,
         ExecutorProviderError,
         ExecutorValidationError,
         SearcherProviderError,
