@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -9,7 +10,7 @@ from django.utils import timezone
 from accounts.models import Organization
 from billing.models import OrganizationSubscription, Plan
 
-from .models import RevenueEvent, SalesAccount, SalesOpportunity
+from .models import RevenueEvent, SalesAccount, SalesActivity, SalesOpportunity
 from .services.revenue import get_revenue_overview, get_subscription_mrr
 from .services.sales import change_opportunity_stage
 
@@ -74,3 +75,24 @@ class BackofficeTests(TestCase):
             self.client.get(reverse("backoffice:sales_opportunity_detail", kwargs={"pk": opportunity.pk})).status_code,
             200,
         )
+
+    def test_demo_seed_creates_revenue_and_sales_data_idempotently(self):
+        call_command("seed_backoffice_demo")
+        initial_counts = {
+            "events": RevenueEvent.objects.count(),
+            "accounts": SalesAccount.objects.count(),
+            "opportunities": SalesOpportunity.objects.count(),
+            "activities": SalesActivity.objects.count(),
+        }
+
+        self.assertGreaterEqual(initial_counts["events"], 9)
+        self.assertGreaterEqual(initial_counts["accounts"], 5)
+        self.assertGreaterEqual(initial_counts["opportunities"], 5)
+        self.assertGreaterEqual(initial_counts["activities"], 10)
+        self.assertTrue(RevenueEvent.objects.filter(event_type=RevenueEvent.EVENT_CHURN).exists())
+
+        call_command("seed_backoffice_demo")
+        self.assertEqual(initial_counts["events"], RevenueEvent.objects.count())
+        self.assertEqual(initial_counts["accounts"], SalesAccount.objects.count())
+        self.assertEqual(initial_counts["opportunities"], SalesOpportunity.objects.count())
+        self.assertEqual(initial_counts["activities"], SalesActivity.objects.count())

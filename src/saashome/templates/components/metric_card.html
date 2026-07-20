@@ -1,5 +1,5 @@
 <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-    <p class="text-xs font-bold uppercase text-slate-500">{{ label }}</p>
+    <div class="flex items-center gap-1.5"><p class="text-xs font-bold uppercase text-slate-500">{{ label }}</p>{% if tooltip %}<span class="group relative inline-flex"><button type="button" class="grid h-4 w-4 place-items-center rounded-full border border-slate-300 bg-white text-[10px] font-black leading-none text-slate-500 hover:border-brand-500 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-100" aria-label="Wyjaśnienie: {{ label }}">?</button><span role="tooltip" class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 rounded-lg bg-slate-950 px-3 py-2 text-xs font-medium normal-case leading-5 text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">{{ tooltip }}</span></span>{% endif %}</div>
     <p class="mt-2 text-2xl font-black text-slate-950">{{ value|default_if_none:"-" }}</p>
     {% if helper %}<p class="mt-1 text-xs leading-5 text-slate-500">{{ helper }}</p>{% endif %}
 </div>
