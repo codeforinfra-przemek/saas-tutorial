@@ -666,8 +666,16 @@ Start with conservative limits:
   --max-stagnant-rounds 2 \
   --max-search-tasks 5 \
   --max-search-calls 10 \
+  --min-queries-per-task 2 \
   --max-extractor-api-calls 20
 ```
+
+`--max-search-calls` is a ceiling, not a target. Use
+`--min-queries-per-task 2` when a five-task batch should attempt two distinct
+Resolver queries per task (up to ten search calls). The setting is passed to the
+Executor/Searcher child and recorded in the immutable Executor limits. Keep the
+product of selected search tasks and this minimum within the search-call ceiling
+when full minimum-query coverage is required.
 
 Each invocation writes a separate immutable `loop-<id>.json` manifest. It
 records every newly executed stage, before/after quality and scope counts,

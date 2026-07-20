@@ -11,7 +11,7 @@ from unittest.mock import patch
 from datacollector.agents.planner import PlannerAgent
 from datacollector.agents.searcher import SearcherAgent
 from datacollector.catalog import load_question_catalog
-from datacollector.cli import main
+from datacollector.cli import build_parser, main
 from datacollector.config import OpenAISettings
 from datacollector.documents import FetchedDocument, FetchStatus
 from datacollector.llm.protocol import (
@@ -427,6 +427,22 @@ class MissingTokenUsageSearcher:
 
 
 class CollectorCliTests(TestCase):
+    def test_loop_parser_accepts_search_depth_per_task(self):
+        args = build_parser().parse_args(
+            [
+                "loop",
+                "--check",
+                "check.json",
+                "--max-search-calls",
+                "10",
+                "--min-queries-per-task",
+                "2",
+            ]
+        )
+
+        self.assertEqual(args.max_search_calls, 10)
+        self.assertEqual(args.min_queries_per_task, 2)
+
     def create_extractor_cli_fixture(self, output_directory):
         plan = PlannerAgent(load_question_catalog()).create_plan(
             PlannerInput(
@@ -1290,6 +1306,8 @@ class CollectorCliTests(TestCase):
                         "--max-rounds",
                         "1",
                         "--skip-normalize",
+                        "--min-queries-per-task",
+                        "2",
                     ]
                 )
 
@@ -1302,6 +1320,10 @@ class CollectorCliTests(TestCase):
             self.assertEqual(
                 summary["usage_totals"]["estimated_cost_usd"],
                 "0.00055000",
+            )
+            self.assertIn(
+                "--min-queries-per-task 2",
+                summary["next_command"],
             )
             self.assertTrue(Path(summary["loop_path"]).is_file())
 

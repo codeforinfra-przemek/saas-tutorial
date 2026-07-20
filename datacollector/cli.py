@@ -736,6 +736,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Executor paid web-search tool-call ceiling per cycle (default: 10).",
     )
     loop_parser.add_argument(
+        "--min-queries-per-task",
+        type=_positive_int,
+        default=1,
+        help=(
+            "Minimum exact Resolver queries executed per search task in each "
+            "cycle (default: 1)."
+        ),
+    )
+    loop_parser.add_argument(
         "--max-candidate-routes",
         type=_nonnegative_int,
         default=5,
@@ -3204,7 +3213,7 @@ def _run_loop(args: argparse.Namespace) -> int:
                         offline=False,
                         iteration=execution_iteration,
                         max_search_calls=args.max_search_calls,
-                        min_queries_per_task=1,
+                        min_queries_per_task=args.min_queries_per_task,
                         max_retry_tasks=0,
                         retry_search_calls=1,
                         max_candidate_routes=args.max_candidate_routes,
@@ -3514,7 +3523,11 @@ def _run_loop(args: argparse.Namespace) -> int:
         next_command = (
             ".venv/bin/python -m datacollector loop --check "
             f"{current_path.resolve()} --max-rounds {policy.max_rounds} "
-            f"--max-cost-usd {policy.max_estimated_cost_usd}"
+            f"--max-cost-usd {policy.max_estimated_cost_usd} "
+            f"--max-search-calls {args.max_search_calls} "
+            f"--min-queries-per-task {args.min_queries_per_task} "
+            f"--max-candidate-routes {args.max_candidate_routes} "
+            f"--max-extractor-api-calls {args.max_extractor_api_calls}"
             f"{repair_override}"
         )
     else:
