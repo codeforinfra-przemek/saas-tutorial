@@ -58,13 +58,29 @@ from ..schemas import (
 DEFAULT_PROMPT_PATH = (
     Path(__file__).resolve().parent.parent / "prompts" / "checker_system_v3.md"
 )
-DEFAULT_MAX_CLAIMS = 100
+DEFAULT_MAX_CLAIMS = 500
 DEFAULT_MAX_EVIDENCE_CHARS = 100_000
 _TERMINAL_RETRIEVAL_ERROR_CODES = {"access_denied", "anti_bot_page"}
 
 
 class CheckerValidationError(ValueError):
     """Raised before an invalid or misleading Checker artifact is saved."""
+
+
+def _paid_postprocessing_error(
+    exc: Exception,
+    usages: list[AgentIterationUsage],
+    failed_attempts: list[CheckerAttemptFailure],
+) -> CheckerProviderError:
+    """Retain billed Checker usage when deterministic assembly fails."""
+
+    return CheckerProviderError(
+        "Paid Checker post-processing failed "
+        f"({type(exc).__name__}); provider usage must be retained.",
+        code="postprocessing_error",
+        usages=list(usages),
+        failed_attempts=list(failed_attempts),
+    )
 
 
 def _deduplicate(values: list[str]) -> list[str]:
@@ -757,16 +773,25 @@ class CheckerAgent:
                 "content to the Extractor."
             )
 
-        task_results, follow_up_tasks = self._build_task_results(
-            selected_tasks,
-            search_results,
-            extraction_results,
-            decisions,
-            contradictions,
-            source_by_id,
-            assessment_by_source,
-            paid_success=self.llm is not None and not failed_attempts,
-        )
+        try:
+            task_results, follow_up_tasks = self._build_task_results(
+                selected_tasks,
+                search_results,
+                extraction_results,
+                decisions,
+                contradictions,
+                source_by_id,
+                assessment_by_source,
+                paid_success=self.llm is not None and not failed_attempts,
+            )
+        except Exception as exc:
+            if agent_usage:
+                raise _paid_postprocessing_error(
+                    exc,
+                    agent_usage,
+                    failed_attempts,
+                ) from None
+            raise
         critical_fields = set(plan.critical_fields)
         critical_missing_fields = [
             field_result.target_field
@@ -775,16 +800,25 @@ class CheckerAgent:
             if field_result.target_field in critical_fields
             and field_result.status != CheckerFieldStatus.VERIFIED
         ]
-        score_breakdown = self._score(
-            plan,
-            selected_tasks,
-            task_results,
-            decisions,
-            contradictions,
-            unsafe_items,
-            assessment_by_source,
-            paid_success=self.llm is not None and not failed_attempts,
-        )
+        try:
+            score_breakdown = self._score(
+                plan,
+                selected_tasks,
+                task_results,
+                decisions,
+                contradictions,
+                unsafe_items,
+                assessment_by_source,
+                paid_success=self.llm is not None and not failed_attempts,
+            )
+        except Exception as exc:
+            if agent_usage:
+                raise _paid_postprocessing_error(
+                    exc,
+                    agent_usage,
+                    failed_attempts,
+                ) from None
+            raise
         blocking_unsafe = any(
             item.severity in {CheckerSeverity.HIGH, CheckerSeverity.CRITICAL}
             for item in unsafe_items
@@ -828,68 +862,77 @@ class CheckerAgent:
                 "A passing Checker artifact still requires human review before publication or import.",
             ]
         )
-        return CheckerResults(
-            check_id=str(uuid4()),
-            plan_run_id=plan.run_id,
-            search_id=search_results.search_id,
-            extraction_id=extraction_results.extraction_id,
-            plan_sha256=plan_sha256,
-            search_sha256=search_sha256,
-            extraction_sha256=extraction_sha256,
-            plan_reference=plan_reference or extraction_results.plan_reference,
-            search_reference=search_reference or extraction_results.search_reference,
-            extraction_reference=extraction_reference,
-            created_at=datetime.now(timezone.utc),
-            iteration=iteration,
-            generated_by="deterministic" if self.llm is None else "openai",
-            model=self.llm.model_name if self.llm is not None else None,
-            brand_name=plan.planner_input.brand_name,
-            target_country=plan.planner_input.target_country,
-            depth=plan.planner_input.depth,
-            provider_executed=bool(agent_usage or failed_attempts),
-            checker_mode=(
-                CheckerMode.INCREMENTAL if incremental else CheckerMode.FULL
-            ),
-            prior_check_id=(
-                prior_checker_results.check_id
-                if prior_checker_results is not None
-                else None
-            ),
-            prior_check_sha256=prior_checker_sha256,
-            prior_check_reference=prior_checker_reference,
-            quality_threshold=plan.stop_conditions.quality_threshold,
-            limits=CheckerLimits(
-                max_claims=max_claims,
-                max_evidence_chars=max_evidence_chars,
-            ),
-            selected_task_ids=extraction_results.selected_task_ids,
-            selected_source_ids=extraction_results.selected_source_ids,
-            selected_claim_ids=selected_claim_ids,
-            reviewed_task_ids=reviewed_task_ids,
-            reviewed_source_ids=reviewed_source_ids,
-            reviewed_claim_ids=reviewed_claim_ids,
-            inherited_claim_ids=inherited_claim_ids,
-            unevaluated_task_ids=unevaluated_task_ids,
-            unevaluated_source_ids=unevaluated_source_ids,
-            scope_complete=scope_complete,
-            selected_scope_ready=selected_scope_ready,
-            source_assessments=source_assessments,
-            claim_decisions=decisions,
-            contradictions=contradictions,
-            unsafe_items=unsafe_items,
-            task_results=task_results,
-            critical_missing_fields=critical_missing_fields,
-            unevaluated_critical_fields=unevaluated_critical_fields,
-            follow_up_tasks=follow_up_tasks,
-            score_breakdown=score_breakdown,
-            quality_score=score_breakdown.quality_score,
-            passed=passed,
-            recommended_next_action=next_action,
-            warnings=_deduplicate(warnings),
-            compliance_rules=compliance_rules,
-            agent_usage=agent_usage,
-            failed_attempts=failed_attempts,
-        )
+        try:
+            return CheckerResults(
+                check_id=str(uuid4()),
+                plan_run_id=plan.run_id,
+                search_id=search_results.search_id,
+                extraction_id=extraction_results.extraction_id,
+                plan_sha256=plan_sha256,
+                search_sha256=search_sha256,
+                extraction_sha256=extraction_sha256,
+                plan_reference=plan_reference or extraction_results.plan_reference,
+                search_reference=search_reference or extraction_results.search_reference,
+                extraction_reference=extraction_reference,
+                created_at=datetime.now(timezone.utc),
+                iteration=iteration,
+                generated_by="deterministic" if self.llm is None else "openai",
+                model=self.llm.model_name if self.llm is not None else None,
+                brand_name=plan.planner_input.brand_name,
+                target_country=plan.planner_input.target_country,
+                depth=plan.planner_input.depth,
+                provider_executed=bool(agent_usage or failed_attempts),
+                checker_mode=(
+                    CheckerMode.INCREMENTAL if incremental else CheckerMode.FULL
+                ),
+                prior_check_id=(
+                    prior_checker_results.check_id
+                    if prior_checker_results is not None
+                    else None
+                ),
+                prior_check_sha256=prior_checker_sha256,
+                prior_check_reference=prior_checker_reference,
+                quality_threshold=plan.stop_conditions.quality_threshold,
+                limits=CheckerLimits(
+                    max_claims=max_claims,
+                    max_evidence_chars=max_evidence_chars,
+                ),
+                selected_task_ids=extraction_results.selected_task_ids,
+                selected_source_ids=extraction_results.selected_source_ids,
+                selected_claim_ids=selected_claim_ids,
+                reviewed_task_ids=reviewed_task_ids,
+                reviewed_source_ids=reviewed_source_ids,
+                reviewed_claim_ids=reviewed_claim_ids,
+                inherited_claim_ids=inherited_claim_ids,
+                unevaluated_task_ids=unevaluated_task_ids,
+                unevaluated_source_ids=unevaluated_source_ids,
+                scope_complete=scope_complete,
+                selected_scope_ready=selected_scope_ready,
+                source_assessments=source_assessments,
+                claim_decisions=decisions,
+                contradictions=contradictions,
+                unsafe_items=unsafe_items,
+                task_results=task_results,
+                critical_missing_fields=critical_missing_fields,
+                unevaluated_critical_fields=unevaluated_critical_fields,
+                follow_up_tasks=follow_up_tasks,
+                score_breakdown=score_breakdown,
+                quality_score=score_breakdown.quality_score,
+                passed=passed,
+                recommended_next_action=next_action,
+                warnings=_deduplicate(warnings),
+                compliance_rules=compliance_rules,
+                agent_usage=agent_usage,
+                failed_attempts=failed_attempts,
+            )
+        except Exception as exc:
+            if agent_usage:
+                raise _paid_postprocessing_error(
+                    exc,
+                    agent_usage,
+                    failed_attempts,
+                ) from None
+            raise
 
     def _validate_incremental_inputs(
         self,

@@ -13,6 +13,8 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from ..llm.protocol import (
     ProviderSearchSource,
     SearcherGeneration,
@@ -148,9 +150,19 @@ def _paid_postprocessing_error(
 ) -> SearcherProviderError:
     """Preserve all known provider usage when local paid processing fails."""
 
+    detail = type(exc).__name__
+    if isinstance(exc, ValidationError):
+        messages = _deduplicate(
+            [
+                str(error.get("msg") or "validation error")
+                for error in exc.errors()
+            ]
+        )
+        if messages:
+            detail = f"ValidationError: {'; '.join(messages[:3])}"
     return SearcherProviderError(
         "Paid Searcher post-processing failed "
-        f"({type(exc).__name__}); provider usage must be retained.",
+        f"({detail}); provider usage must be retained.",
         code="postprocessing_error",
         usages=list(usages),
     )
@@ -1238,6 +1250,19 @@ class SearcherAgent:
         unselected_ids = [
             task.task_id for task in plan.tasks if task.task_id not in set(selected_ids)
         ]
+        provider_tool_call_overrun = max(
+            0,
+            len(actions)
+            + sum(attempt.observed_tool_calls for attempt in failed_attempts)
+            - max_search_calls,
+        )
+        if provider_tool_call_overrun:
+            warnings.append(
+                "Provider returned "
+                f"{provider_tool_call_overrun} tool call(s) beyond the requested "
+                f"max_search_calls={max_search_calls}; retained all billed actions "
+                "and exact provenance instead of discarding the paid response."
+            )
         try:
             return SearchResults(
                 search_id=str(uuid4()),
@@ -1265,6 +1290,7 @@ class SearcherAgent:
                 selected_task_ids=selected_ids,
                 unselected_task_ids=unselected_ids,
                 actions=actions,
+                provider_tool_call_overrun=provider_tool_call_overrun,
                 candidate_routes=candidate_routes,
                 sources=sources,
                 task_results=task_results,

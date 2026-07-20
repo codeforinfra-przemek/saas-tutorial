@@ -66,6 +66,11 @@ and cost in the OpenAI model guidance checked on 2026-07-17. Override it through
 The adapter follows the official [Responses API text-generation guide](https://developers.openai.com/api/docs/guides/text)
 and parses a Pydantic model with [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
 Responses are requested with `store=False` and an 8,000-token output cap by default.
+Ordinary model calls use `OPENAI_TIMEOUT_SECONDS=60`; multi-step Searcher calls
+use the separate `OPENAI_SEARCH_TIMEOUT_SECONDS=180` default. Increase the latter
+for larger sequential web-search workloads without lengthening every agent call.
+Searcher disables hidden SDK transport retries because a timed-out request may
+already have incurred web-search cost; a retry must be an explicit, auditable run.
 Only the question fields needed for planning are sent to the model; deterministic
 evidence criteria remain local, reducing the serialized canonical-question
 payload by about 31% for the current Polish due-diligence catalog.
@@ -192,12 +197,17 @@ using the old field still load, but new artifacts serialize the new name. Exact
 unambiguous; batched activity remains auditable through `observed_in_action_ids`.
 An executed derived query may be assigned to a task only when the model reports
 that exact provider-observed query for one task; ambiguous multi-task assignments
-remain action-only. Searcher schema `1.4.0` records the deterministic
+remain action-only. Searcher schema `1.5.0` records the deterministic
 `query_task_ids` mapping on each action and asks the provider to use one task and
 one query per search action. Provider output can still omit or batch queries, so
 the local validator never invents missing URL-to-query provenance. Citation
 titles are merged by canonical URL and sentence punctuation is removed before
 URL identity is calculated.
+
+If the provider returns more tool actions than the requested `max_tool_calls`,
+the artifact retains the complete billed trace, records
+`provider_tool_call_overrun`, and emits a warning. The requested ceiling remains
+visible in `limits`; observed provider usage is never rewritten to look cheaper.
 
 `candidate_routes` records provider-observed URLs that the model did not map.
 Candidate Router promotes a URL only when its completed action has one task, its
@@ -376,7 +386,7 @@ deterministic Checker only as an optional smoke/regression test:
   --extractions datacollector/data/runs/zabka/<run>/extractions-r003.json \
   --free \
   --iteration 3 \
-  --max-claims 100 \
+  --max-claims 500 \
   --max-evidence-chars 100000
 ```
 
@@ -394,7 +404,7 @@ Run the paid Checker against the Extractor path:
 .venv/bin/python -m datacollector check \
   --extractions datacollector/data/runs/zabka/<run>/extractions-r003.json \
   --iteration 3 \
-  --max-claims 100 \
+  --max-claims 500 \
   --max-evidence-chars 100000
 ```
 

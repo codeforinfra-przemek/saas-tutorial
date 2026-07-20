@@ -1,6 +1,7 @@
 import hashlib
 from datetime import datetime, timezone
 from unittest import TestCase
+from unittest.mock import patch
 from uuid import uuid4
 
 from datacollector.agents.checker import (
@@ -781,6 +782,82 @@ class CheckerAgentTests(TestCase):
             CheckerFollowUpAction.REEXTRACT_EXISTING,
         )
         self.assertTrue(follow_up.reextract_source_ids)
+
+    def test_follow_up_preserves_more_than_twenty_related_claims(self):
+        target_field = self.task.target_fields[0]
+        template = next(
+            claim
+            for claim in self.extraction_results.claims
+            if claim.target_field == target_field
+        )
+        other_claims = [
+            claim
+            for claim in self.extraction_results.claims
+            if claim.target_field != target_field
+        ]
+        target_claims = [
+            template.model_copy(
+                update={"claim_id": f"claim-{index:016x}"}
+            )
+            for index in range(100, 122)
+        ]
+        extraction_results = self.extraction_results.model_copy(
+            update={"claims": [*target_claims, *other_claims]}
+        )
+
+        def draft_factory(results):
+            return CheckerDraft(
+                decisions=[
+                    CheckerClaimDecisionDraft(
+                        claim_id=claim.claim_id,
+                        verdict=(
+                            CheckerModelVerdict.REJECTED
+                            if claim.target_field == target_field
+                            else CheckerModelVerdict.ACCEPTED
+                        ),
+                        semantic_fit=(
+                            CheckerModelSemanticFit.MISMATCH
+                            if claim.target_field == target_field
+                            else CheckerModelSemanticFit.DIRECT
+                        ),
+                        source_support=CheckerModelSourceSupport.SUFFICIENT,
+                        issue_codes=(
+                            [CheckerIssueCode.UNSUPPORTED_CLAIM]
+                            if claim.target_field == target_field
+                            else []
+                        ),
+                        rationale="The fixture exercises accumulated field lineage.",
+                    )
+                    for claim in results.claims
+                ]
+            )
+
+        results = self._run(
+            FixtureCheckerLLM(draft_factory),
+            extraction_results=extraction_results,
+        )
+        follow_up = next(
+            item
+            for item in results.follow_up_tasks
+            if item.target_field == target_field
+        )
+
+        self.assertEqual(follow_up.related_claim_ids, [
+            claim.claim_id for claim in target_claims
+        ])
+
+    def test_paid_postprocessing_failure_retains_provider_usage(self):
+        with patch.object(
+            CheckerAgent,
+            "_build_task_results",
+            side_effect=RuntimeError("fixture assembly failure"),
+        ):
+            with self.assertRaises(CheckerProviderError) as raised:
+                self._run(FixtureCheckerLLM(self._accepted_draft))
+
+        self.assertEqual(raised.exception.code, "postprocessing_error")
+        self.assertEqual(len(raised.exception.usages), 1)
+        self.assertEqual(raised.exception.usages[0].agent, "checker")
 
     def test_critical_missing_field_blocks_pass_above_threshold(self):
         blocked_field = self.task.target_fields[0]

@@ -240,6 +240,57 @@ class FakeInvalidActionScopeLLM(FakeSearcherLLM):
         )
 
 
+class FakeProviderCapOverrunLLM(FakeSearcherLLM):
+    def generate(self, *args, **kwargs):
+        generation = super().generate(*args, **kwargs)
+        task = args[1][0]
+        second_query = task.search_queries[1]
+        return SearcherGeneration(
+            draft=generation.draft,
+            usage=generation.usage.model_copy(
+                update={
+                    "tool_usage": [
+                        build_web_search_tool_usage({"search": 2})
+                    ]
+                }
+            ),
+            actions=[
+                *generation.actions,
+                SearchAction(
+                    action_id="ws_provider_overrun",
+                    call_index=generation.actions[0].call_index,
+                    scope_task_ids=[task.task_id],
+                    action_type="search",
+                    queries=[second_query],
+                    source_urls=[],
+                ),
+            ],
+            provider_sources=generation.provider_sources,
+        )
+
+
+class FakeSearchAndOpenLLM(FakeSearcherLLM):
+    def generate(self, *args, **kwargs):
+        generation = super().generate(*args, **kwargs)
+        task = args[1][0]
+        return SearcherGeneration(
+            draft=generation.draft,
+            usage=generation.usage,
+            actions=[
+                *generation.actions,
+                SearchAction(
+                    action_id="ws_open_page",
+                    call_index=generation.actions[0].call_index,
+                    scope_task_ids=[task.task_id],
+                    action_type="open_page",
+                    target_url="https://example.com/franchise",
+                    source_urls=[],
+                ),
+            ],
+            provider_sources=generation.provider_sources,
+        )
+
+
 class FakeRetryingSearcherLLM:
     model_name = "fake-retrying-searcher"
 
@@ -1085,6 +1136,50 @@ class SearcherAgentTests(TestCase):
         self.assertEqual(raised.exception.code, "postprocessing_error")
         self.assertEqual(len(raised.exception.usages), 1)
         self.assertEqual(raised.exception.usages[0].tokens.total_tokens, 120)
+
+    def test_provider_tool_call_overrun_retains_paid_result(self):
+        results = SearcherAgent(
+            FakeProviderCapOverrunLLM()
+        ).create_search_results(
+            self.plan,
+            plan_sha256="8" * 64,
+            plan_reference="/tmp/plan.json",
+            task_limit=1,
+            max_search_calls=1,
+        )
+
+        self.assertEqual(results.schema_version, "1.5.0")
+        self.assertEqual(len(results.actions), 2)
+        self.assertEqual(results.provider_tool_call_overrun, 1)
+        self.assertEqual(results.agent_usage[0].tool_usage[0].calls, 2)
+        self.assertTrue(
+            any("beyond the requested" in warning for warning in results.warnings)
+        )
+
+        payload = results.model_dump(mode="json")
+        payload["provider_tool_call_overrun"] = 0
+        with self.assertRaisesRegex(
+            ValidationError,
+            "overrun must match observed provenance",
+        ):
+            SearchResults.model_validate(payload)
+
+    def test_open_page_counts_toward_provider_cap_but_not_search_billing(self):
+        results = SearcherAgent(FakeSearchAndOpenLLM()).create_search_results(
+            self.plan,
+            plan_sha256="9" * 64,
+            plan_reference="/tmp/plan.json",
+            task_limit=1,
+            max_search_calls=1,
+        )
+
+        self.assertEqual(len(results.actions), 2)
+        self.assertEqual(results.provider_tool_call_overrun, 1)
+        self.assertEqual(results.agent_usage[0].tool_usage[0].calls, 1)
+        self.assertEqual(
+            [action.action_type for action in results.actions],
+            ["search", "open_page"],
+        )
 
     def test_schema_1_0_provider_verified_alias_still_loads(self):
         results = SearcherAgent(FakeSearcherLLM()).create_search_results(

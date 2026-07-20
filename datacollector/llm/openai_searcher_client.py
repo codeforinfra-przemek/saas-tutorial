@@ -7,7 +7,17 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AuthenticationError,
+    BadRequestError,
+    InternalServerError,
+    OpenAI,
+    PermissionDeniedError,
+    RateLimitError,
+)
 
 from ..config import OpenAISettings
 from ..schemas import (
@@ -19,6 +29,28 @@ from ..schemas import (
 from .openai_usage import build_agent_usage
 from .pricing import build_web_search_tool_usage
 from .protocol import ProviderSearchSource, SearcherGeneration, SearcherProviderError
+
+
+def _provider_exception_code(exc: Exception) -> str:
+    """Return a stable, non-sensitive category for request failures."""
+
+    if isinstance(exc, RateLimitError):
+        return "rate_limit"
+    if isinstance(exc, APITimeoutError):
+        return "timeout"
+    if isinstance(exc, AuthenticationError):
+        return "authentication_error"
+    if isinstance(exc, PermissionDeniedError):
+        return "permission_denied"
+    if isinstance(exc, BadRequestError):
+        return "invalid_request"
+    if isinstance(exc, InternalServerError):
+        return "provider_server_error"
+    if isinstance(exc, APIConnectionError):
+        return "connection_error"
+    if isinstance(exc, APIStatusError):
+        return "provider_status_error"
+    return "provider_exception"
 
 
 def _as_mapping(value: Any) -> dict[str, Any]:
@@ -160,8 +192,11 @@ class OpenAISearcherClient:
         self.settings = settings
         self._client = client or OpenAI(
             api_key=settings.api_key,
-            timeout=settings.timeout_seconds,
-            max_retries=settings.max_retries,
+            timeout=settings.search_timeout_seconds,
+            # Web-search calls may already have incurred tool cost before a
+            # transport failure. Hidden SDK retries would make the attempt and
+            # cost ledger ambiguous, so retries must be explicit at CLI level.
+            max_retries=0,
         )
 
     @property
@@ -240,6 +275,13 @@ class OpenAISearcherClient:
             if self.settings.model.startswith("gpt-5.6")
             else {}
         )
+        attempt_context = {
+            "agent": "searcher",
+            "iteration": iteration,
+            "call_index": call_index,
+            "scope_task_ids": [task.task_id for task in tasks],
+            "requested_model": self.settings.model,
+        }
         try:
             response = self._client.responses.parse(
                 model=self.settings.model,
@@ -270,7 +312,8 @@ class OpenAISearcherClient:
         except Exception as exc:
             raise SearcherProviderError(
                 f"OpenAI Searcher request failed ({type(exc).__name__}).",
-                code="provider_exception",
+                code=_provider_exception_code(exc),
+                **attempt_context,
             ) from None
 
         actions, provider_sources, action_counts = _extract_response_provenance(
@@ -282,11 +325,7 @@ class OpenAISearcherClient:
         failure_context = {
             "observed_tool_calls": len(actions),
             "tool_usage": tool_usage,
-            "agent": "searcher",
-            "iteration": iteration,
-            "call_index": call_index,
-            "scope_task_ids": [task.task_id for task in tasks],
-            "requested_model": self.settings.model,
+            **attempt_context,
         }
         try:
             usage = build_agent_usage(

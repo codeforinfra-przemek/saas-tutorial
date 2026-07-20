@@ -427,6 +427,13 @@ class MissingTokenUsageSearcher:
 
 
 class CollectorCliTests(TestCase):
+    def test_checker_default_claim_limit_matches_loop_capacity(self):
+        args = build_parser().parse_args(
+            ["check", "--extractions", "extractions.json"]
+        )
+
+        self.assertEqual(args.max_claims, 500)
+
     def test_loop_parser_accepts_search_depth_per_task(self):
         args = build_parser().parse_args(
             [

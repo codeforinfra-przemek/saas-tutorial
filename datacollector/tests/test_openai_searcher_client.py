@@ -1,7 +1,11 @@
 import json
+import httpx
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import patch
+
+from openai import APITimeoutError
 
 from datacollector.agents.planner import PlannerAgent
 from datacollector.catalog import load_question_catalog
@@ -203,6 +207,59 @@ class OpenAISearcherClientTests(TestCase):
             generation.usage.cost_estimate.total_estimated_cost_usd,
             Decimal("0.01400000"),
         )
+
+    @patch("datacollector.llm.openai_searcher_client.OpenAI")
+    def test_searcher_uses_its_dedicated_long_timeout(self, openai_factory):
+        settings = OpenAISettings(
+            api_key="test",
+            search_timeout_seconds=181,
+            max_retries=3,
+        )
+
+        OpenAISearcherClient(settings)
+
+        openai_factory.assert_called_once_with(
+            api_key="test",
+            timeout=181,
+            max_retries=0,
+        )
+
+    def test_timeout_keeps_attempt_metadata_for_failure_ledger(self):
+        class TimeoutResponses:
+            def parse(self, **kwargs):
+                del kwargs
+                raise APITimeoutError(
+                    request=httpx.Request(
+                        "POST",
+                        "https://api.openai.com/v1/responses",
+                    )
+                )
+
+        client = OpenAISearcherClient(
+            OpenAISettings(api_key="test", model="gpt-5.6-terra"),
+            client=SimpleNamespace(responses=TimeoutResponses()),
+        )
+        task = self.plan.tasks[0]
+
+        with self.assertRaises(SearcherProviderError) as raised:
+            client.generate(
+                self.plan,
+                [task],
+                "Searcher system prompt",
+                iteration=4,
+                call_index=2,
+                max_search_calls=10,
+                min_queries_per_task=2,
+            )
+
+        error = raised.exception
+        self.assertEqual(error.code, "timeout")
+        self.assertEqual(error.agent, "searcher")
+        self.assertEqual(error.iteration, 4)
+        self.assertEqual(error.call_index, 2)
+        self.assertEqual(error.scope_task_ids, [task.task_id])
+        self.assertEqual(error.requested_model, "gpt-5.6-terra")
+        self.assertIsNone(error.usage)
 
     def test_sdk_mapping_does_not_serialize_structured_parsed_union(self):
         class SDKLikeObject:

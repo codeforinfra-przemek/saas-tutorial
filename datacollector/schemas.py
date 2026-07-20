@@ -24,7 +24,7 @@ from pydantic import (
 
 SCHEMA_VERSION = "1.2.0"
 PROMPT_VERSION = "planner-system-v2"
-SEARCHER_SCHEMA_VERSION = "1.4.0"
+SEARCHER_SCHEMA_VERSION = "1.5.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v4"
 EXTRACTOR_SCHEMA_VERSION = "1.2.0"
 EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
@@ -859,6 +859,7 @@ class SearchResults(ClosedModel):
         "1.2.0",
         "1.3.0",
         "1.4.0",
+        "1.5.0",
     ] = SEARCHER_SCHEMA_VERSION
     prompt_version: str = SEARCHER_PROMPT_VERSION
     search_id: str
@@ -888,6 +889,7 @@ class SearchResults(ClosedModel):
     selected_task_ids: list[str] = Field(min_length=1)
     unselected_task_ids: list[str]
     actions: list[SearchAction]
+    provider_tool_call_overrun: int = Field(default=0, ge=0, le=100)
     candidate_routes: list[CandidateRouteDecision] = Field(default_factory=list)
     sources: list[SearchSource]
     task_results: list[SearchTaskResult] = Field(min_length=1)
@@ -970,7 +972,7 @@ class SearchResults(ClosedModel):
                 raise ValueError(
                     "Search action scopes may reference only selected tasks."
                 )
-            if self.schema_version == "1.4.0" and not set(
+            if self.schema_version in {"1.4.0", "1.5.0"} and not set(
                 action.query_task_ids
             ).issubset(action.queries):
                 raise ValueError(
@@ -978,7 +980,7 @@ class SearchResults(ClosedModel):
                 )
             for query, task_ids in (
                 action.query_task_ids.items()
-                if self.schema_version == "1.4.0"
+                if self.schema_version in {"1.4.0", "1.5.0"}
                 else []
             ):
                 if (
@@ -993,7 +995,7 @@ class SearchResults(ClosedModel):
         routed_urls: set[str] = set()
         for route in (
             self.candidate_routes
-            if self.schema_version in {"1.3.0", "1.4.0"}
+            if self.schema_version in {"1.3.0", "1.4.0", "1.5.0"}
             else []
         ):
             if len(route.action_ids) != len(set(route.action_ids)):
@@ -1067,7 +1069,7 @@ class SearchResults(ClosedModel):
             elif route.routed_task_id is not None:
                 raise ValueError("Unrouted candidates cannot name a routed task.")
         source_by_id = {source.source_id: source for source in self.sources}
-        if self.schema_version in {"1.3.0", "1.4.0"}:
+        if self.schema_version in {"1.3.0", "1.4.0", "1.5.0"}:
             sources_by_url = {
                 source.canonical_url: source for source in self.sources
             }
@@ -1191,7 +1193,7 @@ class SearchResults(ClosedModel):
                         "Source query provenance must come from a single-query "
                         "observed action."
                     )
-                if self.schema_version == "1.4.0" and any(
+                if self.schema_version in {"1.4.0", "1.5.0"} and any(
                     not any(
                         action.queries == [query]
                         and (
@@ -1426,6 +1428,23 @@ class SearchResults(ClosedModel):
                     "Failed attempt without usage must mark tokens unknown."
                 )
 
+        observed_tool_calls_for_cap = len(self.actions) + sum(
+            failure.observed_tool_calls for failure in self.failed_attempts
+        )
+        expected_provider_overrun = max(
+            0,
+            observed_tool_calls_for_cap - self.limits.max_search_calls,
+        )
+        if self.schema_version == "1.5.0":
+            if self.provider_tool_call_overrun != expected_provider_overrun:
+                raise ValueError(
+                    "Provider tool-call overrun must match observed provenance."
+                )
+        elif self.provider_tool_call_overrun or expected_provider_overrun:
+            raise ValueError(
+                "Legacy Searcher schemas cannot exceed their tool-call cap."
+            )
+
         if self.generated_by == "offline":
             if (
                 self.model is not None
@@ -1465,8 +1484,6 @@ class SearchResults(ClosedModel):
                 raise ValueError(
                     "OpenAI Searcher must contain a completed search action."
                 )
-            if len(self.actions) > self.limits.max_search_calls:
-                raise ValueError("Search actions exceed the configured tool-call cap.")
             if any(
                 usage.agent != "searcher" or usage.iteration != self.iteration
                 for usage in self.agent_usage
@@ -1482,9 +1499,6 @@ class SearchResults(ClosedModel):
                 raise ValueError(
                     "Search usage scopes may reference only selected tasks."
                 )
-            observed_search_calls = sum(
-                action.action_type == "search" for action in self.actions
-            )
             action_call_indices = {action.call_index for action in self.actions}
             if not action_call_indices.issubset(usage_call_indices):
                 raise ValueError(
@@ -1508,24 +1522,23 @@ class SearchResults(ClosedModel):
                     "Every Searcher usage entry must belong to actions or a "
                     "recorded failed attempt."
                 )
-            recorded_search_calls = sum(
+            recorded_tool_calls = sum(
                 tool.calls
                 for usage in self.agent_usage
                 if usage.call_index not in set(failed_call_indices)
                 for tool in usage.tool_usage
                 if tool.tool == "web_search"
             )
-            if observed_search_calls != recorded_search_calls:
-                raise ValueError(
-                    "Recorded web search tool calls must match search actions."
-                )
-            failed_tool_calls = sum(
-                failure.observed_tool_calls for failure in self.failed_attempts
+            # max_tool_calls applies to every provider web-search action, while
+            # billing usage records only actual search actions. open_page and
+            # find_in_page remain in the provenance trace but are not priced as
+            # separate web searches.
+            observed_successful_calls = sum(
+                action.action_type == "search" for action in self.actions
             )
-            if len(self.actions) + failed_tool_calls > self.limits.max_search_calls:
+            if observed_successful_calls != recorded_tool_calls:
                 raise ValueError(
-                    "Successful actions and observed failed tool calls exceed "
-                    "the configured global tool-call cap."
+                    "Recorded web search tool calls must match provider actions."
                 )
         else:
             lineage_values = (
@@ -1622,25 +1635,19 @@ class SearchResults(ClosedModel):
                     raise ValueError(
                         "Executor Searcher usage is not tied to an action or failure."
                     )
-                recorded_search_calls = sum(
+                recorded_tool_calls = sum(
                     tool.calls
                     for usage in self.agent_usage
                     if usage.call_index not in set(failed_call_indices)
                     for tool in usage.tool_usage
                     if tool.tool == "web_search"
                 )
-                if recorded_search_calls != sum(
+                observed_successful_calls = sum(
                     action.action_type == "search" for action in self.actions
-                ):
+                )
+                if recorded_tool_calls != observed_successful_calls:
                     raise ValueError(
                         "Executor web-search usage must match current actions."
-                    )
-                if len(self.actions) + sum(
-                    failure.observed_tool_calls
-                    for failure in self.failed_attempts
-                ) > self.limits.max_search_calls:
-                    raise ValueError(
-                        "Executor current search exceeds its tool-call cap."
                     )
                 current_action_ids = {
                     action.action_id for action in self.actions
@@ -2787,8 +2794,11 @@ class CheckerFollowUpTask(ClosedModel):
     reason: CheckerFollowUpReason
     question: str = Field(min_length=10, max_length=2000)
     required_source_types: list[SourceType] = Field(default_factory=list, max_length=20)
-    related_claim_ids: list[str] = Field(default_factory=list, max_length=20)
-    supporting_claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    # One field can accumulate references across many incremental research rounds.
+    # Keep the complete lineage instead of failing once the historical small-batch
+    # limit is crossed. Checker itself accepts at most 500 claims per artifact.
+    related_claim_ids: list[str] = Field(default_factory=list, max_length=500)
+    supporting_claim_ids: list[str] = Field(default_factory=list, max_length=500)
     route: CheckerFollowUpRoute = CheckerFollowUpRoute.RESOLVER
     action: CheckerFollowUpAction = CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE
     candidate_source_ids: list[str] = Field(default_factory=list, max_length=100)
@@ -3513,8 +3523,8 @@ class ResolverWorkItem(ClosedModel):
     selected_source_ids: list[str] = Field(default_factory=list, max_length=50)
     fallback_source_ids: list[str] = Field(default_factory=list, max_length=100)
     queries: list[str] = Field(default_factory=list, max_length=10)
-    related_claim_ids: list[str] = Field(default_factory=list, max_length=20)
-    supporting_claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    related_claim_ids: list[str] = Field(default_factory=list, max_length=500)
+    supporting_claim_ids: list[str] = Field(default_factory=list, max_length=500)
     minimum_additional_sources: int = Field(ge=0, le=20)
     requires_independent_source: bool
     completion_criteria: str = Field(min_length=10, max_length=2000)

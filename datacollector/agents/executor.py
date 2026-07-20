@@ -932,7 +932,7 @@ class ExecutorAgent:
                 )
             )
         return SearchResults(
-            schema_version="1.4.0",
+            schema_version="1.5.0",
             search_id=str(uuid4()),
             plan_run_id=plan.run_id,
             plan_sha256=plan_sha256,
@@ -969,6 +969,9 @@ class ExecutorAgent:
                 if task.task_id not in set(selected_task_ids)
             ],
             actions=list(delta.actions if delta else []),
+            provider_tool_call_overrun=(
+                delta.provider_tool_call_overrun if delta else 0
+            ),
             candidate_routes=list(delta.candidate_routes if delta else []),
             sources=sources,
             task_results=task_results,

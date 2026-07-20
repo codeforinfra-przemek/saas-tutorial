@@ -428,8 +428,8 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument(
         "--max-claims",
         type=_positive_int,
-        default=100,
-        help="Maximum raw claims reviewed in this iteration (default: 100).",
+        default=500,
+        help="Maximum raw claims reviewed in this iteration (default: 500).",
     )
     check_parser.add_argument(
         "--max-evidence-chars",
@@ -1235,6 +1235,7 @@ def _run_search(args: argparse.Namespace) -> int:
         "selected_tasks": len(results.selected_task_ids),
         "unselected_tasks": len(results.unselected_task_ids),
         "search_actions": len(results.actions),
+        "provider_tool_call_overrun": results.provider_tool_call_overrun,
         "action_candidate_urls": len(action_candidate_urls),
         "candidate_routes": {
             decision: sum(
@@ -2440,6 +2441,11 @@ def _run_execute(args: argparse.Namespace) -> int:
                 extraction_failed_attempts=exc.extraction_failed_attempts,
             ) from None
         except SearcherProviderError as exc:
+            fallback_model = (
+                search_llm.model_name
+                if search_llm is not None
+                else args.model or "unknown"
+            )
             paths = _save_executor_failure_usages(
                 plan_run_id=plan.run_id,
                 reference_path=args.resolution,
@@ -2453,11 +2459,7 @@ def _run_execute(args: argparse.Namespace) -> int:
                 ),
                 usages=exc.usages,
             )
-            if not paths and (
-                exc.agent is not None
-                and exc.call_index is not None
-                and exc.requested_model is not None
-            ):
+            if not paths:
                 paths.append(
                     save_agent_failure(
                         AgentFailureArtifact(
@@ -2465,11 +2467,13 @@ def _run_execute(args: argparse.Namespace) -> int:
                             plan_run_id=plan.run_id,
                             created_at=datetime.now(timezone.utc),
                             error_code=exc.code,
-                            agent=exc.agent,
+                            agent=exc.agent or "searcher",
                             iteration=exc.iteration or iteration,
-                            call_index=exc.call_index,
-                            scope_task_ids=exc.scope_task_ids,
-                            requested_model=exc.requested_model,
+                            call_index=exc.call_index or 1,
+                            scope_task_ids=(
+                                exc.scope_task_ids or resolution.search_task_ids
+                            ),
+                            requested_model=exc.requested_model or fallback_model,
                             usage=None,
                             observed_tool_calls=exc.observed_tool_calls,
                             tool_usage=exc.tool_usage,
@@ -2576,6 +2580,9 @@ def _run_execute(args: argparse.Namespace) -> int:
         "batch_actions": action_counts,
         "batch_statuses": batch_statuses,
         "search_executed": results.search_executed,
+        "provider_tool_call_overrun": (
+            merged_search.provider_tool_call_overrun
+        ),
         "network_executed": results.network_executed,
         "provider_executed": results.provider_executed,
         "processed_sources": len(results.processed_source_ids),
@@ -2615,6 +2622,7 @@ def _run_execute(args: argparse.Namespace) -> int:
             f".venv/bin/python -m datacollector check --extractions "
             f"{merged_extraction_path} --iteration {iteration}"
             f"{' --incremental' if results.execution_mode == ExecutorMode.PAID else ''}"
+            f" --max-claims {max(100, len(merged_extraction.claims))}"
         ),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))

@@ -16,6 +16,7 @@ class OpenAISettingsTests(TestCase):
             "OPENAI_MODEL": "test-model",
             "OPENAI_REASONING_EFFORT": "high",
             "OPENAI_TIMEOUT_SECONDS": "12",
+            "OPENAI_SEARCH_TIMEOUT_SECONDS": "181",
             "OPENAI_MAX_RETRIES": "0",
             "OPENAI_MAX_OUTPUT_TOKENS": "4096",
         }
@@ -26,6 +27,7 @@ class OpenAISettingsTests(TestCase):
         self.assertEqual(settings.model, "test-model")
         self.assertEqual(settings.reasoning_effort, "high")
         self.assertEqual(settings.timeout_seconds, 12)
+        self.assertEqual(settings.search_timeout_seconds, 181)
         self.assertEqual(settings.max_retries, 0)
         self.assertEqual(settings.max_output_tokens, 4096)
         self.assertEqual(settings.search_context_size, "low")
@@ -34,6 +36,19 @@ class OpenAISettingsTests(TestCase):
             ("arxiv.org", "quora.com", "reddit.com", "wikipedia.org"),
         )
         self.assertNotIn("sk-test-secret", repr(settings))
+
+    def test_search_timeout_defaults_to_at_least_three_minutes(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "secret",
+                "OPENAI_TIMEOUT_SECONDS": "240",
+            },
+            clear=True,
+        ):
+            settings = OpenAISettings.from_env(MISSING_ENV_FILE)
+
+        self.assertEqual(settings.search_timeout_seconds, 240)
 
     def test_web_search_options_are_configurable(self):
         environment = {

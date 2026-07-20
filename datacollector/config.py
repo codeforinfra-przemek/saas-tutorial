@@ -76,6 +76,7 @@ class OpenAISettings:
     model: str = "gpt-5.6-terra"
     reasoning_effort: str = "medium"
     timeout_seconds: int = 60
+    search_timeout_seconds: int = 180
     max_retries: int = 2
     max_output_tokens: int = 8000
     search_context_size: str = "low"
@@ -125,11 +126,17 @@ class OpenAISettings:
                 "OPENAI_WEB_SEARCH_CONTEXT_SIZE must be one of: " f"{allowed}."
             )
 
+        timeout_seconds = _read_int("OPENAI_TIMEOUT_SECONDS", 60, 1)
         return cls(
             api_key=api_key,
             model=model,
             reasoning_effort=reasoning_effort,
-            timeout_seconds=_read_int("OPENAI_TIMEOUT_SECONDS", 60, 1),
+            timeout_seconds=timeout_seconds,
+            search_timeout_seconds=_read_int(
+                "OPENAI_SEARCH_TIMEOUT_SECONDS",
+                max(timeout_seconds, 180),
+                1,
+            ),
             max_retries=_read_int("OPENAI_MAX_RETRIES", 2, 0),
             max_output_tokens=_read_int("OPENAI_MAX_OUTPUT_TOKENS", 8000, 256),
             search_context_size=search_context_size,
