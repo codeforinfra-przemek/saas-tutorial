@@ -15,6 +15,7 @@ from ..schemas import (
     ExtractionAttemptFailure,
     ExtractionResults,
     ExtractorDraft,
+    NormalizerDraft,
     PlannerDraft,
     PlannerInput,
     ResearchPlan,
@@ -67,6 +68,12 @@ class CheckerGeneration:
 @dataclass(frozen=True)
 class ResolverGeneration:
     draft: ResolverDraft
+    usage: AgentIterationUsage
+
+
+@dataclass(frozen=True)
+class NormalizerGeneration:
+    draft: NormalizerDraft
     usage: AgentIterationUsage
 
 
@@ -268,6 +275,52 @@ class ResolverProviderError(RuntimeError):
         self.failed_attempts = list(failed_attempts or [])
 
 
+class NormalizerProviderError(RuntimeError):
+    """Raised when a paid Normalizer response cannot be used safely."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "provider_error",
+        usage: AgentIterationUsage | None = None,
+        agent: str = "normalizer",
+        iteration: int | None = None,
+        call_index: int | None = None,
+        scope_task_ids: list[str] | None = None,
+        scope_source_ids: list[str] | None = None,
+        requested_model: str | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.usage = usage
+        self.usages = [usage] if usage is not None else []
+        self.agent = agent
+        self.iteration = iteration or (
+            usage.iteration if usage is not None else None
+        )
+        self.call_index = call_index or (
+            usage.call_index if usage is not None else None
+        )
+        self.scope_task_ids = list(
+            scope_task_ids
+            if scope_task_ids is not None
+            else usage.scope_task_ids
+            if usage is not None
+            else []
+        )
+        self.scope_source_ids = list(
+            scope_source_ids
+            if scope_source_ids is not None
+            else usage.scope_source_ids
+            if usage is not None
+            else []
+        )
+        self.requested_model = requested_model or (
+            usage.requested_model if usage is not None else None
+        )
+
+
 class PlannerLLM(Protocol):
     @property
     def model_name(self) -> str: ...
@@ -350,3 +403,21 @@ class ResolverLLM(Protocol):
         iteration: int,
         call_index: int,
     ) -> ResolverGeneration: ...
+
+
+class NormalizerLLM(Protocol):
+    @property
+    def model_name(self) -> str: ...
+
+    def generate(
+        self,
+        plan: ResearchPlan,
+        search_results: SearchResults,
+        extraction_results: ExtractionResults,
+        checker_results: CheckerResults,
+        claim_ids: list[str],
+        system_prompt: str,
+        *,
+        iteration: int,
+        call_index: int,
+    ) -> NormalizerGeneration: ...

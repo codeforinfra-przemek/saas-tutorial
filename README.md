@@ -372,3 +372,22 @@ The budget and business-model definitions live in
 does not create thousands of thin pages from user filters. Article and landing
 page SEO fields are grouped in Django Admin with recommended title and
 description lengths.
+
+## Internal Backoffice
+
+Staff users have a separate, noindex internal workspace at `/internal/`:
+
+- `/internal/revenue/` - MRR, ARR, forecast, retention and revenue events;
+- `/internal/revenue/subscriptions/` - filtered organization subscription table;
+- `/internal/sales/` - lightweight sales pipeline, overdue follow-ups and stale opportunities;
+- `/internal/sales/opportunities/<id>/` - sales contacts, activity timeline and stage updates.
+
+The `backoffice` app is deliberately small: it records revenue events and sales
+work without creating subscriptions automatically when an opportunity is won.
+Existing subscriptions can be added to revenue history with:
+
+```bash
+cd src/saashome
+python manage.py backfill_revenue_events --dry-run
+python manage.py backfill_revenue_events
+```

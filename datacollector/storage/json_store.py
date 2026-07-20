@@ -17,6 +17,7 @@ from ..schemas import (
     CheckerResults,
     ExecutorResults,
     ExtractionResults,
+    NormalizerResults,
     ResearchPlan,
     ResolverResults,
     SearchResults,
@@ -400,6 +401,55 @@ def save_executor_results(
     )
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / executor_results_filename(results)
+    rendered = (
+        json.dumps(
+            results.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    _write_immutable_text(result_path, rendered)
+    return result_path
+
+
+def normalizer_results_filename_for(iteration: int, *, free: bool) -> str:
+    stem = "normalized" if iteration == 1 else f"normalized-r{iteration:03d}"
+    if free:
+        stem = f"{stem}-free"
+    return f"{stem}.json"
+
+
+def normalizer_results_filename(results: NormalizerResults) -> str:
+    return normalizer_results_filename_for(
+        results.iteration,
+        free=results.normalization_mode.value == "free",
+    )
+
+
+def load_normalizer_results(
+    path: Path | str,
+) -> tuple[NormalizerResults, str]:
+    """Load Normalizer output and return its exact input-byte SHA-256."""
+
+    normalizer_path = Path(path)
+    raw_normalizer = normalizer_path.read_bytes()
+    results = NormalizerResults.model_validate_json(raw_normalizer)
+    return results, hashlib.sha256(raw_normalizer).hexdigest()
+
+
+def save_normalizer_results(
+    results: NormalizerResults,
+    checker_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> Path:
+    """Save beside the exact Checker input and never overwrite."""
+
+    directory = (
+        Path(output_dir) if output_dir is not None else Path(checker_path).parent
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    result_path = directory / normalizer_results_filename(results)
     rendered = (
         json.dumps(
             results.model_dump(mode="json"),

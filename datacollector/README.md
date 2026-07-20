@@ -1,4 +1,4 @@
-# Franchise AI research loop — Planner through Executor
+# Franchise AI research loop — Planner through Normalizer
 
 This is a standalone, local worker for auditable franchise research. It is kept
 outside Django intentionally: long-running and paid agent work must not execute
@@ -11,7 +11,8 @@ Planner → Searcher → Extractor → Checker ↔ Resolver → Executor → Che
         → Normalizer → human review → Importer
 ```
 
-Planner, Searcher, Extractor, Checker, Resolver and Executor are implemented.
+Planner, Searcher, Extractor, Checker, Resolver, Executor and Normalizer are
+implemented.
 Planner combines:
 
 - a deterministic, versioned question catalog covering all 23 FTC FDD Items;
@@ -35,6 +36,10 @@ plans retrieval and research; it never claims that planned work has already run.
 Executor runs those exact batches through the existing workers, preserves
 predecessor lineage, deduplicates retrieval, and materializes merged Searcher and
 Extractor artifacts for a new Checker pass. Executor itself makes no model call.
+Normalizer consumes one successful paid Checker artifact, admits only accepted
+and grounded claims, creates typed staging values with exact claim/citation/source
+provenance, and always routes the result to human review. It cannot publish or
+write production data.
 
 ## Setup
 
@@ -601,6 +606,63 @@ Resolver schedules and Executor merges the next bounded plan batch. Normalizer
 is allowed only after the required plan scope has passed or a human explicitly
 accepts documented gaps.
 
+## Run Normalizer: typed staging data, never publication
+
+Normalizer consumes an exact successful paid Checker artifact and validates the
+complete Plan→Searcher→Extractor→Checker hashes and IDs. It never searches,
+fetches, invokes tools, changes Checker verdicts, fills missing facts, or writes
+to Django. Rejected and `needs_review` claims are excluded. Accepted claims tied
+to a Checker safety finding are also excluded. Every retained value records its
+raw claim IDs, citation IDs and source IDs.
+
+For a Checker that passed, run paid Normalizer directly:
+
+```bash
+.venv/bin/python -m datacollector normalize \
+  --check datacollector/data/runs/zabka/<run>/check-r012.json \
+  --iteration 12
+```
+
+When the repair-round budget has been exhausted and the Checker still did not
+pass, inspect its gaps first and explicitly request an incomplete review draft:
+
+```bash
+.venv/bin/python -m datacollector normalize \
+  --check datacollector/data/runs/zabka/<run>/check-r012.json \
+  --iteration 12 \
+  --allow-incomplete
+```
+
+Without `--allow-incomplete`, a failed Checker is rejected before any Normalizer
+API call. The override never makes the data publishable: the artifact records the
+failed score, incomplete scope, critical gaps and override, and keeps
+`publishable=false`.
+
+The paid pass makes at most one Structured Outputs request. It may group truly
+equivalent accepted claims and normalize explicit values as text, integer,
+decimal, boolean, date, URL, money or percentage. Numeric ranges, approximate
+values, units and ISO currencies remain explicit. Local code rejects invented,
+missing, duplicated or cross-field claim IDs and falls back to one conservative
+text value per accepted claim while retaining usage/cost metadata.
+
+The optional free smoke test uses that conservative representation directly:
+
+```bash
+.venv/bin/python -m datacollector normalize \
+  --check datacollector/data/runs/zabka/<run>/check-r012.json \
+  --free \
+  --iteration 12 \
+  --allow-incomplete
+```
+
+It writes `normalized-r012-free.json`; paid mode writes
+`normalized-r012.json`. Both are immutable, review-only staging artifacts.
+Field results preserve the Checker's verification status, rejected and
+needs-review partitions, unresolved contradictions, missing fields and
+corroboration requirements. The only next action is `human_review`. A later
+Importer must consume a separately approved review artifact, never raw
+Normalizer output.
+
 ## Token and cost accounting
 
 Every successful OpenAI call records one `agent_usage` entry in the artifact
@@ -656,7 +718,13 @@ only the current child Searcher and Extractor usage, so `usage_totals` is the re
 incremental cost of that execution rather than a cumulative re-count of inherited
 claims. The free manifest has zero tokens and tool cost.
 
-For GPT-5.6, Planner, Searcher, Extractor, Checker and Resolver disable the default
+Normalizer records at most one `agent_usage` entry and has no tools. Paid mode
+charges only model input/output tokens for accepted claims and their bounded
+evidence context. Invalid or failed responses retain known usage (or mark it
+unknown) while producing a deterministic text fallback. Free mode has no API
+usage and zero provider cost.
+
+For GPT-5.6, Planner, Searcher, Extractor, Checker, Resolver and Normalizer disable the default
 implicit cache breakpoint for their one-off, brand-specific calls. Those payloads
 would otherwise incur cache-write charges without guaranteeing a later cache hit.
 Provider-reported cache-write tokens are still recorded and priced if they occur.

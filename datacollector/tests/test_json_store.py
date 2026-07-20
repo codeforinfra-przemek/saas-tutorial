@@ -55,6 +55,21 @@ class FixtureExecutorResults:
         }
 
 
+class FixtureNormalizerResults:
+    def __init__(self, *, iteration: int, normalization_mode: str) -> None:
+        self.iteration = iteration
+        self.normalization_mode = SimpleNamespace(value=normalization_mode)
+
+    def model_dump(self, *, mode: str):
+        if mode != "json":
+            raise AssertionError("Normalizer artifacts must use JSON-mode serialization.")
+        return {
+            "iteration": self.iteration,
+            "normalization_mode": self.normalization_mode.value,
+            "brand_name": "Żabka",
+        }
+
+
 class ImmutableWriteTests(TestCase):
     def test_publishes_complete_file_from_same_directory_and_fsyncs(self):
         with TemporaryDirectory() as temporary_directory:
@@ -336,3 +351,67 @@ class ExecutorStorageTests(TestCase):
             self.assertIs(loaded, validated)
             self.assertEqual(digest, hashlib.sha256(raw_execution).hexdigest())
             validate.assert_called_once_with(raw_execution)
+
+
+class NormalizerStorageTests(TestCase):
+    def test_normalizer_filename_variants_are_iteration_aware(self):
+        free_results = FixtureNormalizerResults(
+            iteration=12,
+            normalization_mode="free",
+        )
+        paid_results = FixtureNormalizerResults(
+            iteration=12,
+            normalization_mode="paid",
+        )
+        self.assertEqual(
+            json_store.normalizer_results_filename_for(1, free=False),
+            "normalized.json",
+        )
+        self.assertEqual(
+            json_store.normalizer_results_filename_for(12, free=True),
+            "normalized-r012-free.json",
+        )
+        self.assertEqual(
+            json_store.normalizer_results_filename(free_results),
+            "normalized-r012-free.json",
+        )
+        self.assertEqual(
+            json_store.normalizer_results_filename(paid_results),
+            "normalized-r012.json",
+        )
+
+    def test_normalizer_save_is_immutable_and_load_returns_exact_hash(self):
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            checker_path = directory / "check-r012.json"
+            results = FixtureNormalizerResults(
+                iteration=12,
+                normalization_mode="free",
+            )
+
+            normalized_path = json_store.save_normalizer_results(
+                results,
+                checker_path,
+            )
+            raw_normalized = normalized_path.read_bytes()
+
+            self.assertEqual(
+                normalized_path,
+                directory / "normalized-r012-free.json",
+            )
+            with self.assertRaises(FileExistsError):
+                json_store.save_normalizer_results(results, checker_path)
+
+            validated = object()
+            with patch.object(
+                json_store.NormalizerResults,
+                "model_validate_json",
+                return_value=validated,
+            ) as validate:
+                loaded, digest = json_store.load_normalizer_results(
+                    normalized_path
+                )
+
+            self.assertIs(loaded, validated)
+            self.assertEqual(digest, hashlib.sha256(raw_normalized).hexdigest())
+            validate.assert_called_once_with(raw_normalized)

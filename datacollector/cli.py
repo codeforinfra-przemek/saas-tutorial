@@ -20,6 +20,7 @@ from .agents.executor import (
     ExecutorProviderError,
     ExecutorValidationError,
 )
+from .agents.normalizer import NormalizerAgent, NormalizerValidationError
 from .agents.planner import PlannerAgent, PlannerValidationError
 from .agents.resolver import ResolverAgent, ResolverValidationError
 from .agents.searcher import SearcherAgent, SearcherValidationError
@@ -30,6 +31,7 @@ from .llm.openai_client import OpenAIPlannerClient, PlannerProviderError
 from .llm.openai_checker_client import OpenAICheckerClient
 from .llm.openai_extractor_client import OpenAIExtractorClient
 from .llm.openai_resolver_client import OpenAIResolverClient
+from .llm.openai_normalizer_client import OpenAINormalizerClient
 from .llm.openai_searcher_client import (
     OpenAISearcherClient,
     SearcherProviderError,
@@ -37,6 +39,7 @@ from .llm.openai_searcher_client import (
 from .llm.protocol import (
     CheckerProviderError,
     ExtractorProviderError,
+    NormalizerProviderError,
     ResolverProviderError,
 )
 from .schemas import (
@@ -46,6 +49,7 @@ from .schemas import (
     CheckerNextAction,
     ExecutorMode,
     ExtractionAttemptFailure,
+    NormalizerMode,
     PlannerInput,
     ResearchDepth,
     ToolUsage,
@@ -60,12 +64,14 @@ from .storage.json_store import (
     load_checker_results,
     load_research_plan,
     resolver_results_filename_for,
+    normalizer_results_filename_for,
     load_resolver_results,
     load_search_results,
     reserve_artifact,
     save_agent_failure,
     save_checker_results,
     save_extraction_results,
+    save_normalizer_results,
     save_reconciled_extraction_results,
     save_executor_results,
     save_research_plan,
@@ -98,7 +104,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m datacollector",
         description=(
             "Auditable franchise research loop "
-            "(Planner + Searcher + Extractor + Checker + Resolver + Executor)."
+            "(Planner + Searcher + Extractor + Checker + Resolver + Executor + "
+            "Normalizer)."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -574,6 +581,72 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         help="Artifact directory; defaults to the Resolver directory.",
+    )
+
+    normalize_parser = subparsers.add_parser(
+        "normalize",
+        help="Normalize accepted Checker claims into a review-only staging record.",
+    )
+    normalize_parser.add_argument(
+        "--check",
+        type=Path,
+        required=True,
+        help="Exact successful paid Checker artifact to consume.",
+    )
+    normalize_parser.add_argument(
+        "--plan",
+        type=Path,
+        help="Exact plan artifact; defaults to Checker's plan_reference.",
+    )
+    normalize_parser.add_argument(
+        "--sources",
+        type=Path,
+        help="Exact Searcher artifact; defaults to Checker's search_reference.",
+    )
+    normalize_parser.add_argument(
+        "--extractions",
+        type=Path,
+        help="Exact Extractor artifact; defaults to Checker's extraction_reference.",
+    )
+    normalize_parser.add_argument(
+        "--free",
+        "--offline",
+        dest="offline",
+        action="store_true",
+        help="Preserve accepted values as deterministic text without OpenAI.",
+    )
+    normalize_parser.add_argument(
+        "--iteration",
+        type=_positive_int,
+        help="Logical Normalizer iteration; defaults to the Checker iteration.",
+    )
+    normalize_parser.add_argument(
+        "--max-claims",
+        type=_positive_int,
+        default=100,
+        help="Hard accepted-claim ceiling for one normalization pass (default: 100).",
+    )
+    normalize_parser.add_argument(
+        "--max-input-chars",
+        type=_positive_int,
+        default=100_000,
+        help="Hard raw-value and quote character ceiling (default: 100000).",
+    )
+    normalize_parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help=(
+            "Explicitly create a review-only draft from a Checker that did not "
+            "pass; gaps remain unresolved and publication stays forbidden."
+        ),
+    )
+    normalize_parser.add_argument(
+        "--model", help="Override OPENAI_MODEL for this Normalizer invocation."
+    )
+    normalize_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Artifact directory; defaults to the Checker directory.",
     )
 
     reconcile_parser = subparsers.add_parser(
@@ -2180,6 +2253,201 @@ def _run_execute(args: argparse.Namespace) -> int:
     return 0
 
 
+def _save_normalizer_failure_ledger(results, reference_path: Path) -> Path:
+    """Preserve the one paid Normalizer attempt if publication fails."""
+
+    usage = results.agent_usage[0] if results.agent_usage else None
+    attempt = results.failed_attempts[0] if results.failed_attempts else None
+    failure = AgentFailureArtifact(
+        failure_id=str(uuid4()),
+        plan_run_id=results.plan_run_id,
+        created_at=datetime.now(timezone.utc),
+        error_code=(
+            attempt.error_code if attempt is not None else "artifact_write_failed"
+        ),
+        agent="normalizer",
+        iteration=results.iteration,
+        call_index=1,
+        scope_task_ids=(
+            usage.scope_task_ids
+            if usage is not None
+            else attempt.scope_task_ids
+            if attempt is not None
+            else []
+        ),
+        scope_source_ids=(
+            usage.scope_source_ids
+            if usage is not None
+            else attempt.scope_source_ids
+            if attempt is not None
+            else []
+        ),
+        requested_model=results.model or "unknown",
+        usage=usage,
+        observed_tool_calls=0,
+        tool_usage=[],
+        token_usage_unknown=usage is None,
+    )
+    return save_agent_failure(failure, reference_path)
+
+
+def _run_normalize(args: argparse.Namespace) -> int:
+    checker_results, check_sha256 = load_checker_results(args.check)
+    if not checker_results.passed and not args.allow_incomplete:
+        raise NormalizerValidationError(
+            "Checker did not pass. Review its documented gaps and rerun with "
+            "--allow-incomplete only when an incomplete staging draft is intended."
+        )
+    extraction_path = args.extractions or Path(
+        checker_results.extraction_reference
+    )
+    extraction_results, extraction_sha256 = load_extraction_results(
+        extraction_path
+    )
+    search_path = args.sources or Path(checker_results.search_reference)
+    search_results, search_sha256 = load_search_results(search_path)
+    plan_path = args.plan or Path(checker_results.plan_reference)
+    plan, plan_sha256 = load_research_plan(plan_path)
+    iteration = args.iteration or checker_results.iteration
+    result_directory = args.output_dir or args.check.parent
+    expected_path = result_directory / normalizer_results_filename_for(
+        iteration,
+        free=args.offline,
+    )
+
+    with reserve_artifact(expected_path):
+        llm = None
+        if not args.offline:
+            settings = OpenAISettings.from_env()
+            if args.model:
+                settings = replace(settings, model=args.model)
+            llm = OpenAINormalizerClient(settings)
+        results = NormalizerAgent(llm).create_normalizer_results(
+            plan,
+            search_results,
+            extraction_results,
+            checker_results,
+            plan_sha256=plan_sha256,
+            search_sha256=search_sha256,
+            extraction_sha256=extraction_sha256,
+            check_sha256=check_sha256,
+            check_reference=str(args.check.resolve()),
+            plan_reference=str(plan_path.resolve()),
+            search_reference=str(search_path.resolve()),
+            extraction_reference=str(extraction_path.resolve()),
+            iteration=iteration,
+            mode=(NormalizerMode.FREE if args.offline else NormalizerMode.PAID),
+            allow_incomplete=args.allow_incomplete,
+            max_claims=args.max_claims,
+            max_input_chars=args.max_input_chars,
+        )
+        try:
+            results_path = save_normalizer_results(
+                results,
+                args.check,
+                output_dir=args.output_dir,
+            )
+        except Exception as exc:
+            if not results.provider_executed:
+                raise
+            ledger_note = ""
+            try:
+                failure_path = _save_normalizer_failure_ledger(
+                    results,
+                    args.check,
+                )
+            except Exception as ledger_exc:
+                ledger_note = (
+                    " Normalizer failure ledger also failed with "
+                    f"{type(ledger_exc).__name__}."
+                )
+            else:
+                ledger_note = f" Provider usage saved to: {failure_path}."
+            raise NormalizerProviderError(
+                "Paid Normalizer completed its provider attempt but its final "
+                f"artifact could not be saved ({type(exc).__name__}).{ledger_note}",
+                code="artifact_write_failed",
+                usage=results.agent_usage[0] if results.agent_usage else None,
+                iteration=results.iteration,
+                scope_task_ids=(
+                    results.agent_usage[0].scope_task_ids
+                    if results.agent_usage
+                    else results.failed_attempts[0].scope_task_ids
+                ),
+                scope_source_ids=(
+                    results.agent_usage[0].scope_source_ids
+                    if results.agent_usage
+                    else results.failed_attempts[0].scope_source_ids
+                ),
+                requested_model=results.model,
+            ) from None
+
+    field_statuses: dict[str, int] = {}
+    value_types: dict[str, int] = {}
+    for field in results.field_results:
+        field_statuses[field.status.value] = (
+            field_statuses.get(field.status.value, 0) + 1
+        )
+    for value in results.normalized_values:
+        value_types[value.value_type.value] = (
+            value_types.get(value.value_type.value, 0) + 1
+        )
+    summary = {
+        "normalization_id": results.normalization_id,
+        "plan_run_id": results.plan_run_id,
+        "search_id": results.search_id,
+        "extraction_id": results.extraction_id,
+        "check_id": results.check_id,
+        "check_sha256": results.check_sha256,
+        "brand": results.brand_name,
+        "normalization_mode": results.normalization_mode.value,
+        "generated_by": results.generated_by,
+        "strategy_source": results.strategy_source.value,
+        "model": results.model,
+        "iteration": results.iteration,
+        "provider_executed": results.provider_executed,
+        "input_checker_passed": results.input_checker_passed,
+        "incomplete_input_allowed": results.incomplete_input_allowed,
+        "input_quality_score": results.input_quality_score,
+        "input_scope_complete": results.input_scope_complete,
+        "eligible_claims": len(results.eligible_claim_ids),
+        "excluded_claims": len(results.excluded_claim_ids),
+        "normalized_values": len(results.normalized_values),
+        "field_statuses": field_statuses,
+        "value_types": value_types,
+        "unresolved_fields": len(results.unresolved_field_ids),
+        "critical_missing_fields": len(results.critical_missing_fields),
+        "unevaluated_critical_fields": len(
+            results.unevaluated_critical_fields
+        ),
+        "publishable": results.publishable,
+        "ready_for_human_review": results.ready_for_human_review,
+        "recommended_next_action": results.recommended_next_action.value,
+        "failed_attempts": [
+            attempt.model_dump(mode="json")
+            for attempt in results.failed_attempts
+        ],
+        "warnings": results.warnings,
+        "agent_usage": [
+            _usage_summary(usage) for usage in results.agent_usage
+        ],
+        "usage_totals": _usage_totals(
+            results.agent_usage,
+            failed_call_indices=[
+                attempt.call_index for attempt in results.failed_attempts
+            ],
+            has_unknown_token_usage=any(
+                attempt.token_usage_unknown
+                for attempt in results.failed_attempts
+            ),
+        ),
+        "normalized_path": str(results_path),
+        "next_step": "human_review",
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _run_reconcile(args: argparse.Namespace) -> int:
     current, current_sha256 = load_extraction_results(args.extractions)
     if current.generated_by != "executor":
@@ -2335,6 +2603,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_resolve(args)
         if args.command == "execute":
             return _run_execute(args)
+        if args.command == "normalize":
+            return _run_normalize(args)
         if args.command == "reconcile":
             return _run_reconcile(args)
         if args.command == "questions":
@@ -2348,6 +2618,8 @@ def main(argv: list[str] | None = None) -> int:
         CheckerValidationError,
         ExtractorProviderError,
         ExtractorValidationError,
+        NormalizerProviderError,
+        NormalizerValidationError,
         ExecutorProviderError,
         ExecutorValidationError,
         SearcherProviderError,

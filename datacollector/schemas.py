@@ -34,6 +34,8 @@ CHECKER_SCORING_VERSION = "checker-scoring-v2"
 RESOLVER_SCHEMA_VERSION = "1.1.0"
 RESOLVER_PROMPT_VERSION = "resolver-system-v2"
 EXECUTOR_SCHEMA_VERSION = "1.0.0"
+NORMALIZER_SCHEMA_VERSION = "1.0.0"
+NORMALIZER_PROMPT_VERSION = "normalizer-system-v1"
 
 
 class ClosedModel(BaseModel):
@@ -3779,4 +3781,411 @@ class ExecutorResults(ClosedModel):
         )
         if self.recommended_next_action != expected_action:
             raise ValueError("Executor recommended next action is inconsistent.")
+        return self
+
+
+class NormalizerMode(StrEnum):
+    FREE = "free"
+    PAID = "paid"
+
+
+class NormalizerStrategySource(StrEnum):
+    DETERMINISTIC = "deterministic"
+    OPENAI = "openai"
+    DETERMINISTIC_FALLBACK = "deterministic_fallback"
+
+
+class NormalizedValueType(StrEnum):
+    TEXT = "text"
+    INTEGER = "integer"
+    DECIMAL = "decimal"
+    BOOLEAN = "boolean"
+    DATE = "date"
+    URL = "url"
+    MONEY = "money"
+    PERCENTAGE = "percentage"
+
+
+class NormalizationPrecision(StrEnum):
+    EXACT = "exact"
+    APPROXIMATE = "approximate"
+    RANGE = "range"
+    QUALITATIVE = "qualitative"
+    UNKNOWN = "unknown"
+
+
+class NormalizerFieldStatus(StrEnum):
+    NORMALIZED = "normalized"
+    MULTIPLE_VALUES = "multiple_values"
+    CONFLICTING = "conflicting"
+    NEEDS_REVIEW = "needs_review"
+    MISSING = "missing"
+
+
+class NormalizerNextAction(StrEnum):
+    HUMAN_REVIEW = "human_review"
+
+
+class NormalizerValueDraft(ClosedModel):
+    """One provider-proposed representation of accepted raw claims."""
+
+    task_id: str
+    target_field: str = Field(min_length=1, max_length=500)
+    claim_ids: list[str] = Field(min_length=1, max_length=50)
+    value_type: NormalizedValueType
+    canonical_text: str = Field(min_length=1, max_length=2000)
+    number_min: Decimal | None = None
+    number_max: Decimal | None = None
+    boolean_value: bool | None = None
+    date_value: date | None = None
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    unit: str | None = Field(default=None, max_length=100)
+    precision: NormalizationPrecision
+    notes: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_typed_value(self) -> "NormalizerValueDraft":
+        if len(self.claim_ids) != len(set(self.claim_ids)):
+            raise ValueError("Normalizer draft claim IDs must be unique.")
+        numeric = self.value_type in {
+            NormalizedValueType.INTEGER,
+            NormalizedValueType.DECIMAL,
+            NormalizedValueType.MONEY,
+            NormalizedValueType.PERCENTAGE,
+        }
+        if numeric:
+            if self.number_min is None or self.boolean_value is not None or self.date_value:
+                raise ValueError("Numeric normalization requires only numeric values.")
+            if self.number_max is not None and self.number_max < self.number_min:
+                raise ValueError("Normalizer number_max cannot be below number_min.")
+            if self.value_type == NormalizedValueType.INTEGER and any(
+                value != value.to_integral_value()
+                for value in (self.number_min, self.number_max)
+                if value is not None
+            ):
+                raise ValueError("Integer normalization requires integral values.")
+            if self.value_type == NormalizedValueType.MONEY and self.currency is None:
+                raise ValueError("Money normalization requires an ISO currency.")
+            if self.value_type != NormalizedValueType.MONEY and self.currency is not None:
+                raise ValueError("Only money normalization may declare currency.")
+            if self.number_max is not None and self.number_max != self.number_min:
+                if self.precision != NormalizationPrecision.RANGE:
+                    raise ValueError("A numeric range requires range precision.")
+        elif self.value_type == NormalizedValueType.BOOLEAN:
+            if (
+                self.boolean_value is None
+                or self.number_min is not None
+                or self.number_max is not None
+                or self.date_value is not None
+                or self.currency is not None
+            ):
+                raise ValueError("Boolean normalization requires only boolean_value.")
+        elif self.value_type == NormalizedValueType.DATE:
+            if (
+                self.date_value is None
+                or self.number_min is not None
+                or self.number_max is not None
+                or self.boolean_value is not None
+                or self.currency is not None
+            ):
+                raise ValueError("Date normalization requires only date_value.")
+        elif any(
+            value is not None
+            for value in (
+                self.number_min,
+                self.number_max,
+                self.boolean_value,
+                self.date_value,
+                self.currency,
+            )
+        ):
+            raise ValueError("Text and URL normalization cannot declare typed values.")
+        if self.precision == NormalizationPrecision.RANGE and (
+            not numeric
+            or self.number_max is None
+            or self.number_max == self.number_min
+        ):
+            raise ValueError("Range precision requires two distinct numeric bounds.")
+        return self
+
+
+class NormalizerDraft(ClosedModel):
+    values: list[NormalizerValueDraft] = Field(default_factory=list, max_length=500)
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+
+
+class NormalizedValue(NormalizerValueDraft):
+    normalized_value_id: str = Field(pattern=r"^normalized-value-[a-f0-9]{16}$")
+    raw_value_texts: list[str] = Field(min_length=1, max_length=50)
+    citation_ids: list[str] = Field(min_length=1, max_length=200)
+    source_ids: list[str] = Field(min_length=1, max_length=200)
+    needs_corroboration: bool
+
+    @model_validator(mode="after")
+    def validate_normalized_provenance(self) -> "NormalizedValue":
+        for values in (
+            self.raw_value_texts,
+            self.citation_ids,
+            self.source_ids,
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError("Normalized value provenance must be unique.")
+        return self
+
+
+class NormalizerFieldResult(ClosedModel):
+    normalized_field_id: str = Field(pattern=r"^normalized-field-[a-f0-9]{16}$")
+    task_id: str
+    target_field: str
+    checker_status: CheckerFieldStatus
+    status: NormalizerFieldStatus
+    normalized_value_ids: list[str] = Field(default_factory=list)
+    accepted_claim_ids: list[str] = Field(default_factory=list)
+    rejected_claim_ids: list[str] = Field(default_factory=list)
+    needs_review_claim_ids: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+    review_required: Literal[True] = True
+    notes: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_normalized_field(self) -> "NormalizerFieldResult":
+        for values in (
+            self.normalized_value_ids,
+            self.accepted_claim_ids,
+            self.rejected_claim_ids,
+            self.needs_review_claim_ids,
+            self.source_ids,
+            self.notes,
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError("Normalizer field lists must be unique.")
+        if self.status == NormalizerFieldStatus.MISSING and (
+            self.normalized_value_ids or self.accepted_claim_ids
+        ):
+            raise ValueError("A missing normalized field cannot contain accepted data.")
+        if self.status in {
+            NormalizerFieldStatus.NORMALIZED,
+            NormalizerFieldStatus.MULTIPLE_VALUES,
+            NormalizerFieldStatus.CONFLICTING,
+        } and (not self.normalized_value_ids or not self.accepted_claim_ids):
+            raise ValueError("A populated normalized field requires values and claims.")
+        if (
+            self.status == NormalizerFieldStatus.NORMALIZED
+            and len(self.normalized_value_ids) != 1
+        ):
+            raise ValueError("A normalized field requires exactly one value.")
+        if (
+            self.status == NormalizerFieldStatus.MULTIPLE_VALUES
+            and len(self.normalized_value_ids) < 2
+        ):
+            raise ValueError("A multiple-values field requires at least two values.")
+        return self
+
+
+class NormalizerLimits(ClosedModel):
+    max_claims: int = Field(ge=1, le=500)
+    max_input_chars: int = Field(ge=1_000, le=500_000)
+    observed_input_chars: int = Field(ge=0, le=500_000)
+    max_api_calls: Literal[1] = 1
+
+
+class NormalizerAttemptFailure(ClosedModel):
+    call_index: Literal[1] = 1
+    scope_task_ids: list[str]
+    scope_source_ids: list[str]
+    error_code: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    usage_recorded: bool
+    token_usage_unknown: bool = False
+
+
+class NormalizerResults(ClosedModel):
+    """Typed, source-linked staging record that always requires human review."""
+
+    schema_version: Literal["1.0.0"] = NORMALIZER_SCHEMA_VERSION
+    prompt_version: Literal["normalizer-system-v1"] = NORMALIZER_PROMPT_VERSION
+    normalization_id: str
+    plan_run_id: str
+    search_id: str
+    extraction_id: str
+    check_id: str
+    plan_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    search_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    extraction_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    check_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    plan_reference: str = Field(min_length=1)
+    search_reference: str = Field(min_length=1)
+    extraction_reference: str = Field(min_length=1)
+    check_reference: str = Field(min_length=1)
+    created_at: datetime
+    iteration: int = Field(ge=1)
+    normalization_mode: NormalizerMode
+    generated_by: Literal["deterministic", "openai"]
+    strategy_source: NormalizerStrategySource
+    model: str | None
+    provider_executed: bool
+    brand_name: str
+    target_country: str = Field(pattern=r"^[A-Z]{2}$")
+    depth: ResearchDepth
+    input_checker_passed: bool
+    incomplete_input_allowed: bool
+    input_quality_score: int = Field(ge=0, le=100)
+    input_quality_threshold: int = Field(ge=0, le=100)
+    input_scope_complete: bool
+    limits: NormalizerLimits
+    eligible_claim_ids: list[str]
+    excluded_claim_ids: list[str]
+    unsafe_excluded_claim_ids: list[str]
+    normalized_values: list[NormalizedValue]
+    field_results: list[NormalizerFieldResult] = Field(min_length=1)
+    unresolved_field_ids: list[str]
+    critical_missing_fields: list[str]
+    unevaluated_critical_fields: list[str]
+    publishable: Literal[False] = False
+    ready_for_human_review: Literal[True] = True
+    recommended_next_action: Literal[NormalizerNextAction.HUMAN_REVIEW] = (
+        NormalizerNextAction.HUMAN_REVIEW
+    )
+    warnings: list[str]
+    compliance_rules: list[str]
+    agent_usage: list[AgentIterationUsage] = Field(default_factory=list)
+    failed_attempts: list[NormalizerAttemptFailure] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_normalizer_results(self) -> "NormalizerResults":
+        for value, field_name in (
+            (self.normalization_id, "normalization_id"),
+            (self.plan_run_id, "plan_run_id"),
+            (self.search_id, "search_id"),
+            (self.extraction_id, "extraction_id"),
+            (self.check_id, "check_id"),
+        ):
+            try:
+                parsed = UUID(value)
+            except (ValueError, AttributeError) as exc:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.") from exc
+            if parsed.version != 4:
+                raise ValueError(f"{field_name} must be a valid UUIDv4.")
+        for values, field_name in (
+            (self.eligible_claim_ids, "eligible_claim_ids"),
+            (self.excluded_claim_ids, "excluded_claim_ids"),
+            (self.unsafe_excluded_claim_ids, "unsafe_excluded_claim_ids"),
+            (self.unresolved_field_ids, "unresolved_field_ids"),
+            (self.critical_missing_fields, "critical_missing_fields"),
+            (self.unevaluated_critical_fields, "unevaluated_critical_fields"),
+            (self.warnings, "warnings"),
+            (self.compliance_rules, "compliance_rules"),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"Normalizer {field_name} values must be unique.")
+        if set(self.eligible_claim_ids) & set(self.excluded_claim_ids):
+            raise ValueError("Eligible and excluded Normalizer claims overlap.")
+        if not set(self.unsafe_excluded_claim_ids).issubset(self.excluded_claim_ids):
+            raise ValueError("Unsafe excluded claims must belong to excluded claims.")
+        value_ids = [item.normalized_value_id for item in self.normalized_values]
+        field_ids = [item.normalized_field_id for item in self.field_results]
+        if len(value_ids) != len(set(value_ids)) or len(field_ids) != len(set(field_ids)):
+            raise ValueError("Normalizer value and field IDs must be unique.")
+        normalized_claim_ids = [
+            claim_id
+            for value in self.normalized_values
+            for claim_id in value.claim_ids
+        ]
+        if len(normalized_claim_ids) != len(set(normalized_claim_ids)):
+            raise ValueError("Each eligible claim may be normalized only once.")
+        if set(normalized_claim_ids) != set(self.eligible_claim_ids):
+            raise ValueError("Normalized values must cover every eligible claim.")
+        value_by_id = {item.normalized_value_id: item for item in self.normalized_values}
+        field_value_ids = [
+            value_id
+            for field in self.field_results
+            for value_id in field.normalized_value_ids
+        ]
+        if len(field_value_ids) != len(set(field_value_ids)) or set(field_value_ids) != set(value_ids):
+            raise ValueError("Normalizer fields must partition normalized values.")
+        field_accepted_ids = [
+            claim_id
+            for field in self.field_results
+            for claim_id in field.accepted_claim_ids
+        ]
+        if len(field_accepted_ids) != len(set(field_accepted_ids)) or set(field_accepted_ids) != set(self.eligible_claim_ids):
+            raise ValueError("Normalizer fields must partition eligible claims.")
+        for field in self.field_results:
+            for value_id in field.normalized_value_ids:
+                value = value_by_id[value_id]
+                if value.task_id != field.task_id or value.target_field != field.target_field:
+                    raise ValueError("Normalized value belongs to the wrong field.")
+            value_claim_ids = {
+                claim_id
+                for value_id in field.normalized_value_ids
+                for claim_id in value_by_id[value_id].claim_ids
+            }
+            if value_claim_ids != set(field.accepted_claim_ids):
+                raise ValueError("Normalized field claims do not match its values.")
+        expected_unresolved = [
+            field.normalized_field_id
+            for field in self.field_results
+            if field.checker_status != CheckerFieldStatus.VERIFIED
+            or field.status
+            in {
+                NormalizerFieldStatus.CONFLICTING,
+                NormalizerFieldStatus.NEEDS_REVIEW,
+                NormalizerFieldStatus.MISSING,
+            }
+        ]
+        if self.unresolved_field_ids != expected_unresolved:
+            raise ValueError("Normalizer unresolved-field summary is inconsistent.")
+        if self.limits.observed_input_chars > self.limits.max_input_chars:
+            raise ValueError("Normalizer input exceeds max_input_chars.")
+        if len(self.eligible_claim_ids) > self.limits.max_claims:
+            raise ValueError("Normalizer eligible claims exceed max_claims.")
+        if not self.input_checker_passed and not self.incomplete_input_allowed:
+            raise ValueError(
+                "A failed Checker input requires an explicit incomplete-input override."
+            )
+        if self.normalization_mode == NormalizerMode.FREE:
+            if (
+                self.generated_by != "deterministic"
+                or self.strategy_source != NormalizerStrategySource.DETERMINISTIC
+                or self.model is not None
+                or self.provider_executed
+                or self.agent_usage
+                or self.failed_attempts
+            ):
+                raise ValueError("Free Normalizer cannot contain provider activity.")
+        elif self.generated_by == "deterministic":
+            if self.eligible_claim_ids or self.model is not None or self.provider_executed:
+                raise ValueError("Paid deterministic Normalizer is valid only with no eligible claims.")
+        else:
+            if self.model is None or not self.model.strip() or not self.provider_executed:
+                raise ValueError("OpenAI Normalizer must record model activity.")
+            if self.strategy_source == NormalizerStrategySource.OPENAI:
+                if len(self.agent_usage) != 1 or self.failed_attempts:
+                    raise ValueError("Successful OpenAI Normalizer requires one usage entry.")
+            elif self.strategy_source == NormalizerStrategySource.DETERMINISTIC_FALLBACK:
+                if len(self.failed_attempts) != 1:
+                    raise ValueError("Normalizer fallback requires one failed attempt.")
+            else:
+                raise ValueError("OpenAI Normalizer has an invalid strategy source.")
+        if len(self.agent_usage) > 1 or len(self.failed_attempts) > 1:
+            raise ValueError("Normalizer permits at most one provider attempt.")
+        if any(
+            usage.agent != "normalizer" or usage.iteration != self.iteration
+            for usage in self.agent_usage
+        ):
+            raise ValueError("Normalizer usage metadata is inconsistent.")
+        if self.agent_usage and self.failed_attempts:
+            attempt = self.failed_attempts[0]
+            usage = self.agent_usage[0]
+            if (
+                not attempt.usage_recorded
+                or attempt.token_usage_unknown
+                or attempt.scope_task_ids != usage.scope_task_ids
+                or attempt.scope_source_ids != usage.scope_source_ids
+            ):
+                raise ValueError("Normalizer failure usage metadata is inconsistent.")
+        elif self.failed_attempts and (
+            self.failed_attempts[0].usage_recorded
+            or not self.failed_attempts[0].token_usage_unknown
+        ):
+            raise ValueError("Unknown Normalizer usage must be marked explicitly.")
         return self
