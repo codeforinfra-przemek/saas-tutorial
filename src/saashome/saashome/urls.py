@@ -22,6 +22,7 @@ from django.urls import include, path
 
 from content.sitemaps import ArticleSitemap, FranchiseSitemap, LandingPageSitemap
 from content.views import robots_txt_view
+from seo.sitemaps import BudgetPageSitemap, BusinessModelPageSitemap, FranchiseCategorySitemap, StaticSeoPageSitemap
 
 from .views import home_view
 
@@ -30,6 +31,10 @@ sitemaps = {
     "articles": ArticleSitemap,
     "landing_pages": LandingPageSitemap,
     "franchises": FranchiseSitemap,
+    "franchise_categories": FranchiseCategorySitemap,
+    "franchise_budgets": BudgetPageSitemap,
+    "franchise_models": BusinessModelPageSitemap,
+    "static": StaticSeoPageSitemap,
 }
 
 urlpatterns = [
@@ -39,6 +44,7 @@ urlpatterns = [
     path('', include('analytics.urls')),
     path('', include('billing.urls')),
     path('', include('content.urls')),
+    path('', include('seo.urls')),
     path('franchises/', include('franchises.urls')),
     path('leads/', include('leads.urls')),
     path('', include('onboarding.urls')),

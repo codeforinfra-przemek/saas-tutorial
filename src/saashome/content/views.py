@@ -1,5 +1,11 @@
+import json
+
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
+from django.urls import reverse
+
+from seo.schema import get_article_schema, get_breadcrumb_schema
+from seo.services import get_article_seo, get_landing_page_seo
 
 from .models import Article, ArticleCategory, LandingPage
 from .services import get_franchises_for_landing_page
@@ -11,6 +17,11 @@ def article_list_view(request):
         .select_related("category", "author")
         .order_by("-published_at", "-created_at")
     )
+    breadcrumbs = [
+        {"name": "Start", "url": request.build_absolute_uri(reverse("home"))},
+        {"name": "Poradnik", "url": request.build_absolute_uri(reverse("content:article_list"))},
+        {"name": article.title, "url": request.build_absolute_uri(article.get_absolute_url())},
+    ]
     context = {
         "site_name": "SaaS Home",
         "page_title": "Poradnik franczyzowy",
@@ -40,10 +51,10 @@ def article_detail_view(request, slug):
         "active_page": "content",
         "article": article,
         "related_articles": related_articles[:3],
-        "seo_title": article.meta_title,
-        "seo_description": article.meta_description,
-        "canonical_url": article.canonical_url,
+        "breadcrumbs": breadcrumbs,
+        "json_ld": json.dumps([get_article_schema(article, request), get_breadcrumb_schema(breadcrumbs)], ensure_ascii=False),
     }
+    context.update(get_article_seo(article, request))
     return render(request, "content/article_detail.html", context)
 
 
@@ -54,20 +65,28 @@ def landing_page_detail_view(request, slug):
         status=LandingPage.STATUS_PUBLISHED,
     )
     franchises = get_franchises_for_landing_page(landing_page)
+    breadcrumbs = [
+        {"name": "Start", "url": request.build_absolute_uri(reverse("home"))},
+        {"name": landing_page.title, "url": request.build_absolute_uri(landing_page.get_absolute_url())},
+    ]
     context = {
         "site_name": "SaaS Home",
         "page_title": landing_page.title,
         "active_page": "content",
         "landing_page": landing_page,
         "franchises": franchises,
-        "seo_title": landing_page.meta_title,
-        "seo_description": landing_page.meta_description,
-        "canonical_url": landing_page.canonical_url,
+        "breadcrumbs": breadcrumbs,
+        "json_ld": json.dumps([get_breadcrumb_schema(breadcrumbs)], ensure_ascii=False),
     }
+    context.update(get_landing_page_seo(landing_page, request))
     return render(request, "content/landing_page_detail.html", context)
 
 
 def robots_txt_view(request):
     sitemap_url = request.build_absolute_uri("/sitemap.xml")
-    content = f"User-agent: *\nAllow: /\nSitemap: {sitemap_url}\n"
+    content = "\n".join([
+        "User-agent: *", "Allow: /", "Disallow: /admin/", "Disallow: /vendor/",
+        "Disallow: /internal/", "Disallow: /accounts/", "Disallow: /auth/",
+        "Disallow: /saved/", "Disallow: /billing/", f"Sitemap: {sitemap_url}", "",
+    ])
     return HttpResponse(content, content_type="text/plain")

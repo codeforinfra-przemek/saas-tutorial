@@ -63,6 +63,9 @@ class FranchiseCategory(models.Model):
     def __str__(self):
         return self.name
 
+    def get_absolute_url(self):
+        return reverse("seo:category_detail", kwargs={"slug": self.slug})
+
 
 class Franchise(models.Model):
     BUSINESS_TYPE_STATIONARY = "stationary"

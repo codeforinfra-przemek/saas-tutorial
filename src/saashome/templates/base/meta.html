@@ -3,14 +3,16 @@
 <meta name="description" content="{% block meta_description %}{{ seo_description|default:"SaaS Home - ranking franczyz, obiekty i mapa zainteresowania użytkowników." }}{% endblock %}">
 {% if canonical_url %}
     <link rel="canonical" href="{{ canonical_url }}">
-{% elif request %}
-    <link rel="canonical" href="{{ request.build_absolute_uri }}">
+{% elif default_canonical_url %}
+    <link rel="canonical" href="{{ default_canonical_url }}">
 {% endif %}
+{% if robots_meta %}<meta name="robots" content="{{ robots_meta }}">{% endif %}
 <meta property="og:title" content="{% firstof seo_title page_title site_name "SaaS Home" %}">
 <meta property="og:description" content="{{ seo_description|default:"Ranking franczyz, porównywarka ofert i mapa lokalizacji." }}">
 {% if canonical_url %}
     <meta property="og:url" content="{{ canonical_url }}">
-{% elif request %}
-    <meta property="og:url" content="{{ request.build_absolute_uri }}">
+{% elif default_canonical_url %}
+    <meta property="og:url" content="{{ default_canonical_url }}">
 {% endif %}
 <meta property="og:type" content="{{ og_type|default:"website" }}">
+{% include "seo/partials/json_ld.html" %}
