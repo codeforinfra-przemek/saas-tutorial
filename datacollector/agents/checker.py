@@ -38,6 +38,7 @@ from ..schemas import (
     CheckerUnsafeItem,
     CheckerVerdict,
     DocumentParseStatus,
+    DocumentRetrievalStatus,
     FieldExtractionStatus,
     PRIORITY_ORDER,
     RawExtractionClaim,
@@ -57,6 +58,7 @@ DEFAULT_PROMPT_PATH = (
 )
 DEFAULT_MAX_CLAIMS = 100
 DEFAULT_MAX_EVIDENCE_CHARS = 100_000
+_TERMINAL_RETRIEVAL_ERROR_CODES = {"access_denied", "anti_bot_page"}
 
 
 class CheckerValidationError(ValueError):
@@ -75,6 +77,16 @@ def _stable_id(prefix: str, *parts: object) -> str:
 
 def _round_score(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _document_is_retryable(document) -> bool:
+    return (
+        document.retrieval_status == DocumentRetrievalStatus.FAILED
+        or (
+            document.retrieval_status == DocumentRetrievalStatus.NOT_ACCESSIBLE
+            and document.error_code not in _TERMINAL_RETRIEVAL_ERROR_CODES
+        )
+    )
 
 
 def _publisher_key(source: SearchSource) -> str:
@@ -889,6 +901,17 @@ class CheckerAgent:
                 or len({decision.task_id for decision in scoped}) != 1
             ):
                 raise ValueError("Checker contradiction crosses tasks or fields.")
+            # A rejected claim is not an eligible fact and therefore cannot
+            # create a scored contradiction. This is especially important for
+            # legislative-project claims that correctly conflict with current
+            # law but were rejected as evidence of the in-force-law field.
+            if any(
+                decision.verdict != CheckerVerdict.ACCEPTED
+                or decision.semantic_fit == CheckerSemanticFit.MISMATCH
+                or decision.source_support == CheckerSourceSupport.UNSUITABLE
+                for decision in scoped
+            ):
+                continue
             canonical_claim_ids = tuple(sorted(item.claim_ids))
             key = (scoped[0].task_id, item.target_field, *canonical_claim_ids)
             if key in seen_contradiction_keys:
@@ -997,8 +1020,7 @@ class CheckerAgent:
                 source_id
                 for source_id in extraction_results.selected_source_ids
                 if task.task_id in source_by_id[source_id].task_ids
-                and document_by_source[source_id].parse_status
-                not in {DocumentParseStatus.PARSED, DocumentParseStatus.PARTIAL}
+                and _document_is_retryable(document_by_source[source_id])
             ]
             task_reextract_sources = [
                 source_id

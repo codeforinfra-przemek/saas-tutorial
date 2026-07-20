@@ -44,6 +44,7 @@ DEFAULT_MAX_FOLLOW_UPS = 30
 DEFAULT_MAX_SOURCE_ACTIONS = 10
 DEFAULT_MAX_SEARCH_TASKS = 5
 DEFAULT_MAX_QUERIES_PER_ITEM = 3
+_TERMINAL_RETRIEVAL_ERROR_CODES = {"access_denied", "anti_bot_page"}
 
 
 class ResolverValidationError(ValueError):
@@ -100,6 +101,8 @@ class ResolverAgent:
         max_source_actions: int = DEFAULT_MAX_SOURCE_ACTIONS,
         max_search_tasks: int = DEFAULT_MAX_SEARCH_TASKS,
         max_queries_per_item: int = DEFAULT_MAX_QUERIES_PER_ITEM,
+        completed_gap_rounds: int = 0,
+        allow_round_limit: bool = False,
     ) -> ResolverResults:
         resolved_iteration = iteration or checker_results.iteration
         self._validate_inputs(
@@ -121,6 +124,22 @@ class ResolverAgent:
             max_search_tasks=max_search_tasks,
             max_queries_per_item=max_queries_per_item,
         )
+        if completed_gap_rounds < 0:
+            raise ResolverValidationError(
+                "Completed gap-repair round count cannot be negative."
+            )
+        if (
+            checker_results.recommended_next_action
+            == CheckerNextAction.RESOLVE_GAPS
+            and completed_gap_rounds >= plan.stop_conditions.max_rounds
+            and not allow_round_limit
+        ):
+            raise ResolverValidationError(
+                "Resolver gap-repair limit reached: "
+                f"{completed_gap_rounds} completed round(s), plan maximum "
+                f"{plan.stop_conditions.max_rounds}. Route the selected scope "
+                "to human review or explicitly allow a round-limit override."
+            )
 
         limits = ResolverLimits(
             max_follow_ups=max_follow_ups,
@@ -183,6 +202,11 @@ class ResolverAgent:
         )
 
         warnings: list[str] = []
+        if completed_gap_rounds >= plan.stop_conditions.max_rounds:
+            warnings.append(
+                "Resolver round-limit override was explicitly enabled after "
+                f"{completed_gap_rounds} completed gap-repair round(s)."
+            )
         if expanding_scope:
             if checker_results.unevaluated_source_ids:
                 warnings.append(
@@ -442,6 +466,16 @@ class ResolverAgent:
             and document.parse_status
             in {DocumentParseStatus.PARSED, DocumentParseStatus.PARTIAL}
         }
+        retryable_document_source_ids = {
+            document.source_id
+            for document in extraction_results.documents
+            if document.retrieval_status == DocumentRetrievalStatus.FAILED
+            or (
+                document.retrieval_status
+                == DocumentRetrievalStatus.NOT_ACCESSIBLE
+                and document.error_code not in _TERMINAL_RETRIEVAL_ERROR_CODES
+            )
+        }
         processed_scopes = {
             (scope.task_id, scope.source_id)
             for scope in extraction_results.semantically_processed_scopes
@@ -477,6 +511,15 @@ class ResolverAgent:
                 ),
                 ResolverAction.REEXTRACT_EXISTING: reextract_source_ids,
             }
+            pools_by_follow_up[follow_up.follow_up_id][
+                ResolverAction.RETRY_RETRIEVAL
+            ] = [
+                source_id
+                for source_id in pools_by_follow_up[follow_up.follow_up_id][
+                    ResolverAction.RETRY_RETRIEVAL
+                ]
+                if source_id in retryable_document_source_ids
+            ]
         return pools_by_follow_up
 
     @staticmethod

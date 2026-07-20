@@ -1,6 +1,9 @@
 from unittest import TestCase
 
-from datacollector.agents.executor import ExecutorAgent
+from datacollector.agents.executor import (
+    ExecutorAgent,
+    _search_sources_requiring_extraction,
+)
 from datacollector.agents.extractor import ExtractorAgent
 from datacollector.agents.searcher import SearcherAgent
 from datacollector.schemas import (
@@ -140,6 +143,32 @@ class ExecutorAgentTests(TestCase):
                 iteration=4,
                 execution_mode=ExecutorMode.FREE,
             )
+
+    def test_rediscovered_source_is_not_reextracted_without_new_task_scope(self):
+        process_ids, skipped_ids = _search_sources_requiring_extraction(
+            self.search,
+            self.extraction,
+        )
+
+        self.assertEqual(process_ids, [])
+        self.assertEqual(skipped_ids, self.extraction.selected_source_ids)
+
+        first_source = self.search.sources[0]
+        expanded_source = first_source.model_copy(
+            update={"task_ids": [*first_source.task_ids, "task-new-scope"]}
+        )
+        expanded_search = self.search.model_copy(
+            update={
+                "sources": [expanded_source, *self.search.sources[1:]],
+            }
+        )
+        process_ids, skipped_ids = _search_sources_requiring_extraction(
+            expanded_search,
+            self.extraction,
+        )
+
+        self.assertEqual(process_ids, [first_source.source_id])
+        self.assertNotIn(first_source.source_id, skipped_ids)
 
     def test_merge_updates_preserved_document_task_mappings(self):
         second_task = checker_fixtures.CheckerAgentTests.second_task

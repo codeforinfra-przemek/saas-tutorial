@@ -3,7 +3,11 @@ from datetime import datetime, timezone
 from unittest import TestCase
 from uuid import uuid4
 
-from datacollector.agents.checker import CheckerAgent, CheckerValidationError
+from datacollector.agents.checker import (
+    CheckerAgent,
+    CheckerValidationError,
+    _document_is_retryable,
+)
 from datacollector.agents.extractor import ExtractorAgent
 from datacollector.agents.planner import PlannerAgent
 from datacollector.catalog import load_question_catalog
@@ -17,6 +21,8 @@ from datacollector.llm.protocol import (
 from datacollector.schemas import (
     AgentIterationUsage,
     CheckerClaimDecisionDraft,
+    CheckerContradictionDraft,
+    CheckerContradictionKind,
     CheckerDraft,
     CheckerFieldStatus,
     CheckerFollowUpAction,
@@ -32,6 +38,7 @@ from datacollector.schemas import (
     CheckerUnsafeCategory,
     CheckerUnsafeItemDraft,
     CheckerVerdict,
+    DocumentRetrievalStatus,
     ExtractionConfidence,
     ExtractorClaimDraft,
     ExtractorDraft,
@@ -561,6 +568,80 @@ class CheckerAgentTests(TestCase):
         )
         self.assertEqual(field.status, CheckerFieldStatus.NEEDS_CORROBORATION)
         self.assertEqual(field.needs_review_claim_ids, [])
+
+    def test_rejected_claim_cannot_create_scored_contradiction(self):
+        target_claims = [
+            claim
+            for claim in self.extraction_results.claims
+            if claim.target_field == self.task.target_fields[0]
+        ]
+        rejected_claim_id = target_claims[1].claim_id
+
+        def draft_factory(extraction_results):
+            return CheckerDraft(
+                decisions=[
+                    CheckerClaimDecisionDraft(
+                        claim_id=claim.claim_id,
+                        verdict=(
+                            CheckerModelVerdict.REJECTED
+                            if claim.claim_id == rejected_claim_id
+                            else CheckerModelVerdict.ACCEPTED
+                        ),
+                        semantic_fit=(
+                            CheckerModelSemanticFit.MISMATCH
+                            if claim.claim_id == rejected_claim_id
+                            else CheckerModelSemanticFit.DIRECT
+                        ),
+                        source_support=(
+                            CheckerModelSourceSupport.UNSUITABLE
+                            if claim.claim_id == rejected_claim_id
+                            else CheckerModelSourceSupport.SUFFICIENT
+                        ),
+                        issue_codes=(
+                            [CheckerIssueCode.UNSUPPORTED_CLAIM]
+                            if claim.claim_id == rejected_claim_id
+                            else []
+                        ),
+                        rationale="The fixture supplies a deterministic verdict.",
+                    )
+                    for claim in extraction_results.claims
+                ],
+                contradictions=[
+                    CheckerContradictionDraft(
+                        target_field=self.task.target_fields[0],
+                        claim_ids=[claim.claim_id for claim in target_claims],
+                        kind=CheckerContradictionKind.TEMPORAL_MISMATCH,
+                        rationale=(
+                            "The provider incorrectly compares accepted and "
+                            "rejected claims."
+                        ),
+                    )
+                ],
+            )
+
+        results = self._run(FixtureCheckerLLM(draft_factory))
+
+        self.assertEqual(results.contradictions, [])
+        self.assertEqual(results.score_breakdown.deduction_points, 0)
+        field = results.task_results[0].field_results[0]
+        self.assertNotEqual(field.status, CheckerFieldStatus.CONFLICTING)
+
+    def test_terminal_anti_bot_document_is_not_retryable(self):
+        document = self.extraction_results.documents[0].model_copy(
+            update={
+                "retrieval_status": DocumentRetrievalStatus.NOT_ACCESSIBLE,
+                "error_code": "anti_bot_page",
+            }
+        )
+        transient = document.model_copy(
+            update={
+                "retrieval_status": DocumentRetrievalStatus.FAILED,
+                "error_code": "tls_error",
+            }
+        )
+
+        self.assertFalse(_document_is_retryable(document))
+        self.assertTrue(_document_is_retryable(transient))
 
     def test_mixed_multivalue_field_is_partial_and_routes_unresolved_claim(self):
         target_field = self.task.target_fields[0]

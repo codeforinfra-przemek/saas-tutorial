@@ -119,6 +119,39 @@ def _successful_semantic_scopes(
     return scopes
 
 
+def _search_sources_requiring_extraction(
+    delta: SearchResults | None,
+    prior_extraction: ExtractionResults,
+) -> tuple[list[str], list[str]]:
+    """Select only genuinely new or newly-scoped Searcher discoveries.
+
+    A paid Searcher commonly rediscovers URLs already present in the predecessor
+    state. Rediscovery alone must not trigger another paid Extractor call. An
+    existing source remains eligible only when Searcher maps it to a plan task
+    that the predecessor document did not cover.
+    """
+
+    if delta is None:
+        return [], []
+    prior_document_by_source = {
+        document.source_id: document for document in prior_extraction.documents
+    }
+    requiring_extraction: list[str] = []
+    skipped_rediscoveries: list[str] = []
+    for source in delta.sources:
+        prior_document = prior_document_by_source.get(source.source_id)
+        if prior_document is None or (
+            set(source.task_ids) - set(prior_document.task_ids)
+        ):
+            requiring_extraction.append(source.source_id)
+        else:
+            skipped_rediscoveries.append(source.source_id)
+    return (
+        _deduplicate(requiring_extraction),
+        _deduplicate(skipped_rediscoveries),
+    )
+
+
 def _claim_semantic_key(extraction: ExtractionResults, claim) -> tuple:
     return (
         claim.task_id,
@@ -399,11 +432,19 @@ class ExecutorAgent:
             if ResolverAction.RETRY_RETRIEVAL
             in action_by_source.get(source_id, set())
         ]
-        delta_source_ids = (
-            [source.source_id for source in delta_search.sources]
-            if delta_search is not None
-            else []
+        (
+            delta_source_ids,
+            skipped_rediscovered_source_ids,
+        ) = _search_sources_requiring_extraction(
+            delta_search,
+            prior_extraction,
         )
+        explicitly_scheduled_source_ids = set(resolution.execution_source_ids)
+        skipped_rediscovered_source_ids = [
+            source_id
+            for source_id in skipped_rediscovered_source_ids
+            if source_id not in explicitly_scheduled_source_ids
+        ]
         process_source_ids = _deduplicate(
             [*resolution.execution_source_ids, *delta_source_ids]
         )
@@ -515,9 +556,9 @@ class ExecutorAgent:
 
         prior_source_ids = {source.source_id for source in prior_search.sources}
         new_source_ids = [
-            source_id
-            for source_id in delta_source_ids
-            if source_id not in prior_source_ids
+            source.source_id
+            for source in (delta_search.sources if delta_search else [])
+            if source.source_id not in prior_source_ids
         ]
         inherited_source_ids = [
             source_id
@@ -547,6 +588,16 @@ class ExecutorAgent:
             [
                 "Executor materialized a merged research state; predecessor "
                 "artifacts remain immutable and authoritative for inherited provenance.",
+                *(
+                    [
+                        "Skipped paid re-extraction for "
+                        f"{len(skipped_rediscovered_source_ids)} rediscovered "
+                        "source(s) whose predecessor documents already covered "
+                        "the same task mappings."
+                    ]
+                    if skipped_rediscovered_source_ids
+                    else []
+                ),
                 *(
                     f"Searcher delta: {warning}"
                     for warning in (

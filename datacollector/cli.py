@@ -43,6 +43,7 @@ from .schemas import (
     AgentFailureArtifact,
     AgentIterationUsage,
     CheckerAttemptFailure,
+    CheckerNextAction,
     ExecutorMode,
     ExtractionAttemptFailure,
     PlannerInput,
@@ -446,6 +447,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resolve_parser.add_argument(
         "--model", help="Override OPENAI_MODEL for this Resolver invocation."
+    )
+    resolve_parser.add_argument(
+        "--allow-round-limit",
+        action="store_true",
+        help=(
+            "Explicitly override the plan max_rounds safety gate after inspecting "
+            "the complete predecessor lineage."
+        ),
     )
     resolve_parser.add_argument(
         "--output-dir",
@@ -1567,6 +1576,64 @@ def _save_resolver_provider_failure(
     return save_agent_failure(failure, reference_path)
 
 
+def _consecutive_gap_repair_rounds(extraction_results) -> int:
+    """Count exact predecessor executions planned from resolve_gaps checks."""
+
+    rounds = 0
+    current = extraction_results
+    seen_extraction_ids: set[str] = set()
+    while current.generated_by == "executor":
+        if current.extraction_id in seen_extraction_ids:
+            raise ResolverValidationError(
+                "Executor predecessor lineage contains a cycle."
+            )
+        seen_extraction_ids.add(current.extraction_id)
+        if current.resolution_reference is None:
+            raise ResolverValidationError(
+                "Executor extraction is missing Resolver lineage."
+            )
+        resolution, resolution_sha256 = load_resolver_results(
+            current.resolution_reference
+        )
+        if (
+            current.resolution_id != resolution.resolution_id
+            or current.resolution_sha256 != resolution_sha256
+        ):
+            raise ResolverValidationError(
+                "Executor extraction Resolver lineage does not match exact bytes."
+            )
+        prior_check, prior_check_sha256 = load_checker_results(
+            resolution.check_reference
+        )
+        if (
+            resolution.check_id != prior_check.check_id
+            or resolution.check_sha256 != prior_check_sha256
+        ):
+            raise ResolverValidationError(
+                "Resolver Checker lineage does not match exact bytes."
+            )
+        if (
+            prior_check.recommended_next_action
+            != CheckerNextAction.RESOLVE_GAPS
+        ):
+            break
+        rounds += 1
+        if current.prior_extraction_reference is None:
+            break
+        prior, prior_sha256 = load_extraction_results(
+            current.prior_extraction_reference
+        )
+        if (
+            current.prior_extraction_id != prior.extraction_id
+            or current.prior_extraction_sha256 != prior_sha256
+        ):
+            raise ResolverValidationError(
+                "Executor predecessor extraction lineage does not match exact bytes."
+            )
+        current = prior
+    return rounds
+
+
 def _run_resolve(args: argparse.Namespace) -> int:
     checker_results, check_sha256 = load_checker_results(args.check)
     extraction_path = args.extractions or Path(
@@ -1579,6 +1646,9 @@ def _run_resolve(args: argparse.Namespace) -> int:
     search_results, search_sha256 = load_search_results(search_path)
     plan_path = args.plan or Path(checker_results.plan_reference)
     plan, plan_sha256 = load_research_plan(plan_path)
+    completed_gap_rounds = _consecutive_gap_repair_rounds(
+        extraction_results
+    )
     iteration = args.iteration or checker_results.iteration
     result_directory = args.output_dir or args.check.parent
     expected_path = result_directory / resolver_results_filename_for(
@@ -1612,6 +1682,8 @@ def _run_resolve(args: argparse.Namespace) -> int:
                 max_source_actions=args.max_source_actions,
                 max_search_tasks=args.max_search_tasks,
                 max_queries_per_item=args.max_queries_per_item,
+                completed_gap_rounds=completed_gap_rounds,
+                allow_round_limit=args.allow_round_limit,
             )
         except ResolverProviderError as exc:
             requested_model = (

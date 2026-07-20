@@ -312,7 +312,9 @@ class ResolverAgentTests(TestCase):
         follow_up = self.checker_results.follow_up_tasks[0].model_copy(
             update={
                 "candidate_source_ids": [],
-                "retry_source_ids": [],
+                "retry_source_ids": [
+                    self.search_results.sources[0].source_id
+                ],
                 "reextract_source_ids": [
                     self.search_results.sources[0].source_id
                 ],
@@ -322,6 +324,7 @@ class ResolverAgentTests(TestCase):
             update={
                 "retrieval_status": DocumentRetrievalStatus.NOT_ACCESSIBLE,
                 "parse_status": DocumentParseStatus.NOT_ATTEMPTED,
+                "error_code": "anti_bot_page",
             }
         )
         extraction = self.extraction_results.model_copy(
@@ -342,6 +345,12 @@ class ResolverAgentTests(TestCase):
         self.assertEqual(
             pools[follow_up.follow_up_id][
                 ResolverAction.REEXTRACT_EXISTING
+            ],
+            [],
+        )
+        self.assertEqual(
+            pools[follow_up.follow_up_id][
+                ResolverAction.RETRY_RETRIEVAL
             ],
             [],
         )
@@ -553,8 +562,26 @@ class ResolverAgentTests(TestCase):
                 "task_results": [changed_task],
             }
         )
+        transient_document = self.extraction_results.documents[0].model_copy(
+            update={
+                "retrieval_status": DocumentRetrievalStatus.FAILED,
+                "parse_status": DocumentParseStatus.NOT_ATTEMPTED,
+                "error_code": "tls_error",
+            }
+        )
+        transient_extraction = self.extraction_results.model_copy(
+            update={
+                "documents": [
+                    transient_document,
+                    *self.extraction_results.documents[1:],
+                ]
+            }
+        )
 
-        results = self._run(checker_results=changed_checker)
+        results = self._run(
+            checker_results=changed_checker,
+            extraction_results=transient_extraction,
+        )
 
         self.assertEqual(
             results.work_items[0].selected_action,
@@ -688,6 +715,30 @@ class ResolverAgentTests(TestCase):
             "Checker artifact SHA-256",
         ):
             self._run(check_sha256="invalid")
+
+    def test_gap_repair_round_limit_blocks_provider_before_call(self):
+        llm = FixtureResolverLLM()
+
+        with self.assertRaisesRegex(
+            ResolverValidationError,
+            "gap-repair limit reached",
+        ):
+            self._run(
+                llm,
+                completed_gap_rounds=self.plan.stop_conditions.max_rounds,
+            )
+
+        self.assertEqual(llm.calls, [])
+
+    def test_gap_repair_round_limit_requires_explicit_override(self):
+        results = self._run(
+            completed_gap_rounds=self.plan.stop_conditions.max_rounds,
+            allow_round_limit=True,
+        )
+
+        self.assertTrue(
+            any("round-limit override" in warning for warning in results.warnings)
+        )
 
     def test_free_cli_writes_free_resolution_summary(self):
         with TemporaryDirectory() as temporary_directory:

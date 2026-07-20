@@ -337,7 +337,7 @@ call. JSON publication is atomic and immutable. If a paid result cannot be
 published after provider calls, every known usage entry and every unknown-usage
 attempt is written best-effort to the `attempts/` ledger.
 
-## Run Checker: deterministic gate, then paid semantic review
+## Run Checker: paid semantic review with optional local smoke test
 
 Point both Checker variants at the exact same paid Extractor artifact. The
 Checker loads the referenced Planner and Searcher artifacts automatically and
@@ -345,7 +345,8 @@ validates their IDs, exact resolved references and SHA-256 lineage. Optional
 `--plan` and `--sources` let automation supply those same explicit input paths;
 they do not permit artifact relocation or bypass lineage validation.
 
-Run the free deterministic Checker first:
+For normal research runs, execute the paid Checker directly. Use the free
+deterministic Checker only as an optional smoke/regression test:
 
 ```bash
 .venv/bin/python -m datacollector check \
@@ -364,7 +365,7 @@ Semantic verdicts remain explicitly `not_reviewed`, so the free result cannot
 pass the complete quality gate and normally recommends `run_paid_checker`. It
 makes no OpenAI call and has zero provider token cost.
 
-Then run the paid Checker against the same Extractor path:
+Run the paid Checker against the Extractor path:
 
 ```bash
 .venv/bin/python -m datacollector check \
@@ -387,6 +388,10 @@ local agent remains authoritative for lineage, scope, exact grounding, source
 classification, completeness, deductions and the final score/pass gate; the
 model supplies bounded semantic-fit, support, contradiction and safety
 judgments.
+
+Only accepted, semantically eligible claims may create a scored contradiction.
+A rejected claim (for example, a legislative proposal rejected as evidence of
+current law) cannot conflict with an accepted current-law claim or deduct score.
 
 Checker contract `1.2.0` keeps semantic acceptance separate from source
 corroboration. A directly supported claim can therefore be `accepted` while its
@@ -430,13 +435,14 @@ be used, known usage (or an explicit unknown-token attempt) is retained in the
 Checker artifact. If that final artifact cannot be published, the same attempt
 facts are written best-effort to the run's `attempts/` ledger.
 
-## Run Resolver: deterministic routing, then paid prioritization
+## Run Resolver: paid prioritization with deterministic local guards
 
 Point both Resolver variants at the same successful paid Checker artifact. A
 free Checker is intentionally rejected because its claims remain semantically
 `not_reviewed`, so it cannot provide reliable repair targets.
 
-Run deterministic Resolver first:
+For normal research runs, execute the paid Resolver directly. The deterministic
+variant remains available as an optional strategy smoke test:
 
 ```bash
 .venv/bin/python -m datacollector resolve \
@@ -464,7 +470,7 @@ prefer `search_new_source` after any genuinely unevaluated known source. If a
 paid strategy is rejected locally, the fallback artifact records the specific
 validation code and reason instead of hiding it behind a generic failure.
 
-Then run the optional paid prioritization against the exact same Checker input:
+Run paid prioritization against the Checker input:
 
 ```bash
 .venv/bin/python -m datacollector resolve \
@@ -493,12 +499,22 @@ immutable merge path to add the new task, source, document, claim and usage stat
 to the exact predecessor artifacts.
 
 `retry_retrieval` is a plan for the next Extractor round, not proof of a completed
-download. Likewise, `extract_known_source` means the source is already known to
+download. Terminal `anti_bot_page` and `access_denied` results are not retry
+candidates; Resolver must search for an alternative public route instead.
+Likewise, `extract_known_source` means the source is already known to
 Searcher but has not yet been processed in the selected extraction scope. A new
 Checker pass is required after executing these batches; unresolved data cannot
 advance to Normalizer.
 
-## Run Executor: local comparison, then paid execution
+Before any paid Resolver request, the CLI walks the exact immutable Executor
+predecessor chain and counts consecutive rounds created from `resolve_gaps`
+checks. Once that count reaches the Planner's `max_rounds`, Resolver stops
+locally and routes the scope to human review instead of starting another costly
+loop. `--allow-round-limit` is an explicit emergency override for a deliberately
+approved extra round; the resulting artifact records that override in its
+warnings.
+
+## Run Executor: paid execution with optional local smoke test
 
 Executor consumes one exact Resolver artifact. It uses Resolver queries for
 `search_new_source`, never uses a stale cache entry for `retry_retrieval`, and
@@ -510,7 +526,8 @@ integrity checks still apply. When a paid result has the same raw-content hash,
 Executor preserves checked predecessor claims and merges newly grounded claims
 additively instead of silently replacing the evidence set.
 
-Run the free comparison first against the paid Resolver strategy:
+For normal research runs, execute paid mode directly. Use the free comparison
+only for smoke tests, retrieval diagnostics or regression work:
 
 ```bash
 .venv/bin/python -m datacollector execute \
@@ -550,6 +567,10 @@ batch outcomes, retry/cache decisions, preserved predecessor states, pending
 human work, child-agent token usage, and exact hashes for every input and output.
 Cache warnings distinguish a same-iteration free retrieval artifact from the
 exact predecessor artifact reused by Executor.
+Rediscovered URLs whose predecessor documents already cover the same task
+mappings are merged into Searcher provenance but are not sent through another
+paid Extractor call. Only a genuinely new source, a newly added task mapping or
+an explicit Resolver source action can schedule extraction.
 
 If an older Executor artifact was created before additive same-content merging,
 repair it locally without repeating paid calls:
