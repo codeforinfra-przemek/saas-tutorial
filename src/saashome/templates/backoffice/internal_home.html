@@ -1,2 +1,22 @@
 {% extends "backoffice/base_internal.html" %}
-{% block internal_content %}<header><p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Owner backoffice</p><h2 class="mt-2 text-3xl font-black text-slate-950">Stan biznesu platformy</h2><p class="mt-2 text-sm leading-6 text-slate-600">Wewnętrzny widok przychodów, subskrypcji i pracy zespołu sprzedażowego.</p></header><div class="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{% include "components/metric_card.html" with label="MRR" value=revenue.mrr|floatformat:2|add:" zł" only %}{% include "components/metric_card.html" with label="Aktywne subskrypcje" value=revenue.active_subscriptions_count only %}{% include "components/metric_card.html" with label="Otwarte szanse" value=sales.open_opportunities_count only %}{% include "components/metric_card.html" with label="Ważone MRR pipeline" value=sales.weighted_pipeline_mrr|floatformat:2|add:" zł" only %}</div><div class="mt-6 flex flex-wrap gap-3"><a href="{% url 'backoffice:revenue_dashboard' %}" class="rounded-lg bg-slate-950 px-4 py-3 text-sm font-extrabold text-white hover:bg-slate-800">Otwórz przychody</a><a href="{% url 'backoffice:sales_dashboard' %}" class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-100">Otwórz sprzedaż</a></div>{% endblock %}
+{% load franchise_formatters %}
+
+{% block internal_content %}
+<header>
+    <p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Owner backoffice</p>
+    <h2 class="mt-2 text-3xl font-black text-slate-950">Stan biznesu platformy</h2>
+    <p class="mt-2 text-sm leading-6 text-slate-600">Wewnętrzny widok przychodów, subskrypcji i pracy zespołu sprzedażowego.</p>
+</header>
+
+<div class="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    {% include "components/metric_card.html" with label="MRR" value=revenue.mrr|grouped_number:2|add:" zł" tooltip="Monthly Recurring Revenue: miesięczny, powtarzalny przychód z aktywnych subskrypcji." only %}
+    {% include "components/metric_card.html" with label="Aktywne subskrypcje" value=revenue.active_subscriptions_count only %}
+    {% include "components/metric_card.html" with label="Otwarte szanse" value=sales.open_opportunities_count tooltip="Szanse sprzedażowe, które nie zostały jeszcze wygrane ani przegrane." only %}
+    {% include "components/metric_card.html" with label="Ważone MRR pipeline" value=sales.weighted_pipeline_mrr|grouped_number:2|add:" zł" tooltip="Prognozowany MRR z pipeline, pomnożony przez prawdopodobieństwo wygrania każdej szansy." only %}
+</div>
+
+<div class="mt-6 flex flex-wrap gap-3">
+    <a href="{% url 'backoffice:revenue_dashboard' %}" class="rounded-lg bg-slate-950 px-4 py-3 text-sm font-extrabold text-white hover:bg-slate-800">Otwórz przychody</a>
+    <a href="{% url 'backoffice:sales_dashboard' %}" class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-100">Otwórz sprzedaż</a>
+</div>
+{% endblock %}

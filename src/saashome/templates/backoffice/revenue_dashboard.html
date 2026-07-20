@@ -1,4 +1,5 @@
 {% extends "backoffice/base_internal.html" %}
+{% load franchise_formatters %}
 
 {% block extra_css %}
 <style>
@@ -13,12 +14,12 @@
 </header>
 
 <div class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-    {% include "components/metric_card.html" with label="MRR" value=overview.mrr|floatformat:2|add:" zł" tooltip="Monthly Recurring Revenue: miesięczny, powtarzalny przychód z aktywnych subskrypcji." only %}
-    {% include "components/metric_card.html" with label="ARR" value=overview.arr|floatformat:2|add:" zł" tooltip="Annual Recurring Revenue: MRR pomnożony przez 12. To roczna wartość powtarzalnego przychodu." only %}
+    {% include "components/metric_card.html" with label="MRR" value=overview.mrr|grouped_number:2|add:" zł" tooltip="Monthly Recurring Revenue: miesięczny, powtarzalny przychód z aktywnych subskrypcji." only %}
+    {% include "components/metric_card.html" with label="ARR" value=overview.arr|grouped_number:2|add:" zł" tooltip="Annual Recurring Revenue: MRR pomnożony przez 12. To roczna wartość powtarzalnego przychodu." only %}
     {% include "components/metric_card.html" with label="Aktywne subskrypcje" value=overview.active_subscriptions_count helper=overview.monthly_subscriptions_count|add:" monthly" tooltip="Liczba subskrypcji aktywnych lub trial, których okres jeszcze nie wygasł." only %}
-    {% include "components/metric_card.html" with label="Nowy MRR w miesiącu" value=overview.new_mrr_this_month|floatformat:2|add:" zł" tooltip="Dodatni MRR dodany w tym miesiącu przez nowe subskrypcje, reaktywacje i upgrade planu." only %}
-    {% include "components/metric_card.html" with label="Churned MRR" value=overview.churned_mrr_this_month|floatformat:2|add:" zł" tooltip="Utracony miesięczny przychód z anulowań, churnu lub downgrade planu w bieżącym miesiącu." only %}
-    {% include "components/metric_card.html" with label="Net MRR movement" value=overview.net_mrr_movement_this_month|floatformat:2|add:" zł" tooltip="Bilans zmian MRR w miesiącu: nowy MRR, upgrade, downgrade, anulowania i churn razem." only %}
+    {% include "components/metric_card.html" with label="Nowy MRR w miesiącu" value=overview.new_mrr_this_month|grouped_number:2|add:" zł" tooltip="Dodatni MRR dodany w tym miesiącu przez nowe subskrypcje, reaktywacje i upgrade planu." only %}
+    {% include "components/metric_card.html" with label="Churned MRR" value=overview.churned_mrr_this_month|grouped_number:2|add:" zł" tooltip="Utracony miesięczny przychód z anulowań, churnu lub downgrade planu w bieżącym miesiącu." only %}
+    {% include "components/metric_card.html" with label="Net MRR movement" value=overview.net_mrr_movement_this_month|grouped_number:2|add:" zł" tooltip="Bilans zmian MRR w miesiącu: nowy MRR, upgrade, downgrade, anulowania i churn razem." only %}
 </div>
 
 <section class="mt-7 rounded-lg border border-slate-200 bg-white p-5">

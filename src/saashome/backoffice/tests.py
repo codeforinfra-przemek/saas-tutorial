@@ -91,6 +91,10 @@ class BackofficeTests(TestCase):
         self.assertGreaterEqual(initial_counts["activities"], 10)
         self.assertTrue(RevenueEvent.objects.filter(event_type=RevenueEvent.EVENT_CHURN).exists())
 
+        self.client.force_login(self.staff)
+        for url_name in ("backoffice:internal_home", "backoffice:revenue_dashboard", "backoffice:sales_dashboard"):
+            self.assertEqual(self.client.get(reverse(url_name)).status_code, 200)
+
         call_command("seed_backoffice_demo")
         self.assertEqual(initial_counts["events"], RevenueEvent.objects.count())
         self.assertEqual(initial_counts["accounts"], SalesAccount.objects.count())
