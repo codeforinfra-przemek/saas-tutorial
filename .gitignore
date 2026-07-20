@@ -44,6 +44,7 @@ local-cdn/
 media/
 src/saashome/mediafiles/*
 !src/saashome/mediafiles/.gitkeep
+src/saashome/private_research_uploads/
 
 # Logs
 *.log

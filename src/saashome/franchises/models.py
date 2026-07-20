@@ -1,7 +1,39 @@
+import uuid
+from pathlib import Path
+
 from django.conf import settings
+from django.core.files.storage import FileSystemStorage
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.deconstruct import deconstructible
+
+
+@deconstructible
+class PrivateResearchStorage(FileSystemStorage):
+    """A migration-safe storage rooted outside publicly served MEDIA_ROOT."""
+
+    def __init__(self):
+        super().__init__(
+            location=getattr(
+                settings,
+                "PRIVATE_RESEARCH_UPLOAD_ROOT",
+                settings.BASE_DIR / "private_research_uploads",
+            ),
+            base_url=None,
+        )
+
+
+private_research_storage = PrivateResearchStorage()
+
+
+def research_document_upload_to(instance, filename):
+    """Keep private uploads outside public media and discard unsafe filenames."""
+
+    suffix = Path(filename).suffix.lower()[:12]
+    return f"{instance.workspace.workspace_id}/{uuid.uuid4().hex}{suffix}"
 
 
 FRANCHISE_VENDOR_EDITABLE_FIELDS = (
@@ -754,3 +786,272 @@ class FranchiseResearchValueClaim(models.Model):
                 name="unique_research_value_claim",
             )
         ]
+
+
+class FranchiseResearchWorkspace(models.Model):
+    """Mutable editorial staging area in front of immutable research imports."""
+
+    STATUS_REVIEW = "review"
+    STATUS_READY = "ready"
+    STATUS_APPROVED_WITH_GAPS = "approved_with_gaps"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = (
+        (STATUS_REVIEW, "W trakcie weryfikacji"),
+        (STATUS_READY, "Gotowe do zatwierdzenia"),
+        (STATUS_APPROVED_WITH_GAPS, "Zatwierdzone z udokumentowanymi brakami"),
+        (STATUS_REJECTED, "Odrzucone"),
+    )
+
+    workspace_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    franchise = models.ForeignKey(
+        Franchise,
+        on_delete=models.CASCADE,
+        related_name="research_workspaces",
+    )
+    normalization_id = models.UUIDField(unique=True)
+    plan_run_id = models.UUIDField()
+    target_country = models.CharField(max_length=2)
+    depth = models.CharField(max_length=30)
+    profile_id = models.CharField(max_length=80, blank=True)
+    iteration = models.PositiveIntegerField()
+    normalized_reference = models.TextField()
+    normalized_sha256 = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=30,
+        choices=STATUS_CHOICES,
+        default=STATUS_REVIEW,
+    )
+    quality_score = models.PositiveSmallIntegerField(default=0)
+    quality_threshold = models.PositiveSmallIntegerField(default=80)
+    checker_passed = models.BooleanField(default=False)
+    scope_complete = models.BooleanField(default=False)
+    planned_tasks = models.PositiveIntegerField(default=0)
+    evaluated_tasks = models.PositiveIntegerField(default=0)
+    planned_fields = models.PositiveIntegerField(default=0)
+    source_count = models.PositiveIntegerField(default=0)
+    claim_count = models.PositiveIntegerField(default=0)
+    normalized_values_count = models.PositiveIntegerField(default=0)
+    stage_summary = models.JSONField(default=list)
+    cost_summary = models.JSONField(default=dict)
+    warnings = models.JSONField(default=list)
+    reviewer_notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_research_workspaces",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_research_workspaces",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["franchise", "status"]),
+            models.Index(fields=["status", "updated_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.franchise} workbench {self.normalization_id}"
+
+    @property
+    def review_progress_percent(self):
+        total = self.review_fields.count()
+        if not total:
+            return 0
+        reviewed = self.review_fields.exclude(
+            decision=FranchiseResearchReviewField.DECISION_PENDING
+        ).count()
+        return round(reviewed * 100 / total)
+
+
+class FranchiseResearchReviewField(models.Model):
+    DECISION_PENDING = "pending"
+    DECISION_ACCEPTED = "accepted"
+    DECISION_ACCEPTED_EDITED = "accepted_edited"
+    DECISION_REJECTED = "rejected"
+    DECISION_DOCUMENTED_GAP = "documented_gap"
+    DECISION_CHOICES = (
+        (DECISION_PENDING, "Do sprawdzenia"),
+        (DECISION_ACCEPTED, "Zaakceptowane"),
+        (DECISION_ACCEPTED_EDITED, "Poprawione i zaakceptowane"),
+        (DECISION_REJECTED, "Odrzucone"),
+        (DECISION_DOCUMENTED_GAP, "Sprawdzono — brak danych"),
+    )
+
+    workspace = models.ForeignKey(
+        FranchiseResearchWorkspace,
+        on_delete=models.CASCADE,
+        related_name="review_fields",
+    )
+    normalized_field_id = models.CharField(max_length=100, blank=True)
+    task_id = models.CharField(max_length=200)
+    task_title = models.CharField(max_length=500)
+    target_field = models.CharField(max_length=500)
+    requirement = models.CharField(max_length=30, blank=True)
+    priority = models.CharField(max_length=30, blank=True)
+    pipeline_status = models.CharField(max_length=40)
+    checker_status = models.CharField(max_length=40, blank=True)
+    proposed_values = models.JSONField(default=list)
+    evidence = models.JSONField(default=list)
+    source_ids = models.JSONField(default=list)
+    notes = models.JSONField(default=list)
+    decision = models.CharField(
+        max_length=30,
+        choices=DECISION_CHOICES,
+        default=DECISION_PENDING,
+    )
+    reviewer_value = models.TextField(blank=True)
+    reviewer_note = models.TextField(blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="research_field_decisions",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "target_field"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "task_id", "target_field"],
+                name="unique_workbench_field_per_task",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["workspace", "decision"]),
+            models.Index(fields=["workspace", "pipeline_status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.workspace.franchise}: {self.target_field}"
+
+    @property
+    def proposed_display(self):
+        return " | ".join(
+            str(item.get("display") or item.get("canonical_text") or "")
+            for item in self.proposed_values
+        ).strip(" |")
+
+    @property
+    def effective_value(self):
+        return self.reviewer_value.strip() or self.proposed_display
+
+
+class FranchiseResearchDocument(models.Model):
+    TYPE_CONTRACT = "contract"
+    TYPE_DISCLOSURE = "disclosure"
+    TYPE_FINANCIAL = "financial"
+    TYPE_LEGAL = "legal"
+    TYPE_PRESENTATION = "presentation"
+    TYPE_OTHER = "other"
+    TYPE_CHOICES = (
+        (TYPE_CONTRACT, "Umowa / wzór umowy"),
+        (TYPE_DISCLOSURE, "Pakiet informacyjny / oferta"),
+        (TYPE_FINANCIAL, "Dane finansowe"),
+        (TYPE_LEGAL, "Dokument prawny / rejestrowy"),
+        (TYPE_PRESENTATION, "Prezentacja / materiały sieci"),
+        (TYPE_OTHER, "Inny dokument"),
+    )
+    ACCESS_INTERNAL = "internal"
+    ACCESS_RESTRICTED = "restricted"
+    ACCESS_PUBLIC_SOURCE = "public_source"
+    ACCESS_CHOICES = (
+        (ACCESS_INTERNAL, "Wewnętrzny"),
+        (ACCESS_RESTRICTED, "Poufny — ograniczony dostęp"),
+        (ACCESS_PUBLIC_SOURCE, "Materiał z publicznego źródła"),
+    )
+    STATUS_PENDING = "pending"
+    STATUS_READY = "ready"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Czeka na analizę"),
+        (STATUS_READY, "Uwzględniony ręcznie"),
+    )
+
+    workspace = models.ForeignKey(
+        FranchiseResearchWorkspace,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+    file = models.FileField(
+        upload_to=research_document_upload_to,
+        storage=private_research_storage,
+        max_length=500,
+    )
+    original_name = models.CharField(max_length=255)
+    document_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
+    access_level = models.CharField(
+        max_length=30,
+        choices=ACCESS_CHOICES,
+        default=ACCESS_INTERNAL,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    content_type = models.CharField(max_length=120, blank=True)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    sha256 = models.CharField(max_length=64)
+    notes = models.TextField(blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="research_documents",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "sha256"],
+                name="unique_workbench_document_content",
+            )
+        ]
+
+
+class FranchiseResearchEvent(models.Model):
+    workspace = models.ForeignKey(
+        FranchiseResearchWorkspace,
+        on_delete=models.CASCADE,
+        related_name="events",
+    )
+    event_type = models.CharField(max_length=50)
+    message = models.CharField(max_length=500)
+    metadata = models.JSONField(default=dict)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="research_events",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["workspace", "created_at"])]
+
+
+@receiver(post_delete, sender=FranchiseResearchDocument)
+def delete_private_research_file(sender, instance, **kwargs):
+    """Do not leave confidential uploads behind after their record is deleted."""
+
+    if instance.file:
+        instance.file.delete(save=False)

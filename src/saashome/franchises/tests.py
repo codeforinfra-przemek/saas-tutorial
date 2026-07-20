@@ -6,12 +6,15 @@ from django.test import TestCase
 from django.urls import reverse
 
 from .research_import import _resolved, import_franchise_research
+from .research_workbench import create_research_workspace
 
 from datacollector.agents.reviewer import HumanReviewer
 from datacollector.schemas import HumanReviewDecision, NormalizerMode
 from datacollector.tests import test_normalizer as normalizer_fixtures
 
 from .models import (
+    Franchise,
+    FranchiseCategory,
     FranchiseResearchArtifact,
     FranchiseResearchCitation,
     FranchiseResearchClaim,
@@ -20,6 +23,7 @@ from .models import (
     FranchiseResearchSource,
     FranchiseResearchTask,
     FranchiseResearchValue,
+    FranchiseResearchWorkspace,
 )
 
 
@@ -151,3 +155,51 @@ class FranchiseResearchImportTests(TestCase):
         self.assertContains(response, "brand.name")
         self.assertContains(response, "Rejestr źródeł")
         self.assertContains(response, self.extraction.citations[0].quote)
+
+    def test_workbench_materializes_full_plan_and_is_idempotent(self):
+        category, _ = FranchiseCategory.objects.get_or_create(
+            slug="workbench-test",
+            defaults={"name": "Workbench test"},
+        )
+        Franchise.objects.create(
+            name=self.normalized.brand_name,
+            slug="workbench-brand",
+            category=category,
+            short_description="Workbench fixture",
+        )
+        loaded = (
+            self.normalized,
+            "e" * 64,
+            self.plan,
+            self.search,
+            self.extraction,
+            self.checker,
+        )
+        with patch(
+            "franchises.research_workbench._load_lineage",
+            return_value=loaded,
+        ):
+            workspace, created = create_research_workspace(
+                self.temporary_directory.name + "/normalized.json",
+                franchise_slug="workbench-brand",
+            )
+            repeated, repeated_created = create_research_workspace(
+                self.temporary_directory.name + "/normalized.json",
+                franchise_slug="workbench-brand",
+            )
+
+        expected_fields = sum(
+            len(dict.fromkeys(task.fields_to_collect or task.target_fields))
+            for task in self.plan.tasks
+        )
+        self.assertTrue(created)
+        self.assertFalse(repeated_created)
+        self.assertEqual(workspace.pk, repeated.pk)
+        self.assertEqual(FranchiseResearchWorkspace.objects.count(), 1)
+        self.assertEqual(workspace.review_fields.count(), expected_fields)
+        self.assertEqual(
+            workspace.review_fields.exclude(proposed_values=[]).count(),
+            sum(bool(field.normalized_value_ids) for field in self.normalized.field_results),
+        )
+        self.assertEqual(workspace.stage_summary[-2]["key"], "review")
+        self.assertIn("estimated_cost_usd", workspace.cost_summary)

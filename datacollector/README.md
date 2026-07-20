@@ -903,6 +903,33 @@ Normalizer output.
 
 ## Human Review report and decision
 
+### Human Research Workbench (recommended editorial flow)
+
+Apply Django migrations and materialize a mutable, staff-only workspace from the
+exact Normalizer lineage:
+
+```bash
+.venv/bin/python src/saashome/manage.py migrate
+.venv/bin/python src/saashome/manage.py open_research_workbench \
+  --normalized datacollector/data/runs/zabka/<run>/normalized-r014.json \
+  --franchise-slug zabka
+```
+
+The command prints a URL under `/internal/research/<workspace-id>/`. The
+Workbench shows all planned fields (including unevaluated ones), evidence,
+pipeline stages, token/cost totals and warnings. Staff can accept or reject a
+proposal with one icon, fill a missing value and accept it in one submit, mark a
+verified absence, or undo a decision. Every change records its actor and time.
+
+Contracts and other private documents are uploaded to a storage root outside
+public `MEDIA_ROOT` and can only be downloaded through a staff-protected view.
+They remain queued for a later extraction run; uploading a document does not
+silently turn it into evidence or publish it. A Workbench approval closes the
+editorial staging step but intentionally does not bypass the immutable signed
+review artifact and Importer described below.
+
+The command is idempotent by `normalization_id` and exact Normalizer bytes.
+
 Create a portable HTML report without making another model or network call:
 
 ```bash

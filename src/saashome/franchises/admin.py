@@ -10,9 +10,13 @@ from .models import (
     FranchiseResearchClaim,
     FranchiseResearchField,
     FranchiseResearchImport,
+    FranchiseResearchDocument,
+    FranchiseResearchEvent,
+    FranchiseResearchReviewField,
     FranchiseResearchSource,
     FranchiseResearchTask,
     FranchiseResearchValue,
+    FranchiseResearchWorkspace,
     FranchiseUpdateRequest,
 )
 
@@ -221,6 +225,35 @@ class FranchiseResearchImportAdmin(admin.ModelAdmin):
     )
 
 
+@admin.register(FranchiseResearchWorkspace)
+class FranchiseResearchWorkspaceAdmin(admin.ModelAdmin):
+    list_display = (
+        "franchise",
+        "profile_id",
+        "status",
+        "quality_score",
+        "updated_at",
+    )
+    list_filter = ("status", "target_country", "depth")
+    search_fields = ("franchise__name", "normalization_id", "profile_id")
+    readonly_fields = ("workspace_id", "created_at", "updated_at")
+
+
+@admin.register(FranchiseResearchDocument)
+class FranchiseResearchDocumentAdmin(admin.ModelAdmin):
+    list_display = (
+        "original_name",
+        "workspace",
+        "document_type",
+        "access_level",
+        "status",
+        "created_at",
+    )
+    list_filter = ("document_type", "access_level", "status")
+    search_fields = ("original_name", "workspace__franchise__name", "sha256")
+    readonly_fields = ("sha256", "size_bytes", "uploaded_by", "created_at")
+
+
 for research_model in (
     FranchiseResearchArtifact,
     FranchiseResearchTask,
@@ -229,5 +262,7 @@ for research_model in (
     FranchiseResearchClaim,
     FranchiseResearchCitation,
     FranchiseResearchValue,
+    FranchiseResearchReviewField,
+    FranchiseResearchEvent,
 ):
     admin.site.register(research_model)

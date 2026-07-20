@@ -3,7 +3,15 @@ from pathlib import Path
 from django import forms
 from django.core.validators import MaxLengthValidator
 
-from .models import Franchise, FranchiseAsset, FranchiseCategory, FranchiseLocation, FranchiseUpdateRequest
+from .models import (
+    Franchise,
+    FranchiseAsset,
+    FranchiseCategory,
+    FranchiseLocation,
+    FranchiseResearchDocument,
+    FranchiseResearchReviewField,
+    FranchiseUpdateRequest,
+)
 
 
 FIELD_CLASSES = (
@@ -344,3 +352,101 @@ class FranchiseAssetForm(forms.ModelForm):
         if uploaded_file.size > max_size:
             raise forms.ValidationError("Plik jest za duży.")
         return uploaded_file
+
+
+class ResearchReviewFieldForm(forms.ModelForm):
+    class Meta:
+        model = FranchiseResearchReviewField
+        fields = ("reviewer_value", "reviewer_note")
+        labels = {
+            "reviewer_value": "Wartość po korekcie",
+            "reviewer_note": "Notatka redakcyjna",
+        }
+        widgets = {
+            "reviewer_value": forms.Textarea(attrs={"rows": 3}),
+            "reviewer_note": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["reviewer_value"].widget.attrs.update(
+            {
+                "class": FIELD_CLASSES,
+                "placeholder": "Wpisz poprawną wartość lub uzupełnij brak…",
+            }
+        )
+        self.fields["reviewer_note"].widget.attrs.update(
+            {
+                "class": FIELD_CLASSES,
+                "placeholder": "Opcjonalnie: skąd pochodzi korekta lub co należy sprawdzić",
+            }
+        )
+
+
+class ResearchDocumentUploadForm(forms.ModelForm):
+    ALLOWED_EXTENSIONS = {
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".csv",
+        ".txt",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+    }
+    MAX_SIZE = 30 * 1024 * 1024
+
+    class Meta:
+        model = FranchiseResearchDocument
+        fields = ("file", "document_type", "access_level", "notes")
+        labels = {
+            "file": "Plik",
+            "document_type": "Rodzaj dokumentu",
+            "access_level": "Poziom dostępu",
+            "notes": "Opis dla zespołu",
+        }
+        widgets = {"notes": forms.Textarea(attrs={"rows": 2})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["file"].widget.attrs.update(
+            {
+                "class": (
+                    "block w-full cursor-pointer rounded-lg border border-dashed "
+                    "border-slate-300 bg-slate-50 p-3 text-sm"
+                ),
+                "accept": ".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp",
+            }
+        )
+        for name in ("document_type", "access_level", "notes"):
+            self.fields[name].widget.attrs["class"] = FIELD_CLASSES
+
+    def clean_file(self):
+        uploaded_file = self.cleaned_data["file"]
+        extension = Path(uploaded_file.name).suffix.lower()
+        if extension not in self.ALLOWED_EXTENSIONS:
+            raise forms.ValidationError("Ten format pliku nie jest obsługiwany.")
+        if uploaded_file.size > self.MAX_SIZE:
+            raise forms.ValidationError("Plik jest większy niż 30 MB.")
+        return uploaded_file
+
+
+class ResearchWorkspaceDecisionForm(forms.Form):
+    reviewer_notes = forms.CharField(
+        required=False,
+        label="Podsumowanie decyzji",
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "class": FIELD_CLASSES,
+                "placeholder": "Najważniejsze braki, zastrzeżenia i zalecenia…",
+            }
+        ),
+    )
+    acknowledge_gaps = forms.BooleanField(
+        required=False,
+        label="Rozumiem, że nieuzupełnione pola pozostaną udokumentowanymi brakami.",
+    )
