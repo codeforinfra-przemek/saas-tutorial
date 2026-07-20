@@ -52,6 +52,8 @@ from ..schemas import (
     SourceIndependence,
     SourceType,
     ExtractionResults,
+    FieldAvailability,
+    ProfileReuseScope,
 )
 
 
@@ -464,6 +466,29 @@ class CheckerAgent:
         selected_claim_by_id = {
             claim.claim_id: claim for claim in selected_claims
         }
+        if plan.profile_snapshot is not None:
+            field_policy_by_name: dict[
+                str, tuple[FieldAvailability | None, bool, ProfileReuseScope | None]
+            ] = {
+                field.target_field: (
+                    field.availability,
+                    field.required_for_completion,
+                    question.reuse_scope,
+                )
+                for question in plan.profile_snapshot.questions
+                for field in question.fields
+            }
+        else:
+            critical_field_names = set(plan.critical_fields)
+            field_policy_by_name = {
+                target_field: (
+                    None,
+                    target_field in critical_field_names,
+                    None,
+                )
+                for task in plan.tasks
+                for target_field in task.target_fields
+            }
         citation_source_by_id = {
             citation.citation_id: citation.source_id
             for citation in extraction_results.citations
@@ -792,7 +817,9 @@ class CheckerAgent:
             if task.task_id not in set(extraction_results.selected_task_ids)
         ]
         unevaluated_source_ids = list(extraction_results.unselected_source_ids)
-        scope_complete = not (unevaluated_task_ids or unevaluated_source_ids)
+        scope_complete = not unevaluated_task_ids and (
+            plan.profile_snapshot is not None or not unevaluated_source_ids
+        )
         unevaluated_task_id_set = set(unevaluated_task_ids)
         unevaluated_critical_fields = [
             field
@@ -801,12 +828,18 @@ class CheckerAgent:
             for field in task.target_fields
             if field in set(plan.critical_fields)
         ]
+        if plan.profile_snapshot is not None and unevaluated_source_ids:
+            warnings.append(
+                f"Profile Checker retained {len(unevaluated_source_ids)} known but "
+                "unused source candidate(s) as an evidence backlog; source exhaustiveness "
+                "does not block completion after every profile task is attempted."
+            )
         if not scope_complete:
             warnings.append(
                 "Checker scope is partial: "
                 f"{len(unevaluated_task_ids)} plan task(s) and "
                 f"{len(unevaluated_source_ids)} known Searcher source(s) were not "
-                "evaluated; this artifact cannot pass."
+                "evaluated; remaining planned tasks prevent this artifact from passing."
             )
         inaccessible_count = sum(
             assessment.parse_status
@@ -829,6 +862,7 @@ class CheckerAgent:
                 contradictions,
                 source_by_id,
                 assessment_by_source,
+                field_policy_by_name,
                 paid_success=self.llm is not None and not failed_attempts,
             )
         except Exception as exc:
@@ -939,6 +973,16 @@ class CheckerAgent:
                 brand_name=plan.planner_input.brand_name,
                 target_country=plan.planner_input.target_country,
                 depth=plan.planner_input.depth,
+                profile_id=(
+                    plan.profile_snapshot.profile_id
+                    if plan.profile_snapshot is not None
+                    else None
+                ),
+                profile_sha256=(
+                    plan.profile_snapshot.profile_sha256
+                    if plan.profile_snapshot is not None
+                    else None
+                ),
                 provider_executed=bool(agent_usage or failed_attempts),
                 checker_mode=(
                     CheckerMode.INCREMENTAL if incremental else CheckerMode.FULL
@@ -1498,6 +1542,9 @@ class CheckerAgent:
         contradictions: list[CheckerContradiction],
         source_by_id: dict[str, SearchSource],
         assessment_by_source: dict[str, CheckerSourceAssessment],
+        field_policy_by_name: dict[
+            str, tuple[FieldAvailability | None, bool, ProfileReuseScope | None]
+        ],
         *,
         paid_success: bool,
     ) -> tuple[list[CheckerTaskResult], list[CheckerFollowUpTask]]:
@@ -1538,6 +1585,9 @@ class CheckerAgent:
                         source_ids=[],
                         issue_codes=[],
                         quality_points=Decimal("1"),
+                        availability=field_policy_by_name[target_field][0],
+                        required_for_completion=field_policy_by_name[target_field][1],
+                        reuse_scope=field_policy_by_name[target_field][2],
                         audit_basis=CheckerAgent._quality_audit_basis(
                             plan,
                             target_field,
@@ -1595,6 +1645,9 @@ class CheckerAgent:
             field_results: list[CheckerFieldResult] = []
             task_follow_up_ids: list[str] = []
             for target_field in task.target_fields:
+                availability, required_for_completion, reuse_scope = (
+                    field_policy_by_name[target_field]
+                )
                 extraction_field = extraction_fields[target_field]
                 field_decisions = decisions_by_field[(task.task_id, target_field)]
                 raw_ids = [item.claim_id for item in field_decisions]
@@ -1691,7 +1744,10 @@ class CheckerAgent:
                         [*issues, CheckerIssueCode.PREFERRED_SOURCE_MISSING.value]
                     )
                 key = (task.task_id, target_field)
-                if key in contradiction_fields:
+                if availability == FieldAvailability.NOT_APPLICABLE:
+                    status = CheckerFieldStatus.NOT_APPLICABLE
+                    issues = []
+                elif key in contradiction_fields:
                     status = CheckerFieldStatus.CONFLICTING
                     issues = _deduplicate(
                         [*issues, CheckerIssueCode.CONFLICTING_VALUES.value]
@@ -1747,9 +1803,15 @@ class CheckerAgent:
                     source_ids=source_ids,
                     issue_codes=issues,
                     quality_points=quality_points,
+                    availability=availability,
+                    required_for_completion=required_for_completion,
+                    reuse_scope=reuse_scope,
                 )
                 field_results.append(field_result)
-                if status != CheckerFieldStatus.VERIFIED:
+                if status not in {
+                    CheckerFieldStatus.VERIFIED,
+                    CheckerFieldStatus.NOT_APPLICABLE,
+                }:
                     reason = {
                         CheckerFieldStatus.PARTIAL: (
                             CheckerFollowUpReason.COMPLETE_PARTIAL_FIELD
@@ -1822,6 +1884,39 @@ class CheckerAgent:
                         action = CheckerFollowUpAction.SEMANTIC_REVIEW
                     else:
                         action = CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE
+                    route = CheckerFollowUpRoute.RESOLVER
+                    candidate_source_ids = task_candidate_sources
+                    retry_source_ids = task_retry_sources
+                    reextract_source_ids = task_reextract_sources
+                    suggested_queries = task.search_queries[:5]
+                    if availability in {
+                        FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+                        FieldAvailability.CONFIDENTIAL_DEAL_ROOM,
+                    }:
+                        route = CheckerFollowUpRoute.HUMAN_REVIEW
+                        action = CheckerFollowUpAction.REQUEST_AUTHORIZED_DOCUMENT
+                        candidate_source_ids = []
+                        retry_source_ids = []
+                        reextract_source_ids = []
+                        additional_sources = 0
+                        independent_required = False
+                    elif availability == FieldAvailability.MANUAL_RESEARCH_REQUIRED:
+                        route = CheckerFollowUpRoute.HUMAN_REVIEW
+                        action = CheckerFollowUpAction.MANUAL_RESEARCH
+                        candidate_source_ids = []
+                        retry_source_ids = []
+                        reextract_source_ids = []
+                        additional_sources = 0
+                        independent_required = False
+                    elif availability == FieldAvailability.SYSTEM_DERIVED:
+                        route = CheckerFollowUpRoute.RESOLVER
+                        action = CheckerFollowUpAction.LOCAL_AUDIT
+                        candidate_source_ids = []
+                        retry_source_ids = []
+                        reextract_source_ids = []
+                        suggested_queries = []
+                        additional_sources = 0
+                        independent_required = False
                     if additional_sources:
                         completion = (
                             f"Complete when {target_field!r} is supported by at least "
@@ -1839,6 +1934,21 @@ class CheckerAgent:
                         completion += (
                             ", and the actual current document is fetched and parsed"
                         )
+                    if action == CheckerFollowUpAction.REQUEST_AUTHORIZED_DOCUMENT:
+                        completion = (
+                            f"Complete when an authorized current document supporting "
+                            f"{target_field!r} is uploaded, parsed, and reviewed"
+                        )
+                    elif action == CheckerFollowUpAction.MANUAL_RESEARCH:
+                        completion = (
+                            f"Complete when a researcher records grounded manual evidence "
+                            f"for {target_field!r}"
+                        )
+                    elif action == CheckerFollowUpAction.LOCAL_AUDIT:
+                        completion = (
+                            f"Complete when {target_field!r} is derived deterministically "
+                            "from immutable local artifacts"
+                        )
                     completion += "."
                     follow_ups.append(
                         CheckerFollowUpTask(
@@ -1854,21 +1964,35 @@ class CheckerAgent:
                             required_source_types=task.preferred_source_types,
                             related_claim_ids=unresolved_claim_ids,
                             supporting_claim_ids=accepted,
-                            route=CheckerFollowUpRoute.RESOLVER,
+                            route=route,
                             action=action,
-                            candidate_source_ids=task_candidate_sources,
-                            retry_source_ids=task_retry_sources,
-                            reextract_source_ids=task_reextract_sources,
+                            candidate_source_ids=candidate_source_ids,
+                            retry_source_ids=retry_source_ids,
+                            reextract_source_ids=reextract_source_ids,
                             minimum_additional_sources=additional_sources,
                             requires_independent_source=independent_required,
-                            suggested_queries=task.search_queries[:5],
+                            suggested_queries=suggested_queries,
                             completion_criteria=completion,
+                            availability=availability,
+                            required_for_completion=required_for_completion,
+                            reuse_scope=reuse_scope,
                         )
                     )
                     task_follow_up_ids.append(follow_up_id)
             statuses = [item.status for item in field_results]
-            if all(status == CheckerFieldStatus.VERIFIED for status in statuses):
+            if all(
+                status
+                in {
+                    CheckerFieldStatus.VERIFIED,
+                    CheckerFieldStatus.NOT_APPLICABLE,
+                }
+                for status in statuses
+            ) and any(status == CheckerFieldStatus.VERIFIED for status in statuses):
                 task_status = CheckerTaskStatus.VERIFIED
+            elif all(
+                status == CheckerFieldStatus.NOT_APPLICABLE for status in statuses
+            ):
+                task_status = CheckerTaskStatus.NOT_APPLICABLE
             elif any(status == CheckerFieldStatus.CONFLICTING for status in statuses):
                 task_status = CheckerTaskStatus.CONFLICTING
             elif any(status == CheckerFieldStatus.NOT_REVIEWED for status in statuses):
@@ -1956,6 +2080,7 @@ class CheckerAgent:
             (task_by_id[result.task_id], field)
             for result in task_results
             for field in result.field_results
+            if field.status != CheckerFieldStatus.NOT_APPLICABLE
         ]
         selected_weight = sum(
             PRIORITY_ORDER[task.priority] for task, _ in selected_fields
@@ -1972,18 +2097,91 @@ class CheckerAgent:
             ),
             start=Decimal("0"),
         )
-        raw_coverage = _round_score(
-            Decimal(100 * raw_weight) / Decimal(selected_weight)
+        raw_coverage = (
+            _round_score(Decimal(100 * raw_weight) / Decimal(selected_weight))
+            if selected_weight
+            else 100
         )
-        verified_coverage = _round_score(
-            Decimal("100") * weighted_quality / Decimal(selected_weight)
+        verified_coverage = (
+            _round_score(
+                Decimal("100") * weighted_quality / Decimal(selected_weight)
+            )
+            if selected_weight
+            else 100
         )
+        selected_completion_fields = [
+            (task, field)
+            for task, field in selected_fields
+            if field.required_for_completion
+        ]
+        selected_completion_weight = sum(
+            PRIORITY_ORDER[task.priority]
+            for task, _ in selected_completion_fields
+        )
+        completion_weighted_quality = sum(
+            (
+                Decimal(PRIORITY_ORDER[task.priority]) * field.quality_points
+                for task, field in selected_completion_fields
+            ),
+            start=Decimal("0"),
+        )
+        selected_completion_coverage = (
+            _round_score(
+                Decimal("100")
+                * completion_weighted_quality
+                / Decimal(selected_completion_weight)
+            )
+            if selected_completion_weight
+            else 100
+        )
+        not_applicable_fields = {
+            field.target_field
+            for question in (
+                plan.profile_snapshot.questions
+                if plan.profile_snapshot is not None
+                else []
+            )
+            for field in question.fields
+            if field.availability == FieldAvailability.NOT_APPLICABLE
+        }
         all_plan_weight = sum(
-            PRIORITY_ORDER[task.priority] * len(task.target_fields)
+            PRIORITY_ORDER[task.priority]
+            * len(
+                [
+                    field
+                    for field in task.target_fields
+                    if field not in not_applicable_fields
+                ]
+            )
             for task in plan.tasks
         )
-        whole_plan_coverage = _round_score(
-            Decimal("100") * weighted_quality / Decimal(all_plan_weight)
+        whole_plan_coverage = (
+            _round_score(
+                Decimal("100") * weighted_quality / Decimal(all_plan_weight)
+            )
+            if all_plan_weight
+            else 100
+        )
+        completion_field_names = set(plan.critical_fields)
+        all_plan_completion_weight = sum(
+            PRIORITY_ORDER[task.priority]
+            * len(
+                [
+                    field
+                    for field in task.target_fields
+                    if field in completion_field_names
+                ]
+            )
+            for task in plan.tasks
+        )
+        whole_plan_completion_coverage = (
+            _round_score(
+                Decimal("100")
+                * completion_weighted_quality
+                / Decimal(all_plan_completion_weight)
+            )
+            if all_plan_completion_weight
+            else 100
         )
         reviewed_decisions = [
             item for item in decisions if item.verdict != CheckerVerdict.NOT_REVIEWED
@@ -2036,13 +2234,30 @@ class CheckerAgent:
             + blocking_unsafe_count * 10
             + critical_unsafe_count * 10,
         )
-        quality_score = max(0, verified_coverage - deductions)
+        quality_base = (
+            selected_completion_coverage
+            if plan.profile_snapshot is not None
+            else verified_coverage
+        )
+        quality_score = max(0, quality_base - deductions)
         return CheckerScoreBreakdown(
             raw_coverage_score=raw_coverage,
             verified_coverage_score=verified_coverage,
             semantic_acceptance_score=semantic_acceptance,
             accepted_claim_source_quality_score=source_quality,
             whole_plan_coverage_score=whole_plan_coverage,
+            completion_coverage_score=(
+                selected_completion_coverage
+                if plan.profile_snapshot is not None
+                else verified_coverage
+            ),
+            total_coverage_score=verified_coverage,
+            whole_plan_completion_coverage_score=(
+                whole_plan_completion_coverage
+                if plan.profile_snapshot is not None
+                else whole_plan_coverage
+            ),
+            whole_plan_total_coverage_score=whole_plan_coverage,
             deduction_points=deductions,
             quality_score=quality_score,
         )

@@ -29,10 +29,10 @@ SEARCHER_SCHEMA_VERSION = "1.5.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v4"
 EXTRACTOR_SCHEMA_VERSION = "1.2.0"
 EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
-CHECKER_SCHEMA_VERSION = "1.4.0"
+CHECKER_SCHEMA_VERSION = "1.5.0"
 CHECKER_PROMPT_VERSION = "checker-system-v3"
-CHECKER_SCORING_VERSION = "checker-scoring-v2"
-RESOLVER_SCHEMA_VERSION = "1.3.0"
+CHECKER_SCORING_VERSION = "checker-scoring-v3"
+RESOLVER_SCHEMA_VERSION = "1.4.0"
 RESOLVER_PROMPT_VERSION = "resolver-system-v2"
 EXECUTOR_SCHEMA_VERSION = "1.1.0"
 NORMALIZER_SCHEMA_VERSION = "1.2.0"
@@ -2857,6 +2857,7 @@ class CheckerFieldStatus(StrEnum):
     MISSING = "missing"
     NOT_ACCESSIBLE = "not_accessible"
     NOT_REVIEWED = "not_reviewed"
+    NOT_APPLICABLE = "not_applicable"
 
 
 class CheckerTaskStatus(StrEnum):
@@ -2866,6 +2867,7 @@ class CheckerTaskStatus(StrEnum):
     MISSING = "missing"
     NOT_ACCESSIBLE = "not_accessible"
     NOT_REVIEWED = "not_reviewed"
+    NOT_APPLICABLE = "not_applicable"
 
 
 class CheckerFollowUpReason(StrEnum):
@@ -2893,6 +2895,9 @@ class CheckerFollowUpAction(StrEnum):
     CORROBORATE = "corroborate"
     RESOLVE_CONFLICT = "resolve_conflict"
     SEMANTIC_REVIEW = "semantic_review"
+    LOCAL_AUDIT = "local_audit"
+    REQUEST_AUTHORIZED_DOCUMENT = "request_authorized_document"
+    MANUAL_RESEARCH = "manual_research"
 
 
 class CheckerNextAction(StrEnum):
@@ -3030,6 +3035,9 @@ class CheckerFieldResult(ClosedModel):
     issue_codes: list[CheckerIssueCode] = Field(default_factory=list)
     quality_points: Decimal = Field(ge=0, le=1)
     audit_basis: str | None = Field(default=None, min_length=10, max_length=2000)
+    availability: FieldAvailability | None = None
+    required_for_completion: bool | None = None
+    reuse_scope: ProfileReuseScope | None = None
 
 
 class CheckerFollowUpTask(ClosedModel):
@@ -3058,6 +3066,9 @@ class CheckerFollowUpTask(ClosedModel):
         min_length=10,
         max_length=2000,
     )
+    availability: FieldAvailability | None = None
+    required_for_completion: bool | None = None
+    reuse_scope: ProfileReuseScope | None = None
     status: Literal["pending"] = "pending"
 
 
@@ -3072,7 +3083,9 @@ class CheckerTaskResult(ClosedModel):
 
 
 class CheckerScoreBreakdown(ClosedModel):
-    scoring_version: Literal["checker-scoring-v1", "checker-scoring-v2"] = (
+    scoring_version: Literal[
+        "checker-scoring-v1", "checker-scoring-v2", "checker-scoring-v3"
+    ] = (
         CHECKER_SCORING_VERSION
     )
     raw_coverage_score: int = Field(ge=0, le=100)
@@ -3087,8 +3100,43 @@ class CheckerScoreBreakdown(ClosedModel):
         ),
     )
     whole_plan_coverage_score: int = Field(ge=0, le=100)
+    completion_coverage_score: int | None = Field(default=None, ge=0, le=100)
+    total_coverage_score: int | None = Field(default=None, ge=0, le=100)
+    whole_plan_completion_coverage_score: int | None = Field(
+        default=None, ge=0, le=100
+    )
+    whole_plan_total_coverage_score: int | None = Field(
+        default=None, ge=0, le=100
+    )
     deduction_points: int = Field(default=0, ge=0, le=100)
     quality_score: int = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_profile_coverage_scores(self) -> "CheckerScoreBreakdown":
+        profile_scores = (
+            self.completion_coverage_score,
+            self.total_coverage_score,
+            self.whole_plan_completion_coverage_score,
+            self.whole_plan_total_coverage_score,
+        )
+        if self.scoring_version == "checker-scoring-v3":
+            if any(score is None for score in profile_scores):
+                raise ValueError(
+                    "Checker scoring v3 requires completion and total coverage scores."
+                )
+            if (
+                self.total_coverage_score != self.verified_coverage_score
+                or self.whole_plan_total_coverage_score
+                != self.whole_plan_coverage_score
+            ):
+                raise ValueError(
+                    "Checker v3 total coverage aliases must match legacy metrics."
+                )
+        elif any(score is not None for score in profile_scores):
+            raise ValueError(
+                "Checker scoring v1/v2 cannot contain v3 coverage scores."
+            )
+        return self
 
 
 class CheckerLimits(ClosedModel):
@@ -3110,7 +3158,7 @@ class CheckerResults(ClosedModel):
     """Auditable quality decision consumed by Resolver and human review."""
 
     schema_version: Literal[
-        "1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"
+        "1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0"
     ] = CHECKER_SCHEMA_VERSION
     prompt_version: Literal[
         "checker-system-v1", "checker-system-v2", "checker-system-v3"
@@ -3134,6 +3182,10 @@ class CheckerResults(ClosedModel):
     brand_name: str
     target_country: str = Field(pattern=r"^[A-Z]{2}$")
     depth: ResearchDepth
+    profile_id: str | None = Field(
+        default=None, pattern=r"^[A-Z]{2}:L[1-3]:v[1-9][0-9]*$"
+    )
+    profile_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     provider_executed: bool
     checker_mode: CheckerMode = CheckerMode.FULL
     prior_check_id: str | None = None
@@ -3192,6 +3244,20 @@ class CheckerResults(ClosedModel):
                 raise ValueError("prior_check_id must be a valid UUIDv4.") from exc
             if prior_check_uuid.version != 4:
                 raise ValueError("prior_check_id must be a valid UUIDv4.")
+        if (self.profile_id is None) != (self.profile_sha256 is None):
+            raise ValueError(
+                "Checker profile ID and profile SHA-256 must be present together."
+            )
+        if self.profile_id is not None:
+            if self.schema_version != "1.5.0":
+                raise ValueError("Checker profile metadata requires schema 1.5.0.")
+            if not self.profile_id.startswith(f"{self.target_country}:"):
+                raise ValueError("Checker profile country must match target_country.")
+        if self.schema_version == "1.5.0":
+            if self.score_breakdown.scoring_version != "checker-scoring-v3":
+                raise ValueError("Checker schema 1.5 requires scoring v3.")
+        elif self.score_breakdown.scoring_version == "checker-scoring-v3":
+            raise ValueError("Legacy Checker schemas cannot contain scoring v3.")
 
         for values, field_name in (
             (self.selected_task_ids, "selected_task_ids"),
@@ -3209,7 +3275,7 @@ class CheckerResults(ClosedModel):
             if len(values) != len(set(values)):
                 raise ValueError(f"Checker {field_name} values must be unique.")
 
-        if self.schema_version in {"1.3.0", "1.4.0"}:
+        if self.schema_version in {"1.3.0", "1.4.0", "1.5.0"}:
             selected_claim_set = set(self.selected_claim_ids)
             reviewed_claim_set = set(self.reviewed_claim_ids)
             inherited_claim_set = set(self.inherited_claim_ids)
@@ -3281,8 +3347,8 @@ class CheckerResults(ClosedModel):
             raise ValueError("Selected and unevaluated Checker tasks overlap.")
         if set(self.selected_source_ids) & set(self.unevaluated_source_ids):
             raise ValueError("Selected and unevaluated Checker sources overlap.")
-        expected_scope_complete = not (
-            self.unevaluated_task_ids or self.unevaluated_source_ids
+        expected_scope_complete = not self.unevaluated_task_ids and (
+            self.profile_id is not None or not self.unevaluated_source_ids
         )
         if self.scope_complete != expected_scope_complete:
             raise ValueError("Checker scope_complete is inconsistent with its scope.")
@@ -3349,7 +3415,7 @@ class CheckerResults(ClosedModel):
                     or item.source_support != CheckerSourceSupport.NOT_REVIEWED
                 )
                 for item in self.claim_decisions
-                if self.schema_version not in {"1.3.0", "1.4.0"}
+                if self.schema_version not in {"1.3.0", "1.4.0", "1.5.0"}
                 or item.claim_id in reviewed_claim_set
             ):
                 raise ValueError(
@@ -3358,7 +3424,7 @@ class CheckerResults(ClosedModel):
             if (
                 (
                     self.reviewed_claim_ids
-                    if self.schema_version in {"1.3.0", "1.4.0"}
+                    if self.schema_version in {"1.3.0", "1.4.0", "1.5.0"}
                     else self.selected_claim_ids
                 )
                 and not self.failed_attempts
@@ -3367,7 +3433,7 @@ class CheckerResults(ClosedModel):
                 raise ValueError(
                     "Successful paid Checker claims require exactly one usage entry."
                 )
-            if self.schema_version in {"1.3.0", "1.4.0"}:
+            if self.schema_version in {"1.3.0", "1.4.0", "1.5.0"}:
                 expected_scope_tasks = self.reviewed_task_ids
                 expected_scope_sources = self.reviewed_source_ids
                 for usage in self.agent_usage:
@@ -3431,6 +3497,41 @@ class CheckerResults(ClosedModel):
                     raise ValueError("Checker field result has wrong task ID.")
                 key = (field_result.task_id, field_result.target_field)
                 field_result_by_key[key] = field_result
+                if self.schema_version == "1.5.0":
+                    if field_result.required_for_completion is None:
+                        raise ValueError(
+                            "Checker 1.5 fields require an explicit completion flag."
+                        )
+                    if self.profile_id is not None and (
+                        field_result.availability is None
+                        or field_result.reuse_scope is None
+                    ):
+                        raise ValueError(
+                            "Profile Checker fields require availability and reuse scope."
+                        )
+                    if self.profile_id is None and (
+                        field_result.availability is not None
+                        or field_result.reuse_scope is not None
+                    ):
+                        raise ValueError(
+                            "Legacy Checker fields cannot claim profile policy metadata."
+                        )
+                    is_not_applicable = (
+                        field_result.availability == FieldAvailability.NOT_APPLICABLE
+                    )
+                    if is_not_applicable != (
+                        field_result.status == CheckerFieldStatus.NOT_APPLICABLE
+                    ):
+                        raise ValueError(
+                            "Checker not_applicable status must match field availability."
+                        )
+                    if is_not_applicable and (
+                        field_result.required_for_completion
+                        or field_result.quality_points != 0
+                    ):
+                        raise ValueError(
+                            "A not-applicable field cannot be required or scored."
+                        )
                 for values in (
                     field_result.raw_claim_ids,
                     field_result.accepted_claim_ids,
@@ -3506,7 +3607,10 @@ class CheckerResults(ClosedModel):
                     or (
                         expected
                         and field_result.status
-                        != CheckerFieldStatus.NOT_REVIEWED
+                        not in {
+                            CheckerFieldStatus.NOT_REVIEWED,
+                            CheckerFieldStatus.NOT_APPLICABLE,
+                        }
                     )
                 ):
                     raise ValueError(
@@ -3514,8 +3618,19 @@ class CheckerResults(ClosedModel):
                     )
 
             statuses = [item.status for item in task_result.field_results]
-            if all(status == CheckerFieldStatus.VERIFIED for status in statuses):
+            if all(
+                status
+                in {
+                    CheckerFieldStatus.VERIFIED,
+                    CheckerFieldStatus.NOT_APPLICABLE,
+                }
+                for status in statuses
+            ) and any(status == CheckerFieldStatus.VERIFIED for status in statuses):
                 expected_task_status = CheckerTaskStatus.VERIFIED
+            elif all(
+                status == CheckerFieldStatus.NOT_APPLICABLE for status in statuses
+            ):
+                expected_task_status = CheckerTaskStatus.NOT_APPLICABLE
             elif any(status == CheckerFieldStatus.CONFLICTING for status in statuses):
                 expected_task_status = CheckerTaskStatus.CONFLICTING
             elif any(status == CheckerFieldStatus.NOT_REVIEWED for status in statuses):
@@ -3557,6 +3672,50 @@ class CheckerResults(ClosedModel):
             if key in follow_up_by_key:
                 raise ValueError("Checker fields may have at most one follow-up.")
             follow_up_by_key[key] = follow_up
+            field_result = field_result_by_key[key]
+            if self.schema_version == "1.5.0" and (
+                follow_up.availability != field_result.availability
+                or follow_up.required_for_completion
+                != field_result.required_for_completion
+                or follow_up.reuse_scope != field_result.reuse_scope
+            ):
+                raise ValueError(
+                    "Checker follow-up profile policy must match its field result."
+                )
+            if self.schema_version == "1.5.0" and self.profile_id is not None:
+                if follow_up.availability in {
+                    FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+                    FieldAvailability.CONFIDENTIAL_DEAL_ROOM,
+                } and (
+                    follow_up.route != CheckerFollowUpRoute.HUMAN_REVIEW
+                    or follow_up.action
+                    != CheckerFollowUpAction.REQUEST_AUTHORIZED_DOCUMENT
+                ):
+                    raise ValueError(
+                        "Private profile work must request an authorized document."
+                    )
+                if (
+                    follow_up.availability
+                    == FieldAvailability.MANUAL_RESEARCH_REQUIRED
+                    and (
+                        follow_up.route != CheckerFollowUpRoute.HUMAN_REVIEW
+                        or follow_up.action
+                        != CheckerFollowUpAction.MANUAL_RESEARCH
+                    )
+                ):
+                    raise ValueError(
+                        "Manual profile work must route to human research."
+                    )
+                if (
+                    follow_up.availability == FieldAvailability.SYSTEM_DERIVED
+                    and (
+                        follow_up.route != CheckerFollowUpRoute.RESOLVER
+                        or follow_up.action != CheckerFollowUpAction.LOCAL_AUDIT
+                    )
+                ):
+                    raise ValueError(
+                        "System-derived profile work must route to a local audit."
+                    )
             field_claim_ids = set(field_result_by_key[key].raw_claim_ids)
             if self.schema_version == "1.0.0":
                 if (
@@ -3606,7 +3765,11 @@ class CheckerResults(ClosedModel):
         unresolved_field_keys = {
             key
             for key, result in field_result_by_key.items()
-            if result.status != CheckerFieldStatus.VERIFIED
+            if result.status
+            not in {
+                CheckerFieldStatus.VERIFIED,
+                CheckerFieldStatus.NOT_APPLICABLE,
+            }
         }
         if set(follow_up_by_key) != unresolved_field_keys:
             raise ValueError(
@@ -3629,18 +3792,39 @@ class CheckerResults(ClosedModel):
             ):
                 raise ValueError("Checker task follow-up mapping is invalid.")
 
-        expected_critical_missing = [
-            field_result.target_field
-            for task_result in self.task_results
-            if task_result.priority == Priority.CRITICAL
-            for field_result in task_result.field_results
-            if field_result.status != CheckerFieldStatus.VERIFIED
-        ]
+        if self.schema_version == "1.5.0":
+            expected_critical_missing = [
+                field_result.target_field
+                for task_result in self.task_results
+                for field_result in task_result.field_results
+                if field_result.required_for_completion
+                and field_result.status != CheckerFieldStatus.VERIFIED
+            ]
+        else:
+            expected_critical_missing = [
+                field_result.target_field
+                for task_result in self.task_results
+                if task_result.priority == Priority.CRITICAL
+                for field_result in task_result.field_results
+                if field_result.status != CheckerFieldStatus.VERIFIED
+            ]
         if self.critical_missing_fields != expected_critical_missing:
             raise ValueError("Checker critical missing fields are inconsistent.")
 
         if self.quality_score != self.score_breakdown.quality_score:
             raise ValueError("Checker quality score must match score breakdown.")
+        if self.schema_version == "1.5.0":
+            quality_base = (
+                self.score_breakdown.completion_coverage_score
+                if self.profile_id is not None
+                else self.score_breakdown.total_coverage_score
+            )
+            if quality_base is None or self.quality_score != max(
+                0, quality_base - self.score_breakdown.deduction_points
+            ):
+                raise ValueError(
+                    "Checker v3 quality must use its active coverage score and deductions."
+                )
         blocking_unsafe = any(
             item.severity in {CheckerSeverity.HIGH, CheckerSeverity.CRITICAL}
             for item in self.unsafe_items
@@ -3654,7 +3838,7 @@ class CheckerResults(ClosedModel):
             and not blocking_unsafe
         )
         if (
-            self.schema_version in {"1.2.0", "1.3.0", "1.4.0"}
+            self.schema_version in {"1.2.0", "1.3.0", "1.4.0", "1.5.0"}
             and self.selected_scope_ready != expected_selected_scope_ready
         ):
             raise ValueError("Checker selected-scope ready flag is inconsistent.")
@@ -3670,12 +3854,12 @@ class CheckerResults(ClosedModel):
             raise ValueError("Checker usage exceeds max_api_calls.")
         expected_usage_task_ids = (
             self.reviewed_task_ids
-            if self.schema_version in {"1.3.0", "1.4.0"}
+            if self.schema_version in {"1.3.0", "1.4.0", "1.5.0"}
             else self.selected_task_ids
         )
         expected_usage_source_ids = (
             self.reviewed_source_ids
-            if self.schema_version in {"1.3.0", "1.4.0"}
+            if self.schema_version in {"1.3.0", "1.4.0", "1.5.0"}
             else self.selected_source_ids
         )
         if any(
@@ -3708,9 +3892,12 @@ class CheckerResults(ClosedModel):
         elif self.passed:
             expected_action = CheckerNextAction.HUMAN_REVIEW
         elif (
-            self.schema_version in {"1.2.0", "1.3.0", "1.4.0"}
+            self.schema_version in {"1.2.0", "1.3.0", "1.4.0", "1.5.0"}
             and self.selected_scope_ready
-            and (self.unevaluated_task_ids or self.unevaluated_source_ids)
+            and (
+                self.unevaluated_task_ids
+                or (self.profile_id is None and self.unevaluated_source_ids)
+            )
         ):
             expected_action = CheckerNextAction.RESEARCH_NEXT_BATCH
         else:
@@ -3783,6 +3970,9 @@ class ResolverWorkItem(ClosedModel):
     follow_up_id: str = Field(pattern=r"^followup-[a-f0-9]{16}$")
     task_id: str
     target_field: str
+    field_availability: FieldAvailability | None = None
+    required_for_completion: bool | None = None
+    reuse_scope: ProfileReuseScope | None = None
     priority: Priority
     reason: CheckerFollowUpReason
     sequence: int = Field(ge=1, le=500)
@@ -3813,6 +4003,37 @@ class ResolverWorkItem(ClosedModel):
                 raise ValueError("Resolver work-item lists must be unique.")
         if self.selected_action not in self.allowed_actions:
             raise ValueError("Resolver selected action is not locally allowed.")
+        if self.field_availability is None:
+            if self.reuse_scope is not None:
+                raise ValueError(
+                    "Legacy Resolver work cannot declare partial profile policy."
+                )
+        elif self.required_for_completion is None or self.reuse_scope is None:
+            raise ValueError(
+                "Profile-aware Resolver work requires completion and reuse policy."
+            )
+
+        human_only_availabilities = {
+            FieldAvailability.MANUAL_RESEARCH_REQUIRED,
+            FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+            FieldAvailability.CONFIDENTIAL_DEAL_ROOM,
+            FieldAvailability.NOT_APPLICABLE,
+        }
+        if self.field_availability in human_only_availabilities and (
+            self.allowed_actions != [ResolverAction.HUMAN_REVIEW]
+            or self.selected_action != ResolverAction.HUMAN_REVIEW
+        ):
+            raise ValueError(
+                "Manual, private, confidential, and not-applicable profile work "
+                "must remain human-only."
+            )
+        if self.field_availability == FieldAvailability.SYSTEM_DERIVED and (
+            self.allowed_actions != [ResolverAction.LOCAL_AUDIT]
+            or self.selected_action != ResolverAction.LOCAL_AUDIT
+        ):
+            raise ValueError(
+                "System-derived profile work must remain a local audit."
+            )
         source_action = self.selected_action in {
             ResolverAction.EXTRACT_KNOWN_SOURCE,
             ResolverAction.RETRY_RETRIEVAL,
@@ -3827,6 +4048,18 @@ class ResolverWorkItem(ClosedModel):
             and not self.queries
         ):
             raise ValueError("Resolver search actions require at least one query.")
+        if (
+            self.selected_action == ResolverAction.HUMAN_REVIEW
+            and self.field_availability is not None
+            and (
+                self.selected_source_ids
+                or self.fallback_source_ids
+                or self.queries
+            )
+        ):
+            raise ValueError(
+                "Resolver human-review actions cannot automate sources or queries."
+            )
         if self.selected_action == ResolverAction.LOCAL_AUDIT and (
             self.selected_source_ids
             or self.fallback_source_ids
@@ -3842,6 +4075,19 @@ class ResolverWorkItem(ClosedModel):
         ):
             raise ValueError("Resolver queries must be bounded plain text.")
         return self
+
+
+def resolver_work_item_is_executable(item: ResolverWorkItem) -> bool:
+    """Return whether Executor can materially advance this work item."""
+
+    if item.selected_action == ResolverAction.HUMAN_REVIEW:
+        return False
+    if item.selected_action == ResolverAction.LOCAL_AUDIT:
+        # Executor can materialize a previously unselected local-only task so the
+        # next Checker sees it. Field-level derivations are already in Checker
+        # scope and another Executor cycle would not change their evidence state.
+        return item.reason == CheckerFollowUpReason.SCOPE_NOT_STARTED
+    return True
 
 
 class ResolverExecutionBatch(ClosedModel):
@@ -3874,7 +4120,9 @@ class ResolverAttemptFailure(ClosedModel):
 class ResolverResults(ClosedModel):
     """Bounded repair plan consumed by the next Searcher/Extractor round."""
 
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = (
+    schema_version: Literal[
+        "1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"
+    ] = (
         RESOLVER_SCHEMA_VERSION
     )
     prompt_version: Literal["resolver-system-v1", "resolver-system-v2"] = (
@@ -3946,7 +4194,11 @@ class ResolverResults(ClosedModel):
             if len(values) != len(set(values)):
                 raise ValueError(f"Resolver {field_name} values must be unique.")
         if self.scope_expansion_override:
-            if self.schema_version not in {"1.2.0", "1.3.0"} or not self.work_items:
+            if self.schema_version not in {
+                "1.2.0",
+                "1.3.0",
+                "1.4.0",
+            } or not self.work_items:
                 raise ValueError(
                     "Resolver scope-expansion override requires schema 1.2 work."
                 )
@@ -4099,7 +4351,14 @@ class ResolverResults(ClosedModel):
                 or failure.token_usage_unknown == usage_recorded
             ):
                 raise ValueError("Resolver failure ledger is inconsistent.")
-        expected_ready = bool(self.work_items)
+        expected_ready = (
+            any(
+                resolver_work_item_is_executable(item)
+                for item in self.work_items
+            )
+            if self.schema_version == "1.4.0"
+            else bool(self.work_items)
+        )
         if self.ready_for_execution != expected_ready:
             raise ValueError("Resolver ready flag is inconsistent.")
         expected_action = (

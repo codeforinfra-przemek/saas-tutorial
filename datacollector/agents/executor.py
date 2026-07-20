@@ -9,6 +9,10 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from ..llm.protocol import ExtractorProviderError
+from ..profiles import (
+    PUBLIC_AUTOMATION_AVAILABILITIES,
+    profile_field_policies,
+)
 from ..schemas import (
     CheckerResults,
     DocumentParseStatus,
@@ -1631,3 +1635,40 @@ class ExecutorAgent:
             raise ExecutorValidationError("Resolver ID is invalid.") from exc
         if parsed.version != 4:
             raise ExecutorValidationError("Resolver ID is invalid.")
+        if plan.profile_snapshot is not None:
+            task_by_id = {task.task_id: task for task in plan.tasks}
+            automated_actions = {
+                ResolverAction.EXTRACT_KNOWN_SOURCE,
+                ResolverAction.RETRY_RETRIEVAL,
+                ResolverAction.REEXTRACT_EXISTING,
+                ResolverAction.SEARCH_NEW_SOURCE,
+            }
+            for item in resolution.work_items:
+                task = task_by_id.get(item.task_id)
+                if task is None:
+                    raise ExecutorValidationError(
+                        "Resolver work item references an unknown profile task."
+                    )
+                policies = profile_field_policies(plan, task)
+                if item.target_field.startswith("__"):
+                    automation_allowed = any(
+                        policy.availability
+                        in PUBLIC_AUTOMATION_AVAILABILITIES
+                        for policy in policies.values()
+                    )
+                else:
+                    policy = policies.get(item.target_field)
+                    if policy is None:
+                        raise ExecutorValidationError(
+                            "Resolver work item references a field absent from the "
+                            "frozen profile policy."
+                        )
+                    automation_allowed = (
+                        policy.availability
+                        in PUBLIC_AUTOMATION_AVAILABILITIES
+                    )
+                if item.selected_action in automated_actions and not automation_allowed:
+                    raise ExecutorValidationError(
+                        "Resolver attempted public automation for a profile field "
+                        "that requires Human Review or local derivation."
+                    )

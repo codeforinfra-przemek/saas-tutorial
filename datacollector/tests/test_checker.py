@@ -12,6 +12,7 @@ from datacollector.agents.checker import (
 from datacollector.agents.extractor import ExtractorAgent
 from datacollector.agents.planner import PlannerAgent
 from datacollector.catalog import load_question_catalog
+from datacollector.profiles import load_profile_catalog
 from datacollector.documents import FetchedDocument, FetchStatus
 from datacollector.llm.pricing import build_web_search_tool_usage
 from datacollector.llm.protocol import (
@@ -28,6 +29,7 @@ from datacollector.schemas import (
     CheckerFieldStatus,
     CheckerFollowUpAction,
     CheckerFollowUpReason,
+    CheckerFollowUpRoute,
     CheckerIssueCode,
     CheckerMode,
     CheckerModelSemanticFit,
@@ -41,12 +43,15 @@ from datacollector.schemas import (
     CheckerUnsafeItemDraft,
     CheckerVerdict,
     DocumentRetrievalStatus,
+    FieldAvailability,
     ExtractionConfidence,
     ExtractorClaimDraft,
     ExtractorDraft,
     PlannerInput,
+    ProfileReuseScope,
     RawExtractionClaim,
     ResearchPlan,
+    CheckerResults,
     SearchAction,
     SearchLimits,
     SearchQueryCoverage,
@@ -427,6 +432,128 @@ class CheckerAgentTests(TestCase):
             **kwargs,
         )
 
+    @classmethod
+    def _profile_fixture(cls, profile_id, question_id):
+        plan = PlannerAgent(
+            load_question_catalog(),
+            profile_catalog=load_profile_catalog(),
+        ).create_plan(
+            PlannerInput(
+                brand_name="Example",
+                target_country="PL",
+                profile_id=profile_id,
+            )
+        )
+        task = next(
+            item for item in plan.tasks if item.catalog_question_id == question_id
+        )
+        sources = []
+        for number in range(1, task.min_sources + 1):
+            source_id = f"source-{(100 + number):016x}"
+            url = f"https://profile{number}.example{number}.com/franchise"
+            sources.append(
+                SearchSource(
+                    source_id=source_id,
+                    url=url,
+                    canonical_url=url,
+                    title=f"Profile fixture source {number}",
+                    source_type=task.preferred_source_types[0],
+                    origin=SearchSourceOrigin.OPENAI_WEB_SEARCH,
+                    provider_observed=True,
+                    task_ids=[task.task_id],
+                    observed_in_action_ids=["action-profile-checker"],
+                    discovered_via_queries=[],
+                    relevance_note="Profile fixture evidence for one selected task.",
+                    discovered_at=NOW,
+                )
+            )
+        query = task.search_queries[0]
+        search_results = SearchResults(
+            search_id=str(uuid4()),
+            plan_run_id=plan.run_id,
+            plan_sha256=PLAN_SHA256,
+            plan_reference=PLAN_REFERENCE,
+            created_at=NOW,
+            iteration=1,
+            generated_by="openai",
+            model="fake-searcher-model",
+            brand_name=plan.planner_input.brand_name,
+            target_country=plan.planner_input.target_country,
+            depth=plan.planner_input.depth,
+            search_executed=True,
+            limits=SearchLimits(
+                max_search_calls=1,
+                task_limit=1,
+                min_queries_per_task=1,
+            ),
+            selected_task_ids=[task.task_id],
+            unselected_task_ids=[
+                item.task_id for item in plan.tasks if item.task_id != task.task_id
+            ],
+            actions=[
+                SearchAction(
+                    action_id="action-profile-checker",
+                    call_index=1,
+                    scope_task_ids=[task.task_id],
+                    action_type="search",
+                    status="completed",
+                    queries=[query],
+                    source_urls=[source.canonical_url for source in sources],
+                )
+            ],
+            sources=sources,
+            task_results=[
+                SearchTaskResult(
+                    task_id=task.task_id,
+                    catalog_question_id=task.catalog_question_id,
+                    status=SearchTaskStatus.SOURCES_FOUND,
+                    planned_queries=[query],
+                    attempted_queries=[query],
+                    planned_queries_attempted=[query],
+                    derived_queries_attempted=[],
+                    query_coverage=SearchQueryCoverage.COMPLETE,
+                    minimum_query_attempts=1,
+                    minimum_sources=task.min_sources,
+                    action_ids=["action-profile-checker"],
+                    source_ids=[source.source_id for source in sources],
+                    coverage_gaps=[],
+                    unresolved_targets=[],
+                )
+            ],
+            warnings=[],
+            compliance_rules=plan.compliance_rules,
+            agent_usage=[
+                AgentIterationUsage(
+                    agent="searcher",
+                    iteration=1,
+                    call_index=1,
+                    scope_task_ids=[task.task_id],
+                    requested_model="fake-searcher-model",
+                    resolved_model="fake-searcher-model",
+                    tokens=TokenUsage(
+                        input_tokens=50,
+                        output_tokens=10,
+                        total_tokens=60,
+                    ),
+                    tool_usage=[build_web_search_tool_usage({"search": 1})],
+                )
+            ],
+        )
+        extraction_results = ExtractorAgent(
+            FixtureFetcher(),
+            FixtureExtractorLLM(),
+        ).create_extraction_results(
+            plan,
+            search_results,
+            plan_sha256=PLAN_SHA256,
+            search_sha256=SEARCH_SHA256,
+            search_reference=SEARCH_REFERENCE,
+            plan_reference=PLAN_REFERENCE,
+            source_limit=len(sources),
+            max_api_calls=len(sources),
+        )
+        return plan, task, search_results, extraction_results
+
     def test_free_leaves_every_claim_not_reviewed_and_applies_source_policy(self):
         results = self._run()
 
@@ -525,6 +652,288 @@ class CheckerAgentTests(TestCase):
         self.assertEqual(
             results.recommended_next_action,
             CheckerNextAction.HUMAN_REVIEW,
+        )
+
+    def test_profile_optional_gap_does_not_block_completion_gate(self):
+        plan, task, search_results, extraction_results = self._profile_fixture(
+            "PL:L1", "scope.brand_identity"
+        )
+        policy = next(
+            question
+            for question in plan.profile_snapshot.questions
+            if question.question_id == task.catalog_question_id
+        )
+        optional_field = next(
+            field.target_field
+            for field in policy.fields
+            if field.availability == FieldAvailability.PUBLIC_OPTIONAL
+        )
+
+        def draft_factory(results):
+            return CheckerDraft(
+                decisions=[
+                    CheckerClaimDecisionDraft(
+                        claim_id=claim.claim_id,
+                        verdict=(
+                            CheckerModelVerdict.REJECTED
+                            if claim.target_field == optional_field
+                            else CheckerModelVerdict.ACCEPTED
+                        ),
+                        semantic_fit=(
+                            CheckerModelSemanticFit.MISMATCH
+                            if claim.target_field == optional_field
+                            else CheckerModelSemanticFit.DIRECT
+                        ),
+                        source_support=CheckerModelSourceSupport.SUFFICIENT,
+                        issue_codes=(
+                            [CheckerIssueCode.UNSUPPORTED_CLAIM]
+                            if claim.target_field == optional_field
+                            else []
+                        ),
+                        rationale="Fixture profile field decision is deterministic.",
+                    )
+                    for claim in results.claims
+                ]
+            )
+
+        results = self._run(
+            FixtureCheckerLLM(draft_factory),
+            plan=plan,
+            search_results=search_results,
+            extraction_results=extraction_results,
+        )
+
+        optional_result = next(
+            field
+            for result in results.task_results
+            for field in result.field_results
+            if field.target_field == optional_field
+        )
+        follow_up = next(
+            item
+            for item in results.follow_up_tasks
+            if item.target_field == optional_field
+        )
+        self.assertEqual(results.schema_version, "1.5.0")
+        self.assertEqual(results.profile_id, "PL:L1:v1")
+        self.assertFalse(optional_result.required_for_completion)
+        self.assertEqual(
+            optional_result.availability, FieldAvailability.PUBLIC_OPTIONAL
+        )
+        self.assertNotIn(optional_field, results.critical_missing_fields)
+        self.assertTrue(results.selected_scope_ready)
+        self.assertFalse(results.passed)
+        self.assertEqual(
+            results.recommended_next_action,
+            CheckerNextAction.RESEARCH_NEXT_BATCH,
+        )
+        self.assertEqual(follow_up.route, CheckerFollowUpRoute.RESOLVER)
+        self.assertFalse(follow_up.required_for_completion)
+        self.assertGreater(
+            results.score_breakdown.completion_coverage_score,
+            results.score_breakdown.total_coverage_score,
+        )
+        self.assertGreater(
+            results.score_breakdown.completion_coverage_score,
+            results.score_breakdown.whole_plan_completion_coverage_score,
+        )
+
+    def test_profile_required_field_in_high_priority_task_is_critical(self):
+        plan, task, search_results, extraction_results = self._profile_fixture(
+            "PL:L1", "scope.jurisdictions"
+        )
+        policy = next(
+            question
+            for question in plan.profile_snapshot.questions
+            if question.question_id == task.catalog_question_id
+        )
+        required_field = next(
+            field.target_field
+            for field in policy.fields
+            if field.required_for_completion
+        )
+
+        def draft_factory(results):
+            return CheckerDraft(
+                decisions=[
+                    CheckerClaimDecisionDraft(
+                        claim_id=claim.claim_id,
+                        verdict=(
+                            CheckerModelVerdict.REJECTED
+                            if claim.target_field == required_field
+                            else CheckerModelVerdict.ACCEPTED
+                        ),
+                        semantic_fit=(
+                            CheckerModelSemanticFit.MISMATCH
+                            if claim.target_field == required_field
+                            else CheckerModelSemanticFit.DIRECT
+                        ),
+                        source_support=CheckerModelSourceSupport.SUFFICIENT,
+                        issue_codes=(
+                            [CheckerIssueCode.UNSUPPORTED_CLAIM]
+                            if claim.target_field == required_field
+                            else []
+                        ),
+                        rationale="Fixture profile field decision is deterministic.",
+                    )
+                    for claim in results.claims
+                ]
+            )
+
+        results = self._run(
+            FixtureCheckerLLM(draft_factory),
+            plan=plan,
+            search_results=search_results,
+            extraction_results=extraction_results,
+        )
+
+        self.assertNotEqual(task.priority.value, "critical")
+        self.assertIn(required_field, results.critical_missing_fields)
+        self.assertFalse(results.selected_scope_ready)
+
+    def test_profile_private_and_system_gaps_use_bounded_routes(self):
+        cases = (
+            (
+                "fdd06.other_fees",
+                FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+                CheckerFollowUpRoute.HUMAN_REVIEW,
+                CheckerFollowUpAction.REQUEST_AUTHORIZED_DOCUMENT,
+            ),
+            (
+                "scope.document_inventory",
+                FieldAvailability.SYSTEM_DERIVED,
+                CheckerFollowUpRoute.RESOLVER,
+                CheckerFollowUpAction.LOCAL_AUDIT,
+            ),
+        )
+        for question_id, availability, route, action in cases:
+            with self.subTest(question=question_id):
+                plan, task, search_results, extraction_results = self._profile_fixture(
+                    "PL:L3", question_id
+                )
+                policy = next(
+                    question
+                    for question in plan.profile_snapshot.questions
+                    if question.question_id == question_id
+                )
+                target_field = next(
+                    field.target_field
+                    for field in policy.fields
+                    if field.availability == availability
+                )
+
+                def draft_factory(results):
+                    return CheckerDraft(
+                        decisions=[
+                            CheckerClaimDecisionDraft(
+                                claim_id=claim.claim_id,
+                                verdict=(
+                                    CheckerModelVerdict.REJECTED
+                                    if claim.target_field == target_field
+                                    else CheckerModelVerdict.ACCEPTED
+                                ),
+                                semantic_fit=(
+                                    CheckerModelSemanticFit.MISMATCH
+                                    if claim.target_field == target_field
+                                    else CheckerModelSemanticFit.DIRECT
+                                ),
+                                source_support=CheckerModelSourceSupport.SUFFICIENT,
+                                rationale="Fixture routes a profile-specific gap.",
+                            )
+                            for claim in results.claims
+                        ]
+                    )
+
+                results = self._run(
+                    FixtureCheckerLLM(draft_factory),
+                    plan=plan,
+                    search_results=search_results,
+                    extraction_results=extraction_results,
+                )
+                follow_up = next(
+                    item
+                    for item in results.follow_up_tasks
+                    if item.target_field == target_field
+                )
+                self.assertEqual(follow_up.availability, availability)
+                self.assertEqual(follow_up.route, route)
+                self.assertEqual(follow_up.action, action)
+                self.assertEqual(follow_up.candidate_source_ids, [])
+                self.assertEqual(follow_up.retry_source_ids, [])
+                self.assertEqual(follow_up.reextract_source_ids, [])
+
+    def test_not_applicable_profile_field_has_no_follow_up(self):
+        paid_results = self._run(FixtureCheckerLLM(self._accepted_draft))
+        policy_by_field = {
+            field: (
+                FieldAvailability.PUBLIC_EXPECTED,
+                True,
+                ProfileReuseScope.BRAND,
+            )
+            for field in self.task.target_fields
+        }
+        target_field = self.task.target_fields[0]
+        policy_by_field[target_field] = (
+            FieldAvailability.NOT_APPLICABLE,
+            False,
+            ProfileReuseScope.BRAND,
+        )
+
+        task_results, follow_ups = CheckerAgent._build_task_results(
+            self.plan,
+            [self.task],
+            self.search_results,
+            self.extraction_results,
+            paid_results.claim_decisions,
+            [],
+            {source.source_id: source for source in self.sources},
+            {
+                assessment.source_id: assessment
+                for assessment in paid_results.source_assessments
+            },
+            policy_by_field,
+            paid_success=True,
+        )
+
+        field_result = next(
+            field
+            for field in task_results[0].field_results
+            if field.target_field == target_field
+        )
+        self.assertEqual(field_result.status, CheckerFieldStatus.NOT_APPLICABLE)
+        self.assertFalse(
+            any(item.target_field == target_field for item in follow_ups)
+        )
+
+    def test_checker_14_artifact_remains_readable(self):
+        current = self._run(FixtureCheckerLLM(self._accepted_draft))
+        payload = current.model_dump(mode="json")
+        payload["schema_version"] = "1.4.0"
+        payload.pop("profile_id")
+        payload.pop("profile_sha256")
+        payload["score_breakdown"]["scoring_version"] = "checker-scoring-v2"
+        for field_name in (
+            "completion_coverage_score",
+            "total_coverage_score",
+            "whole_plan_completion_coverage_score",
+            "whole_plan_total_coverage_score",
+        ):
+            payload["score_breakdown"].pop(field_name)
+        for task_result in payload["task_results"]:
+            for field_result in task_result["field_results"]:
+                field_result.pop("availability")
+                field_result.pop("required_for_completion")
+                field_result.pop("reuse_scope")
+        for follow_up in payload["follow_up_tasks"]:
+            follow_up.pop("availability")
+            follow_up.pop("required_for_completion")
+            follow_up.pop("reuse_scope")
+
+        restored = CheckerResults.model_validate(payload)
+
+        self.assertEqual(restored.schema_version, "1.4.0")
+        self.assertEqual(
+            restored.score_breakdown.scoring_version, "checker-scoring-v2"
         )
 
     def test_incremental_checker_inherits_unchanged_paid_scope_without_api_call(self):

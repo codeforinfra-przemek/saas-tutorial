@@ -9,6 +9,7 @@ from datacollector.agents.planner import PlannerAgent
 from datacollector.catalog import load_question_catalog
 from datacollector.schemas import (
     AgentIterationUsage,
+    CheckerScoreBreakdown,
     DocumentParseStatus,
     DocumentRetrievalStatus,
     EvidencePassage,
@@ -26,6 +27,36 @@ from datacollector.schemas import (
     SourceDocument,
     TokenUsage,
 )
+
+
+class CheckerScoreContractTests(TestCase):
+    def test_scoring_v3_requires_distinct_completion_and_total_metrics(self):
+        with self.assertRaisesRegex(ValidationError, "completion and total"):
+            CheckerScoreBreakdown(
+                scoring_version="checker-scoring-v3",
+                raw_coverage_score=50,
+                verified_coverage_score=40,
+                whole_plan_coverage_score=20,
+                deduction_points=0,
+                quality_score=40,
+            )
+
+    def test_scoring_v3_total_aliases_match_legacy_metrics(self):
+        score = CheckerScoreBreakdown(
+            scoring_version="checker-scoring-v3",
+            raw_coverage_score=50,
+            verified_coverage_score=40,
+            whole_plan_coverage_score=20,
+            completion_coverage_score=80,
+            total_coverage_score=40,
+            whole_plan_completion_coverage_score=35,
+            whole_plan_total_coverage_score=20,
+            deduction_points=0,
+            quality_score=80,
+        )
+
+        self.assertEqual(score.completion_coverage_score, 80)
+        self.assertEqual(score.total_coverage_score, 40)
 
 
 class PlannerInputTests(TestCase):

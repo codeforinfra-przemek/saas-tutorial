@@ -128,10 +128,10 @@ The completion gate is also per field. In the current public PL profiles it
 includes `public_expected`; L2/L3 additionally include `registry_expected` and
 `manual_research_required`. `public_optional`, `private_document_required` and
 `system_derived` fields do not masquerade as critical public facts in the profile
-contract. Private document gaps remain visible in L3. The current legacy Checker
-and Resolver do not consume this classification yet, so do not start an unattended
-paid L2/L3 loop until profile-aware scoring and routing are enabled in the next
-pipeline stage.
+contract. Private document gaps remain visible in L3. Checker 1.5 consumes this
+field-level policy: its completion score and critical-gap gate use only fields
+required by the frozen profile, while total coverage continues to show every
+optional and private gap.
 
 PL profiles use Polish search-query templates and freeze the appropriate Polish
 authorities in the snapshot (CEIDG/Biznes.gov.pl, KRS/PRS/RDF, UOKiK, UPRP,
@@ -150,11 +150,12 @@ Create a no-API profile plan:
 
 Remove `--offline` for an OpenAI-guided Planner run. The profile still controls
 coverage and completion; the model may enrich guidance but cannot remove fields.
-The current Checker continues to expose its legacy aggregate quality score and
-Resolver may still route unresolved private/system-derived fields as ordinary
-follow-ups. Availability-aware scoring, action routing, country-level reuse and
-cross-plan L1→L2→L3 reuse are the next pipeline stage; this release provides the
-versioned policy and immutable lineage required to implement them safely.
+Resolver 1.4 routes public/registry fields to automated evidence work, manual and
+authorized private fields to Human Review, and system-derived fields to local
+audit. Searcher and Extractor independently enforce the same boundary and send
+only public/registry field views to their models for mixed tasks. Country-level
+reuse and cross-plan L1→L2→L3 reuse remain a separate future stage because they
+require an explicit reuse manifest rather than weakening exact artifact lineage.
 
 ## Create a deterministic plan (free, offline)
 
@@ -498,7 +499,7 @@ contradiction. For example, `PLN`, `zł`, `złoty` and `złotych` describe the s
 currency; different cited investment amounts remain separate values on their
 amount field but no longer create a false `investment.currency` conflict.
 
-Checker contract `1.4.0` keeps semantic acceptance separate from source
+Checker contract `1.5.0` keeps semantic acceptance separate from source
 corroboration. A directly supported claim can therefore be `accepted` while its
 field remains `needs_corroboration`. Multi-valued fields with both supported and
 unresolved values use `partial`, so accepted evidence keeps partial quality
@@ -509,19 +510,25 @@ transfer, or resale structure. For document inventory, a page that only names a
 document can establish the stated title or existence, but receives
 `mentioned_not_obtained` until the actual current document is fetched and parsed.
 
-Every unresolved field produces one Resolver-ready follow-up containing an
+Every unresolved field produces one explicitly routed follow-up containing an
 action, known candidate/retry/re-extraction source IDs, unresolved and supporting
 claim IDs, suggested plan queries, the minimum additional source count,
 independence requirement and an explicit completion criterion. This lets the next
 agent act on existing Searcher results before paying for another broad search.
+Profile follow-ups also retain field availability, completion significance and
+reuse scope. Authorized private or manual work is handed to Human Review, while
+`system_derived` work requests a bounded local audit. A `not_applicable` field is
+excluded from coverage denominators and does not create a follow-up.
 
 The defaults impose a hard preflight ceiling of 500 claims and 100,000 quoted
 evidence characters. Checker refuses an artifact above either ceiling instead of
 silently truncating its semantic-review scope; raise the limits deliberately
 after inspecting the extraction. `unevaluated_task_ids` and
 `unevaluated_source_ids` expose scope that the upstream Searcher or Extractor did
-not select, make `scope_complete=false`, and cannot silently pass. Checker also
-requires all critical fields, no unresolved contradiction or high/critical
+not select. For legacy plans either list makes `scope_complete=false`. For a
+profile plan every task must still be attempted, while an unused candidate URL
+remains an explicit evidence backlog and does not by itself block completion.
+Checker also requires all critical fields, no unresolved contradiction or high/critical
 unsafe item, and a score at or above the Planner threshold before it can
 recommend `human_review`. A pass means ready for human review, never safe for
 automatic production import.
@@ -588,6 +595,15 @@ re-extracting the page that mentioned it. Work is grouped into
 `extract_known_source`, `retry_retrieval`, `reextract_existing`,
 `search_new_source`, `local_audit`, or `human_review` execution batches.
 
+For profile plans, Resolver also carries field availability, completion and
+reuse policy into every work item. `manual_research_required`,
+`private_document_required` and `confidential_deal_room` are locked to
+`human_review` with no source IDs or queries. `system_derived` is locked to
+`local_audit`. Required public work is ordered ahead of optional enrichment so a
+bounded round cannot spend its whole budget on non-gating fields. Resolver skips
+its paid model request when all selected work is local or human, and does not run
+a no-op Executor cycle for field-level local work.
+
 The final `data_quality` catalog tasks describe the pipeline's own evidence,
 status, scoring, stopping and approval contracts. They are not franchise facts
 and must not be researched on the web. Resolver therefore materializes them as
@@ -621,14 +637,14 @@ overruns and retains the deterministic executable strategy as an explicit
 fallback. Iteration 5 writes `resolution-r005-free.json` and
 `resolution-r005.json` immutably beside the Checker artifact.
 
-Resolver also accepts `research_next_batch`. In that mode it selects the next
-known sources from `unevaluated_source_ids` first, bounded by
-`--max-source-actions`. Once those are exhausted it selects the next plan-ordered
-slice from `unevaluated_task_ids`, bounded by both `--max-follow-ups` and
-`--max-search-tasks`, and emits mandatory `search_new_source` work. Remaining
-sources or plan tasks are recorded as deferred scope work. Executor then uses its
-immutable merge path to add the new task, source, document, claim and usage state
-to the exact predecessor artifacts.
+Resolver also accepts `research_next_batch`. Legacy mode selects known
+`unevaluated_source_ids` before the next plan task. Profile mode treats those URLs
+as a non-blocking evidence backlog and advances through the next plan-ordered
+`unevaluated_task_ids`, bounded by both `--max-follow-ups` and
+`--max-search-tasks`. A mixed task schedules public automation only; a human-only
+task stops at Human Review. Remaining plan tasks are recorded as deferred scope
+work. Executor then uses its immutable merge path to add the new task, source,
+document, claim and usage state to the exact predecessor artifacts.
 
 Executor completes `local_audit` batches without Searcher, network retrieval or
 Extractor calls and adds the task scope to the merged artifacts. The following

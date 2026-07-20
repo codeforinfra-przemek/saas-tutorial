@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from ..documents import DocumentFetcher, FetchedDocument, FetchStatus
 from ..llm.protocol import ExtractorLLM, ExtractorProviderError
+from ..profiles import public_automation_task_view
 from ..schemas import (
     AgentIterationUsage,
     DocumentParseStatus,
@@ -901,7 +902,27 @@ class ExtractorAgent:
         selected_tasks = [
             task for task in plan.tasks if task.task_id in selected_task_id_set
         ]
-        task_by_id = {task.task_id: task for task in selected_tasks}
+        automation_tasks = [
+            public_view
+            for task in selected_tasks
+            if (public_view := public_automation_task_view(plan, task)) is not None
+        ]
+        automation_task_by_id = {
+            task.task_id: task for task in automation_tasks
+        }
+        forbidden_source_ids = [
+            source.source_id
+            for source in selected_sources
+            if not any(
+                task_id in automation_task_by_id for task_id in source.task_ids
+            )
+        ]
+        if forbidden_source_ids:
+            raise ExtractorValidationError(
+                "Profile policy forbids automated extraction for source(s) "
+                "mapped exclusively to private, manual, confidential, system, "
+                f"or not-applicable fields: {forbidden_source_ids}."
+            )
         selected_task_ids = [task.task_id for task in selected_tasks]
         if set(selected_task_ids) != selected_task_id_set:
             unknown = selected_task_id_set - set(selected_task_ids)
@@ -919,6 +940,18 @@ class ExtractorAgent:
         )
         documents: list[SourceDocument] = []
         warnings = [f"Inherited Searcher warning: {item}" for item in search_results.warnings]
+        excluded_profile_fields = sum(
+            len(task.target_fields)
+            - len(automation_task_by_id[task.task_id].target_fields)
+            for task in selected_tasks
+            if task.task_id in automation_task_by_id
+        )
+        if excluded_profile_fields:
+            warnings.append(
+                "Excluded "
+                f"{excluded_profile_fields} private, manual, confidential, or "
+                "system-derived profile field(s) from the Extractor model scope."
+            )
         network_executed = False
         for source in selected_sources:
             cached = cache.get(source.source_id)
@@ -958,9 +991,9 @@ class ExtractorAgent:
                         fetched,
                         search_id=search_results.search_id,
                         tasks=[
-                            task_by_id[task_id]
+                            automation_task_by_id[task_id]
                             for task_id in source.task_ids
-                            if task_id in task_by_id
+                            if task_id in automation_task_by_id
                         ],
                         max_document_bytes=max_document_bytes,
                         max_document_chars=max_document_chars,
@@ -1017,9 +1050,9 @@ class ExtractorAgent:
                 )
                 continue
             mapped_tasks = [
-                task_by_id[task_id]
+                automation_task_by_id[task_id]
                 for task_id in document.task_ids
-                if task_id in task_by_id
+                if task_id in automation_task_by_id
             ]
             evidence_passages.extend(
                 _build_passages(
@@ -1085,7 +1118,7 @@ class ExtractorAgent:
                         plan,
                         source,
                         document,
-                        selected_tasks,
+                        automation_tasks,
                         source_passages,
                         system_prompt,
                         iteration=iteration,
@@ -1125,7 +1158,7 @@ class ExtractorAgent:
                         source,
                         document,
                         source_passages,
-                        task_by_id,
+                        automation_task_by_id,
                         existing_citations=citations,
                         existing_claims=claims,
                     )
@@ -1171,6 +1204,10 @@ class ExtractorAgent:
                 semantically_processed_task_sources=(
                     semantically_processed_task_sources
                 ),
+                automated_target_fields_by_task={
+                    task.task_id: set(task.target_fields)
+                    for task in automation_tasks
+                },
             )
         except Exception as exc:
             if self.llm is not None and (agent_usage or failed_attempts):
@@ -1540,6 +1577,7 @@ class ExtractorAgent:
         *,
         paid: bool,
         semantically_processed_task_sources: set[tuple[str, str]],
+        automated_target_fields_by_task: dict[str, set[str]] | None = None,
     ) -> list[ExtractionTaskResult]:
         documents_by_source = {item.source_id: item for item in documents}
         search_task_by_id = {item.task_id: item for item in search_results.task_results}
@@ -1569,6 +1607,16 @@ class ExtractorAgent:
                 if field_claims:
                     status = FieldExtractionStatus.EXTRACTED
                     notes = "Raw values require Checker verification and normalization."
+                elif (
+                    automated_target_fields_by_task is not None
+                    and target_field
+                    not in automated_target_fields_by_task.get(task.task_id, set())
+                ):
+                    status = FieldExtractionStatus.NOT_PROCESSED
+                    notes = (
+                        "Research-profile policy excluded this field from public "
+                        "automation; route it to Human Review or local audit."
+                    )
                 elif not has_accessible_text:
                     status = FieldExtractionStatus.NOT_ACCESSIBLE
                     notes = "No selected source produced accessible parsed text."

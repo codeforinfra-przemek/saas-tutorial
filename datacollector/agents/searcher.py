@@ -22,6 +22,7 @@ from ..llm.protocol import (
     SearcherProviderError,
 )
 from ..query_utils import normalize_search_queries
+from ..profiles import public_automation_task_view
 from ..schemas import (
     AgentIterationUsage,
     CandidateRouteDecision,
@@ -968,6 +969,30 @@ class SearcherAgent:
 
         requested = _deduplicate(requested_task_ids or [])
         selected = _select_tasks(plan, requested, task_limit)
+        blocked_task_ids: list[str] = []
+        public_task_views: list[ResearchTask] = []
+        excluded_profile_fields = 0
+        for task in selected:
+            public_view = public_automation_task_view(plan, task)
+            if public_view is None:
+                blocked_task_ids.append(task.task_id)
+            else:
+                public_task_views.append(public_view)
+                excluded_profile_fields += len(task.target_fields) - len(
+                    public_view.target_fields
+                )
+        if blocked_task_ids and requested:
+            raise SearcherValidationError(
+                "Profile policy forbids public-web automation for requested "
+                f"task(s): {blocked_task_ids}. Route them to Human Review or "
+                "local audit instead."
+            )
+        selected = public_task_views
+        if not selected:
+            raise SearcherValidationError(
+                "No selected task contains fields permitted for public-web "
+                "automation by the research profile."
+            )
         overrides = {
             task_id: _deduplicate(queries)
             for task_id, queries in (query_overrides or {}).items()
@@ -1023,6 +1048,18 @@ class SearcherAgent:
         created_at = datetime.now(timezone.utc)
         warnings: list[str] = []
         failed_attempts: list[SearchAttemptFailure] = []
+        if blocked_task_ids:
+            warnings.append(
+                "Skipped "
+                f"{len(blocked_task_ids)} task(s) with no profile fields "
+                "permitted for public-web automation."
+            )
+        if excluded_profile_fields:
+            warnings.append(
+                "Excluded "
+                f"{excluded_profile_fields} private, manual, confidential, or "
+                "system-derived profile field(s) from the Searcher model scope."
+            )
         if removed_queries:
             warnings.append(
                 f"Skipped {removed_queries} plan queries containing unresolved "

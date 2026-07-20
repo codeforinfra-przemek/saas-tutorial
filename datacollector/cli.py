@@ -1908,6 +1908,19 @@ def _run_check(args: argparse.Namespace) -> int:
     for unsafe_item in results.unsafe_items:
         severity = unsafe_item.severity.value
         unsafe_severities[severity] = unsafe_severities.get(severity, 0) + 1
+    selected_field_results = [
+        field_result
+        for task_result in results.task_results
+        for field_result in task_result.field_results
+    ]
+    profile_total_fields = (
+        sum(
+            len(question.fields)
+            for question in plan.profile_snapshot.questions
+        )
+        if plan.profile_snapshot is not None
+        else None
+    )
     summary = {
         "check_id": results.check_id,
         "plan_run_id": results.plan_run_id,
@@ -1917,6 +1930,8 @@ def _run_check(args: argparse.Namespace) -> int:
         "search_sha256": results.search_sha256,
         "extraction_sha256": results.extraction_sha256,
         "brand": results.brand_name,
+        "profile": results.profile_id,
+        "profile_sha256": results.profile_sha256,
         "generated_by": results.generated_by,
         "model": results.model,
         "iteration": results.iteration,
@@ -1932,7 +1947,25 @@ def _run_check(args: argparse.Namespace) -> int:
         "unevaluated_tasks": len(results.unevaluated_task_ids),
         "unevaluated_sources": len(results.unevaluated_source_ids),
         "scope_complete": results.scope_complete,
+        "source_scope_complete": not results.unevaluated_source_ids,
         "selected_scope_ready": results.selected_scope_ready,
+        "profile_total_fields": profile_total_fields,
+        "profile_completion_required_fields": (
+            len(plan.critical_fields)
+            if plan.profile_snapshot is not None
+            else None
+        ),
+        "selected_total_fields": len(
+            [
+                field
+                for field in selected_field_results
+                if field.status.value != "not_applicable"
+            ]
+        ),
+        "selected_completion_required_fields": sum(
+            bool(field.required_for_completion)
+            for field in selected_field_results
+        ),
         "claim_verdicts": claim_verdicts,
         "field_statuses": field_statuses,
         "task_statuses": task_statuses,
@@ -2999,6 +3032,7 @@ def _loop_progress(
     after,
     *,
     min_quality_improvement: int,
+    completion_fields: set[str] | None = None,
 ) -> tuple[bool, list[str], list[str]]:
     reasons: list[str] = []
     regressions: list[str] = []
@@ -3007,15 +3041,13 @@ def _loop_progress(
         before.critical_missing_fields
     )
     contradiction_delta = len(after.contradictions) - len(before.contradictions)
-    before_verified = sum(
-        field.status.value == "verified"
-        for task in before.task_results
-        for field in task.field_results
+    before_verified = _loop_verified_field_count(
+        before,
+        completion_fields=completion_fields,
     )
-    after_verified = sum(
-        field.status.value == "verified"
-        for task in after.task_results
-        for field in task.field_results
+    after_verified = _loop_verified_field_count(
+        after,
+        completion_fields=completion_fields,
     )
     verified_delta = after_verified - before_verified
     if (
@@ -3048,6 +3080,24 @@ def _loop_progress(
     return bool(reasons), reasons, regressions
 
 
+def _loop_verified_field_count(
+    checker_results,
+    *,
+    completion_fields: set[str] | None,
+) -> int:
+    """Count the fields that can materially advance the active completion gate."""
+
+    return sum(
+        field.status.value == "verified"
+        and (
+            completion_fields is None
+            or field.target_field in completion_fields
+        )
+        for task in checker_results.task_results
+        for field in task.field_results
+    )
+
+
 def _make_loop_round(
     *,
     number: int,
@@ -3062,11 +3112,13 @@ def _make_loop_round(
     execution_path: Path | None,
     stage_usage: list[LoopStageUsage],
     min_quality_improvement: int,
+    completion_fields: set[str] | None = None,
 ) -> LoopRoundResult:
     progress, reasons, regressions = _loop_progress(
         before,
         after,
         min_quality_improvement=min_quality_improvement,
+        completion_fields=completion_fields,
     )
     return LoopRoundResult(
         round_number=number,
@@ -3096,15 +3148,13 @@ def _make_loop_round(
         critical_missing_after=len(after.critical_missing_fields),
         contradictions_before=len(before.contradictions),
         contradictions_after=len(after.contradictions),
-        verified_fields_before=sum(
-            field.status.value == "verified"
-            for task in before.task_results
-            for field in task.field_results
+        verified_fields_before=_loop_verified_field_count(
+            before,
+            completion_fields=completion_fields,
         ),
-        verified_fields_after=sum(
-            field.status.value == "verified"
-            for task in after.task_results
-            for field in task.field_results
+        verified_fields_after=_loop_verified_field_count(
+            after,
+            completion_fields=completion_fields,
         ),
         selected_scope_ready_before=before.selected_scope_ready,
         selected_scope_ready_after=after.selected_scope_ready,
@@ -3130,6 +3180,11 @@ def _run_loop(args: argparse.Namespace) -> int:
         raise CheckerValidationError(
             "Loop starting Checker does not match its exact Planner artifact."
         )
+    completion_fields = (
+        set(plan.critical_fields)
+        if plan.profile_snapshot is not None
+        else None
+    )
 
     policy = LoopPolicy(
         quality_threshold=initial_check.quality_threshold,
@@ -3363,6 +3418,7 @@ def _run_loop(args: argparse.Namespace) -> int:
             execution_path=execution_path,
             stage_usage=stage_usage,
             min_quality_improvement=policy.min_quality_improvement,
+            completion_fields=completion_fields,
         )
         rounds.append(round_result)
         stagnant_rounds = 0 if round_result.progress_detected else stagnant_rounds + 1
@@ -3439,7 +3495,7 @@ def _run_loop(args: argparse.Namespace) -> int:
                 stop_reason = LoopStopReason.MAX_ROUNDS
             post_loop_usage.append(
                 _loop_stage_usage(
-                    "checker_full_pre_normalizer",
+                    "checker",
                     full_check_iteration,
                     current_path,
                     full_check_summary,
@@ -3545,6 +3601,21 @@ def _run_loop(args: argparse.Namespace) -> int:
         plan_reference=str(plan_path.resolve()),
         plan_sha256=plan_sha256,
         brand_name=plan.planner_input.brand_name,
+        profile_id=(
+            plan.profile_snapshot.profile_id
+            if plan.profile_snapshot is not None
+            else None
+        ),
+        profile_sha256=(
+            plan.profile_snapshot.profile_sha256
+            if plan.profile_snapshot is not None
+            else None
+        ),
+        research_level=(
+            plan.profile_snapshot.level.value
+            if plan.profile_snapshot is not None
+            else None
+        ),
         started_at=started_at,
         completed_at=datetime.now(timezone.utc),
         initial_check_id=initial_check.check_id,
@@ -3612,6 +3683,9 @@ def _run_loop(args: argparse.Namespace) -> int:
     summary = {
         "loop_id": results.loop_id,
         "brand": results.brand_name,
+        "profile_id": results.profile_id,
+        "profile_sha256": results.profile_sha256,
+        "research_level": results.research_level,
         "initial_check_id": results.initial_check_id,
         "final_check_id": results.final_check_id,
         "rounds_completed": len(results.rounds),

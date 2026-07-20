@@ -11,7 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-LOOP_RUN_SCHEMA_VERSION = "1.0.0"
+LOOP_RUN_SCHEMA_VERSION = "1.1.0"
 
 
 class LoopValidationError(ValueError):
@@ -162,12 +162,21 @@ class LoopRoundResult(ClosedLoopModel):
 class LoopRunResults(ClosedLoopModel):
     """Immutable audit manifest for one bounded paid orchestration session."""
 
-    schema_version: Literal["1.0.0"] = LOOP_RUN_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = LOOP_RUN_SCHEMA_VERSION
     loop_id: str
     plan_run_id: str
     plan_reference: str = Field(min_length=1)
     plan_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     brand_name: str = Field(min_length=1)
+    profile_id: str | None = Field(
+        default=None,
+        pattern=r"^[A-Z]{2}:L[1-3]:v[1-9][0-9]*$",
+    )
+    profile_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[a-f0-9]{64}$",
+    )
+    research_level: Literal["L1", "L2", "L3"] | None = None
     started_at: datetime
     completed_at: datetime
     initial_check_id: str
@@ -212,6 +221,23 @@ class LoopRunResults(ClosedLoopModel):
                 raise ValueError(f"{label} must be a valid UUIDv4.")
         if self.completed_at < self.started_at:
             raise ValueError("Loop completion cannot precede its start.")
+        profile_metadata = (
+            self.profile_id,
+            self.profile_sha256,
+            self.research_level,
+        )
+        if any(value is not None for value in profile_metadata) and not all(
+            value is not None for value in profile_metadata
+        ):
+            raise ValueError(
+                "Loop profile metadata must be either complete or absent."
+            )
+        if self.schema_version == "1.0.0" and any(
+            value is not None for value in profile_metadata
+        ):
+            raise ValueError(
+                "Loop schema 1.0.0 cannot contain research-profile metadata."
+            )
         if [item.round_number for item in self.rounds] != list(
             range(1, len(self.rounds) + 1)
         ):

@@ -14,6 +14,7 @@ from ..schemas import (
     AgentIterationUsage,
     CheckerFollowUpAction,
     CheckerFollowUpReason,
+    CheckerFollowUpRoute,
     CheckerFollowUpTask,
     CheckerIssueCode,
     CheckerNextAction,
@@ -21,7 +22,9 @@ from ..schemas import (
     DocumentParseStatus,
     DocumentRetrievalStatus,
     ExtractionResults,
+    FieldAvailability,
     PRIORITY_ORDER,
+    ProfileReuseScope,
     ResearchPlan,
     ResolverAction,
     ResolverAttemptFailure,
@@ -32,6 +35,7 @@ from ..schemas import (
     ResolverResults,
     ResolverStrategySource,
     ResolverWorkItem,
+    resolver_work_item_is_executable,
     SearchResults,
     SourceType,
 )
@@ -45,6 +49,17 @@ DEFAULT_MAX_SOURCE_ACTIONS = 10
 DEFAULT_MAX_SEARCH_TASKS = 5
 DEFAULT_MAX_QUERIES_PER_ITEM = 3
 _TERMINAL_RETRIEVAL_ERROR_CODES = {"access_denied", "anti_bot_page"}
+_AUTOMATED_AVAILABILITIES = {
+    FieldAvailability.PUBLIC_EXPECTED,
+    FieldAvailability.PUBLIC_OPTIONAL,
+    FieldAvailability.REGISTRY_EXPECTED,
+}
+_HUMAN_ONLY_AVAILABILITIES = {
+    FieldAvailability.MANUAL_RESEARCH_REQUIRED,
+    FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+    FieldAvailability.CONFIDENTIAL_DEAL_ROOM,
+    FieldAvailability.NOT_APPLICABLE,
+}
 
 
 class ResolverValidationError(ValueError):
@@ -80,6 +95,100 @@ class ResolverAgent:
     ) -> None:
         self.llm = llm
         self.prompt_path = Path(prompt_path)
+
+    @staticmethod
+    def _profile_policy_index(
+        plan: ResearchPlan,
+    ) -> dict[tuple[str, str], tuple[FieldAvailability, bool, ProfileReuseScope]]:
+        """Resolve immutable profile policy to runtime task/field identifiers."""
+
+        if plan.profile_snapshot is None:
+            return {}
+        task_by_question = {
+            task.catalog_question_id: task for task in plan.tasks
+        }
+        return {
+            (task_by_question[question.question_id].task_id, field.target_field): (
+                field.availability,
+                field.required_for_completion,
+                question.reuse_scope,
+            )
+            for question in plan.profile_snapshot.questions
+            for field in question.fields
+        }
+
+    @classmethod
+    def _profile_task_policies(
+        cls,
+        plan: ResearchPlan,
+        task_id: str,
+    ) -> list[tuple[str, FieldAvailability, bool, ProfileReuseScope]]:
+        task = next(task for task in plan.tasks if task.task_id == task_id)
+        index = cls._profile_policy_index(plan)
+        return [
+            (target_field, *index[(task_id, target_field)])
+            for target_field in task.target_fields
+            if (task_id, target_field) in index
+        ]
+
+    @classmethod
+    def _follow_up_policy(
+        cls,
+        plan: ResearchPlan | None,
+        follow_up: CheckerFollowUpTask,
+    ) -> tuple[FieldAvailability | None, bool | None, ProfileReuseScope | None]:
+        declared = (
+            follow_up.availability,
+            follow_up.required_for_completion,
+            follow_up.reuse_scope,
+        )
+        if plan is None or plan.profile_snapshot is None:
+            return declared
+        expected = cls._profile_policy_index(plan).get(
+            (follow_up.task_id, follow_up.target_field)
+        )
+        if expected is None:
+            # Resolver creates synthetic task/source-scope follow-ups itself. Their
+            # routing metadata is already derived from the immutable profile.
+            return declared
+        if any(value is not None for value in declared) and declared != expected:
+            raise ResolverValidationError(
+                "Checker follow-up profile policy differs from the Plan snapshot."
+            )
+        return expected
+
+    @classmethod
+    def _follow_up_route_rank(
+        cls,
+        plan: ResearchPlan,
+        follow_up: CheckerFollowUpTask,
+    ) -> tuple[int, int]:
+        availability, required, _ = cls._follow_up_policy(plan, follow_up)
+        if plan.profile_snapshot is None:
+            return (0, 0)
+        if availability in _AUTOMATED_AVAILABILITIES:
+            route_rank = 0
+        elif availability == FieldAvailability.SYSTEM_DERIVED:
+            route_rank = 1
+        else:
+            route_rank = 2
+        return (0 if required else 1, route_rank)
+
+    @classmethod
+    def _locked_action_for_follow_up(
+        cls,
+        plan: ResearchPlan | None,
+        follow_up: CheckerFollowUpTask,
+    ) -> ResolverAction | None:
+        availability, _, _ = cls._follow_up_policy(plan, follow_up)
+        if availability == FieldAvailability.SYSTEM_DERIVED:
+            return ResolverAction.LOCAL_AUDIT
+        if (
+            follow_up.route == CheckerFollowUpRoute.HUMAN_REVIEW
+            or availability in _HUMAN_ONLY_AVAILABILITIES
+        ):
+            return ResolverAction.HUMAN_REVIEW
+        return None
 
     def create_resolution_results(
         self,
@@ -154,6 +263,10 @@ class ResolverAgent:
             checker_results.recommended_next_action
             == CheckerNextAction.RESEARCH_NEXT_BATCH
         )
+        source_backlog_expansion = (
+            plan.profile_snapshot is None
+            and bool(checker_results.unevaluated_source_ids)
+        )
         if force_scope_expansion and (
             checker_results.recommended_next_action
             != CheckerNextAction.RESOLVE_GAPS
@@ -169,11 +282,24 @@ class ResolverAgent:
                 search_results,
                 checker_results,
             )
+            if plan.profile_snapshot is not None:
+                expansion_order = {
+                    item.follow_up_id: index
+                    for index, item in enumerate(ordered_follow_ups)
+                }
+                ordered_follow_ups = sorted(
+                    ordered_follow_ups,
+                    key=lambda item: (
+                        *self._follow_up_route_rank(plan, item),
+                        -PRIORITY_ORDER[item.priority],
+                        expansion_order[item.follow_up_id],
+                    ),
+                )
             expansion_limit = min(
                 max_follow_ups,
                 (
                     max_source_actions
-                    if checker_results.unevaluated_source_ids
+                    if source_backlog_expansion
                     else max_search_tasks
                 ),
             )
@@ -186,6 +312,7 @@ class ResolverAgent:
             ordered_follow_ups = sorted(
                 checker_results.follow_up_tasks,
                 key=lambda item: (
+                    *self._follow_up_route_rank(plan, item),
                     -PRIORITY_ORDER[item.priority],
                     checker_order[item.follow_up_id],
                 ),
@@ -199,12 +326,14 @@ class ResolverAgent:
             selected_follow_ups,
             search_results,
             extraction_results,
+            plan=plan,
         )
         available_source_ids = self._available_source_ids(
             eligible_source_pools,
             search_results,
         )
         deterministic_items = self._build_deterministic_items(
+            plan,
             selected_follow_ups,
             checker_results,
             eligible_source_pools=eligible_source_pools,
@@ -230,7 +359,7 @@ class ResolverAgent:
                     "unresolved selected-scope gaps after exhausting the Planner "
                     "repair-round limit; all gaps remain blocking final approval."
                 )
-            if checker_results.unevaluated_source_ids:
+            if source_backlog_expansion:
                 warnings.append(
                     f"Scheduled {len(selected_follow_ups)} known but unevaluated "
                     "source(s) before expanding to new plan tasks."
@@ -242,7 +371,7 @@ class ResolverAgent:
                 )
         if deferred_follow_up_ids:
             if expanding_scope:
-                if checker_results.unevaluated_source_ids:
+                if source_backlog_expansion:
                     warnings.append(
                         f"Deferred {len(deferred_follow_up_ids)} remaining known "
                         "source(s) to later scope-expansion batches."
@@ -268,14 +397,15 @@ class ResolverAgent:
         scope_task_ids = _deduplicate(
             [item.task_id for item in deterministic_items]
         )
-        local_audit_only = bool(deterministic_items) and all(
-            item.selected_action == ResolverAction.LOCAL_AUDIT
+        deterministic_only = bool(deterministic_items) and all(
+            item.selected_action
+            in {ResolverAction.LOCAL_AUDIT, ResolverAction.HUMAN_REVIEW}
             for item in deterministic_items
         )
-        if self.llm is not None and local_audit_only:
+        if self.llm is not None and deterministic_only:
             warnings.append(
                 "Resolver skipped its provider call because every selected item "
-                "is a deterministic local data-quality audit."
+                "is locked to deterministic local or human work."
             )
         elif self.llm is not None:
             generated_by = "openai"
@@ -397,6 +527,10 @@ class ResolverAgent:
                 "Do not send unresolved data to Normalizer until a new Checker pass accepts it.",
                 "Data-quality governance tasks are audited from immutable local "
                 "artifacts and never trigger web search or document extraction.",
+                "Manual, private-document, confidential, and not-applicable "
+                "profile fields never trigger automated sources or queries.",
+                "System-derived profile fields are handled only through local "
+                "immutable-artifact audits.",
             ]
         )
         result_payload = {
@@ -433,10 +567,15 @@ class ResolverAgent:
             "execution_batches": execution_batches,
             "execution_source_ids": execution_source_ids,
             "search_task_ids": search_task_ids,
-            "ready_for_execution": bool(work_items),
+            "ready_for_execution": any(
+                resolver_work_item_is_executable(item) for item in work_items
+            ),
             "recommended_next_action": (
                 ResolverNextAction.EXECUTE_RESOLUTION
-                if work_items
+                if any(
+                    resolver_work_item_is_executable(item)
+                    for item in work_items
+                )
                 else ResolverNextAction.HUMAN_REVIEW
             ),
             "warnings": warnings,
@@ -482,11 +621,14 @@ class ResolverAgent:
             if source.source_id in referenced
         ]
 
-    @staticmethod
+    @classmethod
     def _eligible_source_pools(
+        cls,
         follow_ups: list[CheckerFollowUpTask],
         search_results: SearchResults,
         extraction_results: ExtractionResults,
+        *,
+        plan: ResearchPlan | None = None,
     ) -> dict[str, dict[ResolverAction, list[str]]]:
         """Keep only source actions that can materially change evidence state."""
 
@@ -528,6 +670,13 @@ class ResolverAgent:
             str, dict[ResolverAction, list[str]]
         ] = {}
         for follow_up in follow_ups:
+            if cls._locked_action_for_follow_up(plan, follow_up) is not None:
+                pools_by_follow_up[follow_up.follow_up_id] = {
+                    ResolverAction.EXTRACT_KNOWN_SOURCE: [],
+                    ResolverAction.RETRY_RETRIEVAL: [],
+                    ResolverAction.REEXTRACT_EXISTING: [],
+                }
+                continue
             reextract_source_ids = [
                 source_id
                 for source_id in evidence_source_ids(
@@ -556,14 +705,48 @@ class ResolverAgent:
             ]
         return pools_by_follow_up
 
-    @staticmethod
+    @classmethod
     def _build_scope_expansion_follow_ups(
+        cls,
         plan: ResearchPlan,
         search_results: SearchResults,
         checker_results: CheckerResults,
     ) -> list[CheckerFollowUpTask]:
         task_by_id = {task.task_id: task for task in plan.tasks}
-        if checker_results.unevaluated_source_ids:
+
+        def scope_policy(task_id: str):
+            policies = cls._profile_task_policies(plan, task_id)
+            automated = [
+                item for item in policies if item[1] in _AUTOMATED_AVAILABILITIES
+            ]
+            system = [
+                item
+                for item in policies
+                if item[1] == FieldAvailability.SYSTEM_DERIVED
+            ]
+            if automated:
+                # A single public search can efficiently serve all automatable
+                # fields in a mixed task. Searcher still applies its own field
+                # boundary before any web-enabled model call.
+                return sorted(
+                    automated,
+                    key=lambda item: (
+                        not item[2],
+                        item[1] == FieldAvailability.PUBLIC_OPTIONAL,
+                    ),
+                )[0]
+            if system:
+                return system[0]
+            return policies[0] if policies else None
+
+        # Profile Checker 1.5 keeps an evidence backlog separately from the
+        # profile completion scope. Scope expansion must advance profile tasks;
+        # replaying every historical source first can starve L2/L3 progression.
+        # Legacy artifacts retain their established source-first behavior.
+        if (
+            plan.profile_snapshot is None
+            and checker_results.unevaluated_source_ids
+        ):
             source_by_id = {
                 source.source_id: source for source in search_results.sources
             }
@@ -580,6 +763,28 @@ class ResolverAgent:
                     source.task_ids[0],
                 )
                 task = task_by_id[task_id]
+                policy = scope_policy(task.task_id)
+                availability = policy[1] if policy is not None else None
+                required = policy[2] if policy is not None else None
+                reuse_scope = policy[3] if policy is not None else None
+                local_audit = (
+                    availability == FieldAvailability.SYSTEM_DERIVED
+                    or (policy is None and task.section_id == "data_quality")
+                )
+                human_review = availability in _HUMAN_ONLY_AVAILABILITIES
+                profile_action = (
+                    CheckerFollowUpAction.LOCAL_AUDIT
+                    if local_audit
+                    else CheckerFollowUpAction.REQUEST_AUTHORIZED_DOCUMENT
+                    if availability
+                    in {
+                        FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+                        FieldAvailability.CONFIDENTIAL_DEAL_ROOM,
+                    }
+                    else CheckerFollowUpAction.MANUAL_RESEARCH
+                    if human_review
+                    else CheckerFollowUpAction.EXTRACT_KNOWN_SOURCE
+                )
                 follow_ups.append(
                     CheckerFollowUpTask(
                         follow_up_id=_stable_id(
@@ -587,20 +792,44 @@ class ResolverAgent:
                         ),
                         task_id=task.task_id,
                         target_field="__source_scope__",
+                        availability=availability,
+                        required_for_completion=required,
+                        reuse_scope=reuse_scope,
                         priority=task.priority,
                         reason=CheckerFollowUpReason.SOURCE_NOT_EVALUATED,
                         question=(
                             "Extract and evaluate the known Searcher source for "
                             f"task '{task.title}': {source.canonical_url}"
                         ),
-                        required_source_types=[source.source_type],
-                        action=CheckerFollowUpAction.EXTRACT_KNOWN_SOURCE,
-                        candidate_source_ids=[source.source_id],
+                        required_source_types=(
+                            []
+                            if local_audit or human_review
+                            else [source.source_type]
+                        ),
+                        route=(
+                            CheckerFollowUpRoute.HUMAN_REVIEW
+                            if human_review
+                            else CheckerFollowUpRoute.RESOLVER
+                        ),
+                        action=profile_action,
+                        candidate_source_ids=(
+                            [] if local_audit or human_review else [source.source_id]
+                        ),
                         minimum_additional_sources=0,
                         requires_independent_source=False,
-                        suggested_queries=_deduplicate(task.search_queries)[:10],
+                        suggested_queries=(
+                            []
+                            if local_audit or human_review
+                            else _deduplicate(task.search_queries)[:10]
+                        ),
                         completion_criteria=(
-                            "Complete when the known source has a retrieval and "
+                            "Complete when the profile field is handled in the "
+                            "human research workflow."
+                            if human_review
+                            else "Complete when local immutable artifacts derive "
+                            "the system-owned field without external evidence calls."
+                            if local_audit
+                            else "Complete when the known source has a retrieval and "
                             "extraction result and a new Checker pass evaluates it."
                         ),
                     )
@@ -610,9 +839,34 @@ class ResolverAgent:
         follow_ups: list[CheckerFollowUpTask] = []
         for task_id in checker_results.unevaluated_task_ids:
             task = task_by_id[task_id]
-            local_audit = task.section_id == "data_quality"
-            queries = [] if local_audit else _deduplicate(task.search_queries)
-            if not local_audit and not queries:
+            policy = scope_policy(task.task_id)
+            availability = policy[1] if policy is not None else None
+            required = policy[2] if policy is not None else None
+            reuse_scope = policy[3] if policy is not None else None
+            local_audit = (
+                availability == FieldAvailability.SYSTEM_DERIVED
+                or (policy is None and task.section_id == "data_quality")
+            )
+            human_review = availability in _HUMAN_ONLY_AVAILABILITIES
+            profile_action = (
+                CheckerFollowUpAction.LOCAL_AUDIT
+                if local_audit
+                else CheckerFollowUpAction.REQUEST_AUTHORIZED_DOCUMENT
+                if availability
+                in {
+                    FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+                    FieldAvailability.CONFIDENTIAL_DEAL_ROOM,
+                }
+                else CheckerFollowUpAction.MANUAL_RESEARCH
+                if human_review
+                else CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE
+            )
+            queries = (
+                []
+                if local_audit or human_review
+                else _deduplicate(task.search_queries)
+            )
+            if not local_audit and not human_review and not queries:
                 queries = [
                     f'"{plan.planner_input.brand_name}" {task.title} '
                     f"{plan.planner_input.target_country}"
@@ -624,6 +878,9 @@ class ResolverAgent:
                     ),
                     task_id=task.task_id,
                     target_field="__task_scope__",
+                    availability=availability,
+                    required_for_completion=required,
+                    reuse_scope=reuse_scope,
                     priority=task.priority,
                     reason=CheckerFollowUpReason.SCOPE_NOT_STARTED,
                     question=(
@@ -631,21 +888,28 @@ class ResolverAgent:
                         f"{task.question}"
                     ),
                     required_source_types=(
-                        [] if local_audit else task.preferred_source_types
+                        []
+                        if local_audit or human_review
+                        else task.preferred_source_types
                     ),
                     related_claim_ids=[],
                     supporting_claim_ids=[],
-                    action=(
-                        CheckerFollowUpAction.SEMANTIC_REVIEW
-                        if local_audit
-                        else CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE
+                    route=(
+                        CheckerFollowUpRoute.HUMAN_REVIEW
+                        if human_review
+                        else CheckerFollowUpRoute.RESOLVER
                     ),
+                    action=profile_action,
                     candidate_source_ids=[],
                     retry_source_ids=[],
                     reextract_source_ids=[],
-                    minimum_additional_sources=(0 if local_audit else task.min_sources),
+                    minimum_additional_sources=(
+                        0 if local_audit or human_review else task.min_sources
+                    ),
                     requires_independent_source=(
-                        task.requires_independent_corroboration
+                        False
+                        if local_audit or human_review
+                        else task.requires_independent_corroboration
                     ),
                     suggested_queries=queries[:10],
                     completion_criteria=(
@@ -653,6 +917,9 @@ class ResolverAgent:
                         "field from immutable plan, search, extraction, and checker "
                         "artifacts without external evidence calls."
                         if local_audit
+                        else "Complete when the task enters the human research "
+                        "workflow without an automated web or extraction call."
+                        if human_review
                         else "Complete when this plan task has been searched, its "
                         "mapped sources have been extracted, and a new Checker pass "
                         "has evaluated every target field."
@@ -674,6 +941,7 @@ class ResolverAgent:
     @classmethod
     def _build_deterministic_items(
         cls,
+        plan: ResearchPlan,
         follow_ups: list[CheckerFollowUpTask],
         checker_results: CheckerResults,
         *,
@@ -700,8 +968,50 @@ class ResolverAgent:
             return selected
 
         for sequence, follow_up in enumerate(follow_ups, start=1):
+            availability, required, reuse_scope = cls._follow_up_policy(
+                plan, follow_up
+            )
+            locked_action = cls._locked_action_for_follow_up(plan, follow_up)
+            if locked_action is not None:
+                items.append(
+                    ResolverWorkItem(
+                        resolution_item_id=_stable_id(
+                            "resolution-item", follow_up.follow_up_id
+                        ),
+                        follow_up_id=follow_up.follow_up_id,
+                        task_id=follow_up.task_id,
+                        target_field=follow_up.target_field,
+                        field_availability=availability,
+                        required_for_completion=required,
+                        reuse_scope=reuse_scope,
+                        priority=follow_up.priority,
+                        reason=follow_up.reason,
+                        sequence=sequence,
+                        allowed_actions=[locked_action],
+                        selected_action=locked_action,
+                        selected_source_ids=[],
+                        fallback_source_ids=[],
+                        queries=[],
+                        related_claim_ids=follow_up.related_claim_ids,
+                        supporting_claim_ids=follow_up.supporting_claim_ids,
+                        minimum_additional_sources=0,
+                        requires_independent_source=False,
+                        completion_criteria=follow_up.completion_criteria,
+                        rationale=(
+                            "Profile availability requires deterministic local "
+                            "derivation without external calls."
+                            if locked_action == ResolverAction.LOCAL_AUDIT
+                            else "Profile availability or Checker routing requires "
+                            "human work without automated sources or queries."
+                        ),
+                    )
+                )
+                continue
             if follow_up.reason == CheckerFollowUpReason.SCOPE_NOT_STARTED:
-                if follow_up.action == CheckerFollowUpAction.SEMANTIC_REVIEW:
+                if follow_up.action in {
+                    CheckerFollowUpAction.SEMANTIC_REVIEW,
+                    CheckerFollowUpAction.LOCAL_AUDIT,
+                }:
                     items.append(
                         ResolverWorkItem(
                             resolution_item_id=_stable_id(
@@ -710,6 +1020,9 @@ class ResolverAgent:
                             follow_up_id=follow_up.follow_up_id,
                             task_id=follow_up.task_id,
                             target_field=follow_up.target_field,
+                            field_availability=availability,
+                            required_for_completion=required,
+                            reuse_scope=reuse_scope,
                             priority=follow_up.priority,
                             reason=follow_up.reason,
                             sequence=sequence,
@@ -741,6 +1054,9 @@ class ResolverAgent:
                         follow_up_id=follow_up.follow_up_id,
                         task_id=follow_up.task_id,
                         target_field=follow_up.target_field,
+                        field_availability=availability,
+                        required_for_completion=required,
+                        reuse_scope=reuse_scope,
                         priority=follow_up.priority,
                         reason=follow_up.reason,
                         sequence=sequence,
@@ -861,9 +1177,15 @@ class ResolverAgent:
                 for source_id in all_source_ids
                 if source_id not in selected_sources
             ]
-            queries = _deduplicate(follow_up.suggested_queries)[
-                :max_queries_per_item
-            ]
+            queries = (
+                []
+                if selected_action == ResolverAction.HUMAN_REVIEW
+                else _deduplicate(follow_up.suggested_queries)[
+                    :max_queries_per_item
+                ]
+            )
+            if selected_action == ResolverAction.HUMAN_REVIEW:
+                fallback_source_ids = []
             items.append(
                 ResolverWorkItem(
                     resolution_item_id=_stable_id(
@@ -872,6 +1194,9 @@ class ResolverAgent:
                     follow_up_id=follow_up.follow_up_id,
                     task_id=follow_up.task_id,
                     target_field=follow_up.target_field,
+                    field_availability=availability,
+                    required_for_completion=required,
+                    reuse_scope=reuse_scope,
                     priority=follow_up.priority,
                     reason=follow_up.reason,
                     sequence=sequence,
@@ -973,9 +1298,14 @@ class ResolverAgent:
                         "The draft exceeds the search-task budget.",
                         code="search_task_budget_exceeded",
                     )
-            queries = _deduplicate(
-                [*item.derived_queries, *baseline.queries]
-            )[:max_queries_per_item]
+            queries = (
+                []
+                if item.selected_action
+                in {ResolverAction.HUMAN_REVIEW, ResolverAction.LOCAL_AUDIT}
+                else _deduplicate(
+                    [*item.derived_queries, *baseline.queries]
+                )[:max_queries_per_item]
+            )
             fallback_source_ids = [
                 source_id
                 for source_id in _deduplicate(
@@ -993,6 +1323,11 @@ class ResolverAgent:
                 )
                 if source_id not in item.selected_source_ids
             ]
+            if item.selected_action in {
+                ResolverAction.HUMAN_REVIEW,
+                ResolverAction.LOCAL_AUDIT,
+            }:
+                fallback_source_ids = []
             grounded_payload = baseline.model_dump(mode="python")
             grounded_payload.update(
                 {

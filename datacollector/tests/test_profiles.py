@@ -12,6 +12,7 @@ from datacollector.profiles import (
     ResearchProfileCatalog,
     load_profile_catalog,
     materialize_profile,
+    public_automation_task_view,
     resolve_profile_definition,
 )
 from datacollector.schemas import (
@@ -251,6 +252,40 @@ class ResearchProfileTests(TestCase):
         self.assertNotIn("brand.aliases", l1_plan.critical_fields)
         self.assertNotIn("fees.joining_fee_tax_basis", l1_plan.critical_fields)
         self.assertNotIn("investment.startup_package", l1_plan.critical_fields)
+
+    def test_public_automation_view_excludes_private_manual_and_system_fields(self):
+        plan = PlannerAgent(
+            self.question_catalog,
+            profile_catalog=self.profile_catalog,
+        ).create_plan(
+            PlannerInput(
+                brand_name="Example", target_country="PL", profile_id="PL:L3"
+            )
+        )
+        fees_task = next(
+            task
+            for task in plan.tasks
+            if task.catalog_question_id == "fdd06.other_fees"
+        )
+        public_view = public_automation_task_view(plan, fees_task)
+
+        self.assertIsNotNone(public_view)
+        self.assertIn("fees.royalty", public_view.target_fields)
+        self.assertNotIn("fees.audit", public_view.target_fields)
+        self.assertNotIn("fees.default_and_penalties", public_view.target_fields)
+        self.assertEqual(
+            set(public_view.fields_to_collect)
+            | set(public_view.fields_to_verify),
+            set(public_view.target_fields),
+        )
+        self.assertIn("Do not seek", public_view.question)
+
+        private_task = next(
+            task
+            for task in plan.tasks
+            if task.catalog_question_id == "fdd22.contracts"
+        )
+        self.assertIsNone(public_automation_task_view(plan, private_task))
 
     def test_l3_restores_full_catalog_semantics_without_weaker_evidence(self):
         l2_snapshot, _ = self.materialized("PL:L2")

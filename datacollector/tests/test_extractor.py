@@ -374,6 +374,66 @@ class ExtractorAgentTests(TestCase):
         self.assertEqual(field.status, FieldExtractionStatus.EXTRACTED)
         self.assertEqual(field.claim_ids, [claim.claim_id])
 
+    def test_profile_extractor_payload_excludes_private_fields(self):
+        original_plan, original_task = self.plan, self.task
+        try:
+            self.plan = PlannerAgent(load_question_catalog()).create_plan(
+                PlannerInput(
+                    brand_name="Example", target_country="PL", profile_id="PL:L3"
+                )
+            )
+            self.task = next(
+                task
+                for task in self.plan.tasks
+                if task.catalog_question_id == "fdd06.other_fees"
+            )
+            source = self._source()
+            llm = FakeExtractorLLM(self._successful_generation)
+
+            results, _ = self._run([source], llm=llm, iteration=3)
+
+            supplied_task = llm.calls[0]["tasks"][0]
+            self.assertIn("fees.royalty", supplied_task.target_fields)
+            self.assertNotIn("fees.audit", supplied_task.target_fields)
+            private_field = next(
+                field
+                for field in results.task_results[0].field_results
+                if field.target_field == "fees.audit"
+            )
+            self.assertEqual(
+                private_field.status, FieldExtractionStatus.NOT_PROCESSED
+            )
+            self.assertIn("excluded", private_field.notes)
+        finally:
+            self.plan, self.task = original_plan, original_task
+
+    def test_profile_extractor_rejects_human_only_source_before_fetch(self):
+        original_plan, original_task = self.plan, self.task
+        try:
+            self.plan = PlannerAgent(load_question_catalog()).create_plan(
+                PlannerInput(
+                    brand_name="Example", target_country="PL", profile_id="PL:L3"
+                )
+            )
+            self.task = next(
+                task
+                for task in self.plan.tasks
+                if task.catalog_question_id == "fdd22.contracts"
+            )
+            source = self._source()
+            fetcher = FakeFetcher(
+                {source.source_id: self._fetched(source)}
+            )
+
+            with self.assertRaisesRegex(
+                ExtractorValidationError, "forbids automated extraction"
+            ):
+                self._run([source], fetcher=fetcher)
+
+            self.assertEqual(fetcher.calls, [])
+        finally:
+            self.plan, self.task = original_plan, original_task
+
     def test_bad_quote_field_and_passage_are_rejected_but_usage_is_retained(self):
         source = self._source()
 

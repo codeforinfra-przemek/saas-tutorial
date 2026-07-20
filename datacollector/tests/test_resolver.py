@@ -1,3 +1,4 @@
+import hashlib
 import json
 from contextlib import redirect_stdout
 from io import StringIO
@@ -12,11 +13,14 @@ from datacollector.agents.resolver import ResolverAgent, ResolverValidationError
 from datacollector.catalog import load_question_catalog
 from datacollector.cli import main
 from datacollector.llm.protocol import ResolverGeneration, ResolverProviderError
+from datacollector.profiles import load_profile_catalog
 from datacollector.schemas import (
     AgentIterationUsage,
     CheckerClaimDecisionDraft,
     CheckerDraft,
     CheckerFollowUpAction,
+    CheckerFollowUpRoute,
+    CheckerFollowUpTask,
     CheckerIssueCode,
     CheckerModelSemanticFit,
     CheckerModelSourceSupport,
@@ -26,11 +30,14 @@ from datacollector.schemas import (
     DocumentParseStatus,
     DocumentRetrievalStatus,
     ExtractionSemanticScope,
+    FieldAvailability,
     PlannerInput,
+    ProfileReuseScope,
     ResearchPlan,
     ResolverAction,
     ResolverDraft,
     ResolverItemDraft,
+    ResolverNextAction,
     ResolverResults,
     ResolverStrategySource,
     SourceType,
@@ -206,6 +213,16 @@ class ResolverAgentTests(TestCase):
             search_reference=checker_fixtures.SEARCH_REFERENCE,
             iteration=4,
         )
+        cls.profile_plan = PlannerAgent(
+            load_question_catalog(),
+            profile_catalog=load_profile_catalog(),
+        ).create_plan(
+            PlannerInput(
+                brand_name="Example",
+                target_country="PL",
+                profile_id="PL:L3",
+            )
+        )
 
     def _run(self, llm=None, *, checker_results=None, **kwargs):
         extraction_results = kwargs.pop(
@@ -233,6 +250,337 @@ class ResolverAgentTests(TestCase):
             iteration=kwargs.pop("iteration", 4),
             **kwargs,
         )
+
+    @classmethod
+    def _profile_field(cls, availability):
+        task_by_question = {
+            task.catalog_question_id: task for task in cls.profile_plan.tasks
+        }
+        for question in cls.profile_plan.profile_snapshot.questions:
+            for field in question.fields:
+                if field.availability == availability:
+                    return (
+                        task_by_question[question.question_id],
+                        question,
+                        field,
+                    )
+        raise AssertionError(f"No profile field for {availability}")
+
+    @staticmethod
+    def _profile_follow_up(task, question, field, *, route=None):
+        return CheckerFollowUpTask(
+            follow_up_id=(
+                "followup-"
+                + hashlib.sha256(
+                    f"{task.task_id}:{field.target_field}".encode()
+                ).hexdigest()[:16]
+            ),
+            task_id=task.task_id,
+            target_field=field.target_field,
+            availability=field.availability,
+            required_for_completion=field.required_for_completion,
+            reuse_scope=question.reuse_scope,
+            priority=task.priority,
+            reason=CheckerFollowUpReason.MISSING_CLAIM,
+            question=f"Resolve profile field {field.target_field} from valid evidence.",
+            required_source_types=task.preferred_source_types,
+            route=route or CheckerFollowUpRoute.RESOLVER,
+            action=CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE,
+            minimum_additional_sources=1,
+            suggested_queries=task.search_queries[:3],
+            completion_criteria=(
+                f"Complete when field {field.target_field} has valid evidence."
+            ),
+        )
+
+    def _build_profile_items(self, follow_ups):
+        return ResolverAgent._build_deterministic_items(
+            self.profile_plan,
+            follow_ups,
+            self.checker_results,
+            eligible_source_pools={
+                follow_up.follow_up_id: {
+                    ResolverAction.EXTRACT_KNOWN_SOURCE: [],
+                    ResolverAction.RETRY_RETRIEVAL: [],
+                    ResolverAction.REEXTRACT_EXISTING: [],
+                }
+                for follow_up in follow_ups
+            },
+            max_source_actions=10,
+            max_search_tasks=5,
+            max_queries_per_item=3,
+        )
+
+    def test_private_and_manual_profile_fields_are_locked_to_human_review(self):
+        follow_ups = []
+        for availability in (
+            FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+            FieldAvailability.MANUAL_RESEARCH_REQUIRED,
+            FieldAvailability.CONFIDENTIAL_DEAL_ROOM,
+        ):
+            try:
+                task, question, field = self._profile_field(availability)
+            except AssertionError:
+                # PL:L3 currently has no confidential deal-room field, but the
+                # boundary remains enforced directly by the schema test below.
+                continue
+            follow_ups.append(self._profile_follow_up(task, question, field))
+
+        items = self._build_profile_items(follow_ups)
+
+        self.assertTrue(items)
+        for item in items:
+            self.assertEqual(item.allowed_actions, [ResolverAction.HUMAN_REVIEW])
+            self.assertEqual(item.selected_action, ResolverAction.HUMAN_REVIEW)
+            self.assertEqual(item.queries, [])
+            self.assertEqual(item.selected_source_ids, [])
+            self.assertEqual(item.fallback_source_ids, [])
+            self.assertIsNotNone(item.required_for_completion)
+            self.assertIsNotNone(item.reuse_scope)
+
+    def test_system_derived_profile_field_is_locked_to_local_audit(self):
+        task, question, field = self._profile_field(
+            FieldAvailability.SYSTEM_DERIVED
+        )
+        follow_up = self._profile_follow_up(task, question, field)
+
+        item = self._build_profile_items([follow_up])[0]
+
+        self.assertEqual(item.allowed_actions, [ResolverAction.LOCAL_AUDIT])
+        self.assertEqual(item.selected_action, ResolverAction.LOCAL_AUDIT)
+        self.assertEqual(item.queries, [])
+        self.assertEqual(item.minimum_additional_sources, 0)
+
+    def test_profile_follow_ups_rank_required_auto_before_optional_and_human(self):
+        follow_ups = {}
+        for availability in (
+            FieldAvailability.PUBLIC_EXPECTED,
+            FieldAvailability.PUBLIC_OPTIONAL,
+            FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+        ):
+            task, question, field = self._profile_field(availability)
+            follow_ups[availability] = self._profile_follow_up(
+                task, question, field
+            )
+
+        ranks = {
+            availability: ResolverAgent._follow_up_route_rank(
+                self.profile_plan, follow_up
+            )
+            for availability, follow_up in follow_ups.items()
+        }
+
+        self.assertLess(
+            ranks[FieldAvailability.PUBLIC_EXPECTED],
+            ranks[FieldAvailability.PUBLIC_OPTIONAL],
+        )
+        self.assertLess(
+            ranks[FieldAvailability.PUBLIC_OPTIONAL],
+            ranks[FieldAvailability.PRIVATE_DOCUMENT_REQUIRED],
+        )
+
+    def test_profile_scope_expansion_routes_mixed_and_human_tasks_safely(self):
+        snapshot_by_question = {
+            question.question_id: question
+            for question in self.profile_plan.profile_snapshot.questions
+        }
+
+        def availability_set(task):
+            return {
+                field.availability
+                for field in snapshot_by_question[task.catalog_question_id].fields
+            }
+
+        auto = {
+            FieldAvailability.PUBLIC_EXPECTED,
+            FieldAvailability.PUBLIC_OPTIONAL,
+            FieldAvailability.REGISTRY_EXPECTED,
+        }
+        human = {
+            FieldAvailability.MANUAL_RESEARCH_REQUIRED,
+            FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+            FieldAvailability.CONFIDENTIAL_DEAL_ROOM,
+        }
+        mixed_task = next(
+            task
+            for task in self.profile_plan.tasks
+            if availability_set(task) & auto and availability_set(task) & human
+        )
+        human_task = next(
+            task
+            for task in self.profile_plan.tasks
+            if availability_set(task)
+            and availability_set(task).issubset(human)
+        )
+        system_task = next(
+            task
+            for task in self.profile_plan.tasks
+            if FieldAvailability.SYSTEM_DERIVED in availability_set(task)
+            and not availability_set(task) & auto
+        )
+        checker = self.checker_results.model_copy(
+            update={
+                "unevaluated_source_ids": [],
+                "unevaluated_task_ids": [
+                    mixed_task.task_id,
+                    human_task.task_id,
+                    system_task.task_id,
+                ],
+            }
+        )
+
+        follow_ups = ResolverAgent._build_scope_expansion_follow_ups(
+            self.profile_plan,
+            self.search_results,
+            checker,
+        )
+        items = self._build_profile_items(follow_ups)
+        by_task = {item.task_id: item for item in items}
+
+        self.assertEqual(
+            by_task[mixed_task.task_id].selected_action,
+            ResolverAction.SEARCH_NEW_SOURCE,
+        )
+        self.assertIn(
+            by_task[mixed_task.task_id].field_availability,
+            auto,
+        )
+        self.assertEqual(
+            by_task[human_task.task_id].selected_action,
+            ResolverAction.HUMAN_REVIEW,
+        )
+        self.assertEqual(by_task[human_task.task_id].queries, [])
+        self.assertEqual(
+            by_task[system_task.task_id].selected_action,
+            ResolverAction.LOCAL_AUDIT,
+        )
+
+    def test_profile_scope_expansion_does_not_replay_source_backlog_first(self):
+        next_task = self.profile_plan.tasks[1]
+        checker = self.checker_results.model_copy(
+            update={
+                "unevaluated_source_ids": [
+                    self.search_results.sources[0].source_id
+                ],
+                "unevaluated_task_ids": [next_task.task_id],
+            }
+        )
+
+        follow_ups = ResolverAgent._build_scope_expansion_follow_ups(
+            self.profile_plan,
+            self.search_results,
+            checker,
+        )
+
+        self.assertEqual(len(follow_ups), 1)
+        self.assertEqual(follow_ups[0].task_id, next_task.task_id)
+        self.assertEqual(follow_ups[0].target_field, "__task_scope__")
+        self.assertEqual(follow_ups[0].candidate_source_ids, [])
+
+    def test_human_only_resolution_skips_paid_resolver_and_is_not_executable(self):
+        follow_up = self.checker_results.follow_up_tasks[0].model_copy(
+            update={
+                "route": CheckerFollowUpRoute.HUMAN_REVIEW,
+                "candidate_source_ids": [],
+                "retry_source_ids": [],
+                "reextract_source_ids": [],
+            }
+        )
+        checker = self.checker_results.model_copy(
+            update={"follow_up_tasks": [follow_up]}
+        )
+        llm = FixtureResolverLLM()
+
+        results = self._run(llm, checker_results=checker)
+
+        self.assertEqual(llm.calls, [])
+        self.assertEqual(results.generated_by, "deterministic")
+        self.assertFalse(results.provider_executed)
+        self.assertFalse(results.ready_for_execution)
+        self.assertEqual(
+            results.recommended_next_action,
+            ResolverNextAction.HUMAN_REVIEW,
+        )
+        self.assertEqual(
+            results.work_items[0].selected_action,
+            ResolverAction.HUMAN_REVIEW,
+        )
+        self.assertEqual(results.work_items[0].queries, [])
+
+    def test_human_plus_field_local_audit_does_not_schedule_executor(self):
+        base = self.checker_results.follow_up_tasks[0]
+        target_fields = self.plan.tasks[0].target_fields
+        local_follow_up = base.model_copy(
+            update={
+                "follow_up_id": "followup-1111111111111111",
+                "target_field": target_fields[0],
+                "availability": FieldAvailability.SYSTEM_DERIVED,
+                "required_for_completion": False,
+                "reuse_scope": ProfileReuseScope.BRAND,
+                "route": CheckerFollowUpRoute.RESOLVER,
+                "action": CheckerFollowUpAction.LOCAL_AUDIT,
+                "reason": CheckerFollowUpReason.MISSING_CLAIM,
+                "candidate_source_ids": [],
+                "retry_source_ids": [],
+                "reextract_source_ids": [],
+                "minimum_additional_sources": 0,
+                "requires_independent_source": False,
+                "suggested_queries": [],
+            }
+        )
+        human_follow_up = base.model_copy(
+            update={
+                "follow_up_id": "followup-2222222222222222",
+                "target_field": target_fields[-1],
+                "availability": FieldAvailability.MANUAL_RESEARCH_REQUIRED,
+                "required_for_completion": False,
+                "reuse_scope": ProfileReuseScope.BRAND,
+                "route": CheckerFollowUpRoute.HUMAN_REVIEW,
+                "action": CheckerFollowUpAction.MANUAL_RESEARCH,
+                "reason": CheckerFollowUpReason.MISSING_CLAIM,
+                "candidate_source_ids": [],
+                "retry_source_ids": [],
+                "reextract_source_ids": [],
+                "minimum_additional_sources": 0,
+                "requires_independent_source": False,
+                "suggested_queries": [],
+            }
+        )
+        checker = self.checker_results.model_copy(
+            update={"follow_up_tasks": [local_follow_up, human_follow_up]}
+        )
+        llm = FixtureResolverLLM()
+
+        results = self._run(llm, checker_results=checker)
+
+        self.assertEqual(llm.calls, [])
+        self.assertFalse(results.ready_for_execution)
+        self.assertEqual(
+            results.recommended_next_action,
+            ResolverNextAction.HUMAN_REVIEW,
+        )
+        self.assertEqual(
+            {item.selected_action for item in results.work_items},
+            {ResolverAction.LOCAL_AUDIT, ResolverAction.HUMAN_REVIEW},
+        )
+
+    def test_resolver_schema_rejects_private_web_search(self):
+        task, question, field = self._profile_field(
+            FieldAvailability.PRIVATE_DOCUMENT_REQUIRED
+        )
+        follow_up = self._profile_follow_up(task, question, field)
+        item = self._build_profile_items([follow_up])[0]
+        payload = item.model_dump(mode="python")
+        payload.update(
+            {
+                "allowed_actions": [ResolverAction.SEARCH_NEW_SOURCE],
+                "selected_action": ResolverAction.SEARCH_NEW_SOURCE,
+                "queries": ["forbidden private-field web search"],
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "must remain human-only"):
+            type(item).model_validate(payload)
 
     def test_free_reextracts_only_usable_unprocessed_evidence_sources(self):
         follow_up = self.checker_results.follow_up_tasks[0].model_copy(
@@ -549,6 +897,11 @@ class ResolverAgentTests(TestCase):
         self.assertEqual(results.search_task_ids, [])
         self.assertEqual(results.execution_source_ids, [])
         self.assertEqual(len(results.work_items), 1)
+        self.assertTrue(results.ready_for_execution)
+        self.assertEqual(
+            results.recommended_next_action,
+            ResolverNextAction.EXECUTE_RESOLUTION,
+        )
         self.assertEqual(
             results.work_items[0].selected_action,
             ResolverAction.LOCAL_AUDIT,

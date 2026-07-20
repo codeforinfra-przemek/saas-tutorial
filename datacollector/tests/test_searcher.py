@@ -541,6 +541,50 @@ class SearcherAgentTests(TestCase):
             PlannerInput(brand_name="Żabka", depth="catalog")
         )
 
+    def test_profile_search_payload_contains_only_public_automation_fields(self):
+        plan = PlannerAgent(load_question_catalog()).create_plan(
+            PlannerInput(
+                brand_name="Example", target_country="PL", profile_id="PL:L3"
+            )
+        )
+        llm = FakeSearcherLLM()
+        results = SearcherAgent(llm).create_search_results(
+            plan,
+            plan_sha256="a" * 64,
+            plan_reference="/fixtures/profile-plan.json",
+            requested_task_ids=["fdd06.other_fees"],
+            task_limit=1,
+            max_search_calls=1,
+        )
+
+        supplied_task = llm.calls[0][1][0]
+        self.assertIn("fees.royalty", supplied_task.target_fields)
+        self.assertNotIn("fees.audit", supplied_task.target_fields)
+        self.assertNotIn("fees.default_and_penalties", supplied_task.target_fields)
+        self.assertEqual(results.selected_task_ids, [supplied_task.task_id])
+
+    def test_profile_search_rejects_human_only_task_before_provider_call(self):
+        plan = PlannerAgent(load_question_catalog()).create_plan(
+            PlannerInput(
+                brand_name="Example", target_country="PL", profile_id="PL:L3"
+            )
+        )
+        llm = FakeSearcherLLM()
+
+        with self.assertRaisesRegex(
+            SearcherValidationError, "forbids public-web automation"
+        ):
+            SearcherAgent(llm).create_search_results(
+                plan,
+                plan_sha256="a" * 64,
+                plan_reference="/fixtures/profile-plan.json",
+                requested_task_ids=["fdd22.contracts"],
+                task_limit=1,
+                max_search_calls=1,
+            )
+
+        self.assertEqual(llm.calls, [])
+
     def test_free_searcher_is_explicit_query_workload_without_network_claim(self):
         results = SearcherAgent().create_search_results(
             self.plan,

@@ -5,13 +5,21 @@ from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
 from datacollector.agents.planner import PlannerAgent
 from datacollector.agents.searcher import SearcherAgent
 from datacollector.catalog import load_question_catalog
-from datacollector.cli import _loop_recommended_next_action, build_parser, main
+from datacollector.profiles import load_profile_catalog
+from datacollector.cli import (
+    _loop_progress,
+    _loop_recommended_next_action,
+    _run_loop,
+    build_parser,
+    main,
+)
 from datacollector.config import OpenAISettings
 from datacollector.documents import FetchedDocument, FetchStatus
 from datacollector.llm.protocol import (
@@ -30,6 +38,7 @@ from datacollector.llm.pricing import (
 from datacollector.loop import LoopNextAction, LoopStopReason
 from datacollector.schemas import (
     AgentIterationUsage,
+    CheckerMode,
     CheckerClaimDecisionDraft,
     CheckerDraft,
     CheckerModelSemanticFit,
@@ -428,6 +437,30 @@ class MissingTokenUsageSearcher:
 
 
 class CollectorCliTests(TestCase):
+    @staticmethod
+    def loop_checker_snapshot(*, required_status, optional_status):
+        def field(target_field, status):
+            return SimpleNamespace(
+                target_field=target_field,
+                status=SimpleNamespace(value=status),
+            )
+
+        return SimpleNamespace(
+            quality_score=10,
+            critical_missing_fields=["required.field"],
+            contradictions=[],
+            selected_task_ids=["task-001"],
+            selected_scope_ready=False,
+            task_results=[
+                SimpleNamespace(
+                    field_results=[
+                        field("required.field", required_status),
+                        field("optional.field", optional_status),
+                    ]
+                )
+            ],
+        )
+
     def test_checker_default_claim_limit_matches_loop_capacity(self):
         args = build_parser().parse_args(
             ["check", "--extractions", "extractions.json"]
@@ -462,12 +495,199 @@ class CollectorCliTests(TestCase):
 
         self.assertEqual(action, LoopNextAction.INSPECT_GAPS)
 
-    def create_extractor_cli_fixture(self, output_directory):
-        plan = PlannerAgent(load_question_catalog()).create_plan(
+    def test_profile_loop_progress_ignores_verified_optional_fields(self):
+        before = self.loop_checker_snapshot(
+            required_status="missing",
+            optional_status="missing",
+        )
+        optional_after = self.loop_checker_snapshot(
+            required_status="missing",
+            optional_status="verified",
+        )
+
+        progress, reasons, regressions = _loop_progress(
+            before,
+            optional_after,
+            min_quality_improvement=1,
+            completion_fields={"required.field"},
+        )
+
+        self.assertFalse(progress)
+        self.assertEqual(reasons, [])
+        self.assertEqual(regressions, [])
+
+        legacy_progress, legacy_reasons, _ = _loop_progress(
+            before,
+            optional_after,
+            min_quality_improvement=1,
+        )
+        self.assertTrue(legacy_progress)
+        self.assertEqual(legacy_reasons, ["verified_fields+1"])
+
+    def test_profile_loop_progress_counts_verified_completion_fields(self):
+        before = self.loop_checker_snapshot(
+            required_status="missing",
+            optional_status="missing",
+        )
+        required_after = self.loop_checker_snapshot(
+            required_status="verified",
+            optional_status="missing",
+        )
+
+        progress, reasons, regressions = _loop_progress(
+            before,
+            required_after,
+            min_quality_improvement=1,
+            completion_fields={"required.field"},
+        )
+
+        self.assertTrue(progress)
+        self.assertEqual(reasons, ["verified_fields+1"])
+        self.assertEqual(regressions, [])
+
+    def test_loop_records_profile_and_full_pre_normalizer_checker_usage(self):
+        plan_sha256 = "a" * 64
+        plan_run_id = "896c0284-f762-457b-b6fb-98bba365673b"
+        profile_sha256 = "b" * 64
+        plan = SimpleNamespace(
+            run_id=plan_run_id,
+            critical_fields=["required.field"],
+            planner_input=SimpleNamespace(brand_name="Example"),
+            profile_snapshot=SimpleNamespace(
+                profile_id="PL:L1:v1",
+                profile_sha256=profile_sha256,
+                level=SimpleNamespace(value="L1"),
+            ),
+        )
+
+        def checker(*, checker_mode, check_id, reference):
+            return SimpleNamespace(
+                plan_reference="/tmp/plan.json",
+                plan_run_id=plan_run_id,
+                plan_sha256=plan_sha256,
+                check_id=check_id,
+                passed=True,
+                checker_mode=checker_mode,
+                extraction_reference="/tmp/extractions.json",
+                iteration=1,
+                quality_threshold=80,
+                quality_score=85,
+                scope_complete=True,
+                selected_task_ids=["task-001"],
+                selected_source_ids=["source-0000000000000000"],
+                selected_claim_ids=[],
+                critical_missing_fields=[],
+                contradictions=[],
+                selected_scope_ready=True,
+                task_results=[],
+            )
+
+        incremental = checker(
+            checker_mode=CheckerMode.INCREMENTAL,
+            check_id="164fa11a-72d0-4f22-bbbb-ddbaa8606695",
+            reference="/tmp/check-incremental.json",
+        )
+        full = checker(
+            checker_mode=CheckerMode.FULL,
+            check_id="43044a36-cc6d-4dc0-b993-888d66745790",
+            reference="/tmp/check-full.json",
+        )
+        zero_usage = {
+            "api_attempts_recorded": 0,
+            "api_calls_with_usage": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+            "total_tokens": 0,
+            "tool_calls": 0,
+            "tool_cost_usd": "0",
+            "estimated_cost_usd": "0",
+        }
+        saved_results = []
+
+        def invoke_stage(handler, args):
+            del args
+            if handler.__name__ == "_run_check":
+                return {
+                    "check_path": "/tmp/check-full.json",
+                    "usage_totals": zero_usage,
+                }
+            if handler.__name__ == "_run_normalize":
+                return {
+                    "normalized_path": "/tmp/normalized.json",
+                    "usage_totals": zero_usage,
+                }
+            self.fail(f"Unexpected loop stage: {handler.__name__}")
+
+        def save_results(results, reference):
+            del reference
+            saved_results.append(results)
+            return Path("/tmp/loop-profile.json")
+
+        args = build_parser().parse_args(
+            [
+                "loop",
+                "--check",
+                "/tmp/check-incremental.json",
+                "--max-rounds",
+                "1",
+            ]
+        )
+        stdout = StringIO()
+        with (
+            patch(
+                "datacollector.cli.load_checker_results",
+                side_effect=[(incremental, "c" * 64), (full, "d" * 64)],
+            ),
+            patch(
+                "datacollector.cli.load_research_plan",
+                return_value=(plan, plan_sha256),
+            ),
+            patch(
+                "datacollector.cli._next_loop_iteration",
+                side_effect=[2, 3, 4],
+            ),
+            patch(
+                "datacollector.cli._invoke_loop_stage",
+                side_effect=invoke_stage,
+            ),
+            patch(
+                "datacollector.cli.save_loop_results",
+                side_effect=save_results,
+            ),
+            patch(
+                "datacollector.cli.load_loop_results",
+                side_effect=lambda path: (saved_results[0], "e" * 64),
+            ),
+            redirect_stdout(stdout),
+        ):
+            exit_code = _run_loop(args)
+
+        summary = json.loads(stdout.getvalue())
+        result = saved_results[0]
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(result.schema_version, "1.1.0")
+        self.assertEqual(result.profile_id, "PL:L1:v1")
+        self.assertEqual(result.profile_sha256, profile_sha256)
+        self.assertEqual(result.research_level, "L1")
+        self.assertEqual(
+            [usage.stage for usage in result.post_loop_usage],
+            ["checker", "normalizer"],
+        )
+        self.assertEqual(summary["profile_id"], "PL:L1:v1")
+        self.assertEqual(summary["profile_sha256"], profile_sha256)
+        self.assertEqual(summary["research_level"], "L1")
+
+    def create_extractor_cli_fixture(self, output_directory, *, profile_id=None):
+        plan = PlannerAgent(
+            load_question_catalog(),
+            profile_catalog=(load_profile_catalog() if profile_id else None),
+        ).create_plan(
             PlannerInput(
                 brand_name="Example",
                 target_country="PL",
-                depth="catalog",
+                depth=("due_diligence" if profile_id else "catalog"),
+                profile_id=profile_id,
             )
         )
         plan_path = save_research_plan(plan, output_directory)
@@ -484,9 +704,10 @@ class CollectorCliTests(TestCase):
         sources_path = save_search_results(search_results, plan_path)
         return plan_path, sources_path
 
-    def create_checker_cli_fixture(self, output_directory):
+    def create_checker_cli_fixture(self, output_directory, *, profile_id=None):
         plan_path, sources_path = self.create_extractor_cli_fixture(
-            output_directory
+            output_directory,
+            profile_id=profile_id,
         )
         stdout = StringIO()
         with (
@@ -1237,6 +1458,19 @@ class CollectorCliTests(TestCase):
             self.assertEqual(check_path.parent, extraction_path.parent)
             self.assertEqual(summary["generated_by"], "deterministic")
             self.assertFalse(summary["provider_executed"])
+            self.assertIsNone(summary["profile"])
+            self.assertIsNone(summary["profile_sha256"])
+            self.assertIsNone(summary["profile_total_fields"])
+            self.assertIsNone(summary["profile_completion_required_fields"])
+            self.assertIn("source_scope_complete", summary)
+            self.assertGreater(summary["selected_total_fields"], 0)
+            self.assertGreater(
+                summary["selected_completion_required_fields"], 0
+            )
+            self.assertIn(
+                "completion_coverage_score", summary["score_breakdown"]
+            )
+            self.assertIn("total_coverage_score", summary["score_breakdown"])
             self.assertEqual(summary["claim_verdicts"], {"not_reviewed": 1})
             self.assertIn("critical_missing_fields_count", summary)
             self.assertIn("unevaluated_critical_fields_count", summary)
@@ -1278,6 +1512,50 @@ class CollectorCliTests(TestCase):
             self.assertFalse(
                 (extraction_path.parent / ".check-free.json.lock").exists()
             )
+
+    def test_profile_check_summary_separates_completion_and_total_coverage(self):
+        with TemporaryDirectory() as temporary_directory:
+            _, _, extraction_path = self.create_checker_cli_fixture(
+                temporary_directory,
+                profile_id="PL:L1",
+            )
+            stdout = StringIO()
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    side_effect=AssertionError(
+                        "Free profile Checker must not load OpenAI settings."
+                    ),
+                ),
+                redirect_stdout(stdout),
+            ):
+                exit_code = main(
+                    [
+                        "check",
+                        "--extractions",
+                        str(extraction_path),
+                        "--free",
+                    ]
+                )
+
+            summary = json.loads(stdout.getvalue())
+            results, _ = load_checker_results(Path(summary["check_path"]))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(summary["profile"], "PL:L1:v1")
+            self.assertEqual(
+                summary["profile_sha256"], results.profile_sha256
+            )
+            self.assertEqual(summary["profile_total_fields"], 61)
+            self.assertEqual(summary["profile_completion_required_fields"], 30)
+            self.assertGreater(summary["selected_total_fields"], 0)
+            self.assertGreater(
+                summary["selected_completion_required_fields"], 0
+            )
+            self.assertIn(
+                "completion_coverage_score", summary["score_breakdown"]
+            )
+            self.assertIn("total_coverage_score", summary["score_breakdown"])
 
     def test_paid_check_writes_semantic_decision_and_usage(self):
         with TemporaryDirectory() as temporary_directory:

@@ -30,8 +30,11 @@ from .schemas import (
     ResearchProfileFieldPolicy,
     ResearchProfileQuestionSnapshot,
     ResearchProfileSnapshot,
+    ResearchPlan,
+    ResearchTask,
     Sensitivity,
     SourceType,
+    TaskAction,
 )
 
 
@@ -45,6 +48,26 @@ _REQUIREMENT_ORDER = {
     Requirement.REQUIRED: 3,
     Requirement.CRITICAL: 4,
 }
+
+
+# Only these availability classes may be sent to an automated public-web
+# researcher.  The set is deliberately closed: adding a new availability to
+# the profile catalog does not silently broaden network or model access.
+PUBLIC_AUTOMATION_AVAILABILITIES = frozenset(
+    {
+        FieldAvailability.PUBLIC_EXPECTED,
+        FieldAvailability.PUBLIC_OPTIONAL,
+        FieldAvailability.REGISTRY_EXPECTED,
+    }
+)
+
+HUMAN_ONLY_AVAILABILITIES = frozenset(
+    {
+        FieldAvailability.MANUAL_RESEARCH_REQUIRED,
+        FieldAvailability.PRIVATE_DOCUMENT_REQUIRED,
+        FieldAvailability.CONFIDENTIAL_DEAL_ROOM,
+    }
+)
 
 
 class ProfileCatalogError(ValueError):
@@ -654,3 +677,92 @@ def available_profiles(
         for profile in profile_catalog.profiles
         if normalized_country is None or profile.country == normalized_country
     ]
+
+
+def profile_question_policy(
+    plan: ResearchPlan,
+    task: ResearchTask,
+) -> ResearchProfileQuestionSnapshot | None:
+    """Return the immutable profile policy corresponding to one plan task.
+
+    Legacy plans intentionally return ``None`` so their historical execution
+    semantics remain unchanged.
+    """
+
+    snapshot = plan.profile_snapshot
+    if snapshot is None:
+        return None
+    return next(
+        (
+            question
+            for question in snapshot.questions
+            if question.question_id == task.catalog_question_id
+        ),
+        None,
+    )
+
+
+def profile_field_policies(
+    plan: ResearchPlan,
+    task: ResearchTask,
+) -> dict[str, ResearchProfileFieldPolicy]:
+    """Map a task's fields to their frozen profile policies."""
+
+    question = profile_question_policy(plan, task)
+    if question is None:
+        return {}
+    return {field.target_field: field for field in question.fields}
+
+
+def public_automation_task_view(
+    plan: ResearchPlan,
+    task: ResearchTask,
+) -> ResearchTask | None:
+    """Build the least-privilege task view allowed for public automation.
+
+    A profile task may mix public fields with employee-supplied contracts or
+    system-derived values.  Searcher and Extractor receive this reduced copy,
+    while persisted plan/extraction artifacts continue to use the original
+    task and therefore retain a complete, auditable gap inventory.
+    """
+
+    policies = profile_field_policies(plan, task)
+    if not policies:
+        return task
+    target_fields = [
+        field
+        for field in task.target_fields
+        if policies[field].availability in PUBLIC_AUTOMATION_AVAILABILITIES
+    ]
+    if not target_fields:
+        return None
+    target_set = set(target_fields)
+    fields_to_collect = [
+        field for field in task.fields_to_collect if field in target_set
+    ]
+    fields_to_verify = [
+        field for field in task.fields_to_verify if field in target_set
+    ]
+    if fields_to_collect and fields_to_verify:
+        action = TaskAction.COLLECT_AND_VERIFY
+    elif fields_to_collect:
+        action = TaskAction.COLLECT
+    else:
+        action = TaskAction.VERIFY
+    return task.model_copy(
+        update={
+            "question": (
+                "Collect or verify only the listed lawfully public fields. "
+                "Do not seek, infer, request, or expose private, confidential, "
+                "employee-supplied, or system-derived data."
+            ),
+            "acceptance_criteria": (
+                "Use public evidence only for the listed target fields and keep "
+                "all non-public profile fields outside this automated request."
+            ),
+            "target_fields": target_fields,
+            "fields_to_collect": fields_to_collect,
+            "fields_to_verify": fields_to_verify,
+            "action": action,
+        }
+    )
