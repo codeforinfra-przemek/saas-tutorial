@@ -3,8 +3,15 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
+import httpx
+from openai import APITimeoutError
+from pydantic import ValidationError
+
 from datacollector.config import OpenAISettings
-from datacollector.llm.openai_normalizer_client import OpenAINormalizerClient
+from datacollector.llm.openai_normalizer_client import (
+    OpenAINormalizerClient,
+    _provider_exception_code,
+)
 from datacollector.llm.protocol import NormalizerProviderError
 from datacollector.schemas import (
     NormalizationPrecision,
@@ -171,3 +178,37 @@ class OpenAINormalizerClientTests(TestCase):
         self.assertEqual(raised.exception.code, "refusal")
         self.assertIsNotNone(raised.exception.usage)
         self.assertNotIn(secret, str(raised.exception))
+
+    def test_timeout_is_reported_with_a_specific_failure_code(self):
+        error = APITimeoutError(
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses")
+        )
+        fake_client = FakeOpenAI(None, error=error)
+
+        with self.assertRaises(NormalizerProviderError) as raised:
+            self._generate(fake_client)
+
+        self.assertEqual(raised.exception.code, "timeout")
+        self.assertIsNone(raised.exception.usage)
+
+    def test_pydantic_parse_error_is_classified_as_invalid_structured_output(self):
+        with self.assertRaises(ValidationError) as raised:
+            NormalizerDraft.model_validate(
+                {
+                    "values": [
+                        {
+                            "task_id": "task-1",
+                            "target_field": "brand.name",
+                            "claim_ids": ["claim-aaaaaaaaaaaaaaaa"],
+                            "value_type": "unsupported",
+                            "canonical_text": "Żabka",
+                            "precision": "exact",
+                        }
+                    ]
+                }
+            )
+
+        self.assertEqual(
+            _provider_exception_code(raised.exception),
+            "invalid_structured_output",
+        )

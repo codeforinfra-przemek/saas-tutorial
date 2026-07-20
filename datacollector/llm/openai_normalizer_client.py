@@ -5,7 +5,18 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AuthenticationError,
+    BadRequestError,
+    InternalServerError,
+    OpenAI,
+    PermissionDeniedError,
+    RateLimitError,
+)
+from pydantic import ValidationError
 
 from ..config import OpenAISettings
 from ..schemas import (
@@ -38,6 +49,30 @@ def _response_contains_refusal(response: Any) -> bool:
             if content_type == "refusal" or refusal:
                 return True
     return False
+
+
+def _provider_exception_code(exc: Exception) -> str:
+    """Return a stable, non-sensitive failure category for request exceptions."""
+
+    if isinstance(exc, ValidationError):
+        return "invalid_structured_output"
+    if isinstance(exc, RateLimitError):
+        return "rate_limit"
+    if isinstance(exc, APITimeoutError):
+        return "timeout"
+    if isinstance(exc, AuthenticationError):
+        return "authentication_error"
+    if isinstance(exc, PermissionDeniedError):
+        return "permission_denied"
+    if isinstance(exc, BadRequestError):
+        return "invalid_request"
+    if isinstance(exc, InternalServerError):
+        return "provider_server_error"
+    if isinstance(exc, APIConnectionError):
+        return "connection_error"
+    if isinstance(exc, APIStatusError):
+        return "provider_status_error"
+    return "provider_exception"
 
 
 class OpenAINormalizerClient:
@@ -195,7 +230,7 @@ class OpenAINormalizerClient:
         except Exception as exc:
             raise NormalizerProviderError(
                 f"OpenAI Normalizer request failed ({type(exc).__name__}).",
-                code="provider_exception",
+                code=_provider_exception_code(exc),
                 **failure_context,
             ) from None
 

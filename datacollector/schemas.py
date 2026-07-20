@@ -3830,32 +3830,46 @@ class NormalizerValueDraft(ClosedModel):
     """One provider-proposed representation of accepted raw claims."""
 
     task_id: str
-    target_field: str = Field(min_length=1, max_length=500)
-    claim_ids: list[str] = Field(min_length=1, max_length=50)
+    target_field: str
+    claim_ids: list[str]
     value_type: NormalizedValueType
-    canonical_text: str = Field(min_length=1, max_length=2000)
-    number_min: str | None = Field(
-        default=None,
-        pattern=r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$",
-    )
-    number_max: str | None = Field(
-        default=None,
-        pattern=r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$",
-    )
+    canonical_text: str
+    number_min: str | None = None
+    number_max: str | None = None
     boolean_value: bool | None = None
-    date_value: str | None = Field(
-        default=None,
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-    )
-    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
-    unit: str | None = Field(default=None, max_length=100)
+    date_value: str | None = None
+    currency: str | None = None
+    unit: str | None = None
     precision: NormalizationPrecision
-    notes: str = Field(default="", max_length=1000)
+    notes: str = ""
 
-    @model_validator(mode="after")
-    def validate_typed_value(self) -> "NormalizerValueDraft":
+    def validate_semantics(self) -> None:
+        """Apply local rules after provider output and usage are available."""
+
+        if not self.task_id.strip():
+            raise ValueError("Normalizer draft task_id cannot be blank.")
+        if not 1 <= len(self.target_field) <= 500:
+            raise ValueError("Normalizer target_field length is invalid.")
+        if not 1 <= len(self.claim_ids) <= 50:
+            raise ValueError("Normalizer claim group size is invalid.")
         if len(self.claim_ids) != len(set(self.claim_ids)):
             raise ValueError("Normalizer draft claim IDs must be unique.")
+        if not 1 <= len(self.canonical_text) <= 2000:
+            raise ValueError("Normalizer canonical_text length is invalid.")
+        if self.unit is not None and len(self.unit) > 100:
+            raise ValueError("Normalizer unit is too long.")
+        if len(self.notes) > 1000:
+            raise ValueError("Normalizer notes are too long.")
+        decimal_pattern = r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$"
+        if any(
+            value is not None and not re.fullmatch(decimal_pattern, value)
+            for value in (self.number_min, self.number_max)
+        ):
+            raise ValueError("Normalizer numeric bounds require decimal strings.")
+        if self.currency is not None and not re.fullmatch(
+            r"[A-Z]{3}", self.currency
+        ):
+            raise ValueError("Normalizer currency requires an ISO code.")
         numeric = self.value_type in {
             NormalizedValueType.INTEGER,
             NormalizedValueType.DECIMAL,
@@ -3881,7 +3895,7 @@ class NormalizerValueDraft(ClosedModel):
                 raise ValueError("Money normalization requires an ISO currency.")
             if self.value_type != NormalizedValueType.MONEY and self.currency is not None:
                 raise ValueError("Only money normalization may declare currency.")
-            if self.number_max is not None and self.number_max != self.number_min:
+            if number_max is not None and number_max != number_min:
                 if self.precision != NormalizationPrecision.RANGE:
                     raise ValueError("A numeric range requires range precision.")
         elif self.value_type == NormalizedValueType.BOOLEAN:
@@ -3923,12 +3937,11 @@ class NormalizerValueDraft(ClosedModel):
             or Decimal(self.number_max) == Decimal(self.number_min)
         ):
             raise ValueError("Range precision requires two distinct numeric bounds.")
-        return self
 
 
 class NormalizerDraft(ClosedModel):
-    values: list[NormalizerValueDraft] = Field(default_factory=list, max_length=500)
-    warnings: list[str] = Field(default_factory=list, max_length=20)
+    values: list[NormalizerValueDraft] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class NormalizedValue(ClosedModel):
@@ -3953,7 +3966,7 @@ class NormalizedValue(ClosedModel):
 
     @model_validator(mode="after")
     def validate_normalized_provenance(self) -> "NormalizedValue":
-        NormalizerValueDraft(
+        draft = NormalizerValueDraft(
             task_id=self.task_id,
             target_field=self.target_field,
             claim_ids=self.claim_ids,
@@ -3968,6 +3981,7 @@ class NormalizedValue(ClosedModel):
             precision=self.precision,
             notes=self.notes,
         )
+        draft.validate_semantics()
         for values in (
             self.claim_ids,
             self.raw_value_texts,

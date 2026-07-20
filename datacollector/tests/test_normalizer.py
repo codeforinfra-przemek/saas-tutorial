@@ -7,8 +7,6 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from pydantic import ValidationError
-
 from datacollector.agents.checker import CheckerAgent
 from datacollector.agents.normalizer import NormalizerAgent, NormalizerValidationError
 from datacollector.cli import main
@@ -220,20 +218,23 @@ class NormalizerAgentTests(TestCase):
             precision=NormalizationPrecision.RANGE,
         )
 
+        value.validate_semantics()
         self.assertEqual(value.number_min, "100000")
         self.assertEqual(value.currency, "PLN")
 
     def test_typed_date_draft_rejects_impossible_calendar_date(self):
-        with self.assertRaises(ValidationError):
-            NormalizerValueDraft(
-                task_id="task-date",
-                target_field="documents.issue_dates",
-                claim_ids=["claim-aaaaaaaaaaaaaaaa"],
-                value_type=NormalizedValueType.DATE,
-                canonical_text="2026-02-31",
-                date_value="2026-02-31",
-                precision=NormalizationPrecision.EXACT,
-            )
+        value = NormalizerValueDraft(
+            task_id="task-date",
+            target_field="documents.issue_dates",
+            claim_ids=["claim-aaaaaaaaaaaaaaaa"],
+            value_type=NormalizedValueType.DATE,
+            canonical_text="2026-02-31",
+            date_value="2026-02-31",
+            precision=NormalizationPrecision.EXACT,
+        )
+
+        with self.assertRaises(ValueError):
+            value.validate_semantics()
 
     def test_paid_normalizer_groups_equivalent_claims_and_records_usage(self):
         results = self._run(FixtureNormalizerLLM(), mode=NormalizerMode.PAID)
@@ -322,6 +323,41 @@ class NormalizerAgentTests(TestCase):
         self.assertEqual(len(results.agent_usage), 1)
         self.assertEqual(results.failed_attempts[0].error_code, "invalid_claim_coverage")
         self.assertEqual(len(results.normalized_values), len(results.eligible_claim_ids))
+
+    def test_invalid_paid_typed_value_falls_back_and_preserves_usage(self):
+        def invalid_draft(claim_ids, claim_by_id):
+            values = []
+            for index, claim_id in enumerate(claim_ids):
+                claim = claim_by_id[claim_id]
+                values.append(
+                    NormalizerValueDraft(
+                        task_id=claim.task_id,
+                        target_field=claim.target_field,
+                        claim_ids=[claim_id],
+                        value_type=(
+                            NormalizedValueType.DATE
+                            if index == 0
+                            else NormalizedValueType.TEXT
+                        ),
+                        canonical_text=claim.value_text,
+                        date_value="2026-02-31" if index == 0 else None,
+                        precision=NormalizationPrecision.EXACT,
+                    )
+                )
+            return NormalizerDraft(values=values)
+
+        results = self._run(
+            FixtureNormalizerLLM(invalid_draft),
+            mode=NormalizerMode.PAID,
+        )
+
+        self.assertEqual(
+            results.strategy_source,
+            NormalizerStrategySource.DETERMINISTIC_FALLBACK,
+        )
+        self.assertEqual(len(results.agent_usage), 1)
+        self.assertEqual(results.failed_attempts[0].error_code, "invalid_typed_value")
+        self.assertFalse(results.failed_attempts[0].token_usage_unknown)
 
     def test_provider_failure_retains_zero_invention_fallback(self):
         results = self._run(FailingNormalizerLLM(), mode=NormalizerMode.PAID)

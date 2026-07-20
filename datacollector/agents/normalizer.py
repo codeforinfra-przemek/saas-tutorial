@@ -450,6 +450,27 @@ class NormalizerAgent:
         draft: NormalizerDraft,
         eligible_claims: list[RawExtractionClaim],
     ) -> None:
+        if len(draft.values) > 500:
+            raise NormalizerDraftValidationError(
+                "Normalizer draft contains too many value groups.",
+                code="invalid_typed_value",
+            )
+        if len(draft.warnings) > 20 or any(
+            not warning.strip() or len(warning) > 1000
+            for warning in draft.warnings
+        ):
+            raise NormalizerDraftValidationError(
+                "Normalizer draft warnings exceed local limits.",
+                code="invalid_typed_value",
+            )
+        for value in draft.values:
+            try:
+                value.validate_semantics()
+            except (ArithmeticError, ValueError) as exc:
+                raise NormalizerDraftValidationError(
+                    "Normalizer draft contains an invalid typed value.",
+                    code="invalid_typed_value",
+                ) from exc
         claim_by_id = {claim.claim_id: claim for claim in eligible_claims}
         draft_claim_ids = [
             claim_id for value in draft.values for claim_id in value.claim_ids
