@@ -31,9 +31,19 @@ def internal_home_view(request):
 @staff_member_required
 def internal_revenue_dashboard_view(request):
     retention_rows, retention_warning = get_retention_table()
+    forecast_rows = get_monthly_revenue_forecast()
+    forecast_chart = [
+        {
+            "month": row["month"].strftime("%Y-%m"),
+            "expected_mrr": float(row["expected_mrr"]),
+            "expected_cash_renewals": float(row["expected_cash_renewals"]),
+            "subscriptions_ending_count": row["subscriptions_ending_count"],
+        }
+        for row in forecast_rows
+    ]
     return render(request, "backoffice/revenue_dashboard.html", internal_context(
         page_title="Owner revenue dashboard",
-        overview=get_revenue_overview(), forecast_rows=get_monthly_revenue_forecast(), retention_rows=retention_rows,
+        overview=get_revenue_overview(), forecast_rows=forecast_rows, forecast_chart=forecast_chart, retention_rows=retention_rows,
         retention_warning=retention_warning, status_breakdown=get_subscription_status_breakdown(),
         recent_revenue_events=get_recent_revenue_events(), cancelled_subscriptions=get_cancelled_subscriptions(),
         top_customers=get_top_customers_by_mrr(),

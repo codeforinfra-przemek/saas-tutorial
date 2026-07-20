@@ -1,2 +1,61 @@
 {% extends "backoffice/base_internal.html" %}
-{% block internal_content %}<header class="flex flex-wrap items-end justify-between gap-3"><div><p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Owner revenue dashboard</p><h2 class="mt-2 text-3xl font-black">Przychody i retencja</h2></div><a href="{% url 'backoffice:subscriptions' %}" class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold hover:bg-slate-100">Wszystkie subskrypcje</a></header><div class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{% include "components/metric_card.html" with label="MRR" value=overview.mrr|floatformat:2|add:" zł" only %}{% include "components/metric_card.html" with label="ARR" value=overview.arr|floatformat:2|add:" zł" only %}{% include "components/metric_card.html" with label="Aktywne subskrypcje" value=overview.active_subscriptions_count helper=overview.monthly_subscriptions_count|add:" monthly" only %}{% include "components/metric_card.html" with label="Nowy MRR w miesiącu" value=overview.new_mrr_this_month|floatformat:2|add:" zł" only %}{% include "components/metric_card.html" with label="Churned MRR" value=overview.churned_mrr_this_month|floatformat:2|add:" zł" only %}{% include "components/metric_card.html" with label="Net MRR movement" value=overview.net_mrr_movement_this_month|floatformat:2|add:" zł" only %}</div><section class="mt-7 rounded-lg border border-slate-200 bg-white p-5"><h3 class="text-lg font-black">Prognoza na 12 miesięcy</h3><div class="mt-4">{% include "backoffice/partials/revenue_forecast_table.html" %}</div></section><section class="mt-5 rounded-lg border border-slate-200 bg-white p-5"><h3 class="text-lg font-black">Retencja</h3>{% if retention_warning %}<p class="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{{ retention_warning }}</p>{% else %}<div class="mt-4">{% include "backoffice/partials/retention_table.html" %}</div>{% endif %}</section><div class="mt-5 grid gap-5 lg:grid-cols-2"><section class="rounded-lg border border-slate-200 bg-white p-5"><h3 class="font-black">Top klienci według MRR</h3><div class="mt-3 space-y-2">{% for row in top_customers %}<div class="flex justify-between border-b border-slate-100 py-2 text-sm"><span class="font-bold">{{ row.organization.name }}</span><span>{{ row.mrr|floatformat:2 }} zł</span></div>{% empty %}<p class="text-sm text-slate-500">Brak aktywnych płatników.</p>{% endfor %}</div></section><section class="rounded-lg border border-slate-200 bg-white p-5"><h3 class="font-black">Ostatnie anulowania</h3><div class="mt-3 space-y-2">{% for subscription in cancelled_subscriptions %}<div class="border-b border-slate-100 py-2 text-sm"><strong>{{ subscription.organization.name }}</strong> · {{ subscription.plan.name }} · {{ subscription.status }}</div>{% empty %}<p class="text-sm text-slate-500">Brak anulowań.</p>{% endfor %}</div></section></div><section class="mt-5 rounded-lg border border-slate-200 bg-white p-5"><h3 class="font-black">Ostatnie zdarzenia przychodowe</h3><div class="mt-3 space-y-2">{% for event in recent_revenue_events %}<div class="flex flex-wrap justify-between gap-2 border-b border-slate-100 py-2 text-sm"><span><strong>{{ event.organization.name }}</strong> · {{ event.event_type }}</span><span>{{ event.mrr_delta|floatformat:2 }} zł MRR · {{ event.effective_at|date:"Y-m-d" }}</span></div>{% empty %}<p class="text-sm text-slate-500">Brak zdarzeń.</p>{% endfor %}</div></section>{% endblock %}
+
+{% block extra_css %}
+<style>
+    .revenue-chart-wrap { position: relative; height: min(360px, 58vw); min-height: 260px; }
+</style>
+{% endblock %}
+
+{% block internal_content %}
+<header class="flex flex-wrap items-end justify-between gap-3">
+    <div><p class="text-xs font-extrabold uppercase tracking-wide text-brand-700">Owner revenue dashboard</p><h2 class="mt-2 text-3xl font-black">Przychody i retencja</h2></div>
+    <a href="{% url 'backoffice:subscriptions' %}" class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold hover:bg-slate-100">Wszystkie subskrypcje</a>
+</header>
+
+<div class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    {% include "components/metric_card.html" with label="MRR" value=overview.mrr|floatformat:2|add:" zł" only %}
+    {% include "components/metric_card.html" with label="ARR" value=overview.arr|floatformat:2|add:" zł" only %}
+    {% include "components/metric_card.html" with label="Aktywne subskrypcje" value=overview.active_subscriptions_count helper=overview.monthly_subscriptions_count|add:" monthly" only %}
+    {% include "components/metric_card.html" with label="Nowy MRR w miesiącu" value=overview.new_mrr_this_month|floatformat:2|add:" zł" only %}
+    {% include "components/metric_card.html" with label="Churned MRR" value=overview.churned_mrr_this_month|floatformat:2|add:" zł" only %}
+    {% include "components/metric_card.html" with label="Net MRR movement" value=overview.net_mrr_movement_this_month|floatformat:2|add:" zł" only %}
+</div>
+
+<section class="mt-7 rounded-lg border border-slate-200 bg-white p-5">
+    <div class="flex flex-wrap items-end justify-between gap-3"><div><h3 class="text-lg font-black">Przewidywane przychody</h3><p class="mt-1 text-sm text-slate-600">Najedź na miesiąc, aby zobaczyć dokładną prognozę MRR i odnowień.</p></div><div class="flex gap-3 text-xs font-bold"><span class="text-emerald-700">● MRR</span><span class="text-sky-700">● Odnowienia</span></div></div>
+    <div class="revenue-chart-wrap mt-5"><canvas id="revenue-forecast-chart" aria-label="Wykres prognozy przychodów" role="img"></canvas></div>
+    {{ forecast_chart|json_script:"revenue-forecast-data" }}
+</section>
+
+<section class="mt-5 rounded-lg border border-slate-200 bg-white p-5"><h3 class="text-lg font-black">Prognoza na 12 miesięcy</h3><div class="mt-4">{% include "backoffice/partials/revenue_forecast_table.html" %}</div></section>
+<section class="mt-5 rounded-lg border border-slate-200 bg-white p-5"><h3 class="text-lg font-black">Retencja</h3>{% if retention_warning %}<p class="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{{ retention_warning }}</p>{% else %}<div class="mt-4">{% include "backoffice/partials/retention_table.html" %}</div>{% endif %}</section>
+<div class="mt-5 grid gap-5 lg:grid-cols-2"><section class="rounded-lg border border-slate-200 bg-white p-5"><h3 class="font-black">Top klienci według MRR</h3><div class="mt-3 space-y-2">{% for row in top_customers %}<div class="flex justify-between border-b border-slate-100 py-2 text-sm"><span class="font-bold">{{ row.organization.name }}</span><span>{{ row.mrr|floatformat:2 }} zł</span></div>{% empty %}<p class="text-sm text-slate-500">Brak aktywnych płatników.</p>{% endfor %}</div></section><section class="rounded-lg border border-slate-200 bg-white p-5"><h3 class="font-black">Ostatnie anulowania</h3><div class="mt-3 space-y-2">{% for subscription in cancelled_subscriptions %}<div class="border-b border-slate-100 py-2 text-sm"><strong>{{ subscription.organization.name }}</strong> · {{ subscription.plan.name }} · {{ subscription.status }}</div>{% empty %}<p class="text-sm text-slate-500">Brak anulowań.</p>{% endfor %}</div></section></div>
+<section class="mt-5 rounded-lg border border-slate-200 bg-white p-5"><h3 class="font-black">Ostatnie zdarzenia przychodowe</h3><div class="mt-3 space-y-2">{% for event in recent_revenue_events %}<div class="flex flex-wrap justify-between gap-2 border-b border-slate-100 py-2 text-sm"><span><strong>{{ event.organization.name }}</strong> · {{ event.event_type }}</span><span>{{ event.mrr_delta|floatformat:2 }} zł MRR · {{ event.effective_at|date:"Y-m-d" }}</span></div>{% empty %}<p class="text-sm text-slate-500">Brak zdarzeń.</p>{% endfor %}</div></section>
+{% endblock %}
+
+{% block extra_body %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const canvas = document.getElementById("revenue-forecast-chart");
+    const dataElement = document.getElementById("revenue-forecast-data");
+    if (!canvas || !dataElement || !window.Chart) return;
+    const forecast = JSON.parse(dataElement.textContent);
+    const money = new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 });
+    new Chart(canvas, {
+        data: {
+            labels: forecast.map(function (row) { return row.month; }),
+            datasets: [
+                { type: "line", label: "Przewidywany MRR", data: forecast.map(function (row) { return row.expected_mrr; }), borderColor: "#138a5f", backgroundColor: "rgba(19, 138, 95, 0.12)", borderWidth: 3, pointBackgroundColor: "#138a5f", pointRadius: 4, pointHoverRadius: 7, tension: 0.32, fill: true },
+                { type: "bar", label: "Odnowienia gotówkowe", data: forecast.map(function (row) { return row.expected_cash_renewals; }), backgroundColor: "rgba(14, 165, 233, 0.65)", borderColor: "#0284c7", borderWidth: 1, borderRadius: 5 },
+            ],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+            plugins: { tooltip: { callbacks: { label: function (context) { return context.dataset.label + ": " + money.format(context.parsed.y || 0); }, afterBody: function (items) { const row = forecast[items[0].dataIndex]; return "Kończące się subskrypcje: " + row.subscriptions_ending_count; } } }, legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { callback: function (value) { return money.format(value); } }, grid: { color: "rgba(148, 163, 184, 0.18)" } }, x: { grid: { display: false } } },
+        },
+    });
+});
+</script>
+{% endblock %}
