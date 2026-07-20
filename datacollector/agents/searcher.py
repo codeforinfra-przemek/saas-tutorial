@@ -6,6 +6,7 @@ import hashlib
 import ipaddress
 import re
 import socket
+import unicodedata
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ from ..llm.protocol import (
 from ..query_utils import normalize_search_queries
 from ..schemas import (
     AgentIterationUsage,
+    CandidateRouteDecision,
     PRIORITY_ORDER,
     ResearchPlan,
     ResearchTask,
@@ -107,6 +109,28 @@ GOVERNMENT_HOST_LABELS = {
     "justice",
     "state",
 }
+CANDIDATE_ROUTER_STOP_WORDS = {
+    "about",
+    "brand",
+    "country",
+    "dane",
+    "dla",
+    "document",
+    "franchise",
+    "franczyza",
+    "franczyzy",
+    "from",
+    "informacje",
+    "official",
+    "poland",
+    "polska",
+    "research",
+    "source",
+    "strona",
+    "with",
+    "zabka",
+}
+DEFAULT_MAX_CANDIDATE_ROUTES = 5
 
 
 class SearcherValidationError(ValueError):
@@ -199,6 +223,120 @@ def _source_id(canonical_url: str) -> str:
 
 def _query_key(value: str) -> str:
     return " ".join(value.split()).casefold()
+
+
+def _routing_tokens(value: str) -> set[str]:
+    normalized = unicodedata.normalize("NFKD", value.casefold())
+    ascii_text = "".join(
+        character for character in normalized if not unicodedata.combining(character)
+    )
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", ascii_text)
+        if len(token) >= 4 and token not in CANDIDATE_ROUTER_STOP_WORDS
+    }
+
+
+def _candidate_route_decision(
+    canonical_url: str,
+    provider_source: ProviderSearchSource,
+    action_ids: list[str],
+    completed_action_by_id: dict[str, SearchAction],
+    tasks: list[ResearchTask],
+) -> CandidateRouteDecision:
+    scoped_task_ids = _deduplicate(
+        [
+            task_id
+            for action_id in action_ids
+            for task_id in completed_action_by_id[action_id].scope_task_ids
+        ]
+    )
+    if len(scoped_task_ids) == 1:
+        return CandidateRouteDecision(
+            canonical_url=canonical_url,
+            title=provider_source.title,
+            action_ids=action_ids,
+            decision="routed",
+            routed_task_id=scoped_task_ids[0],
+            score=100,
+            runner_up_score=0,
+            matched_terms=[],
+            reason_code="single_task_action",
+        )
+
+    task_by_id = {task.task_id: task for task in tasks}
+    scoped_tasks = [
+        task_by_id[task_id]
+        for task_id in scoped_task_ids
+        if task_id in task_by_id
+    ]
+    task_terms: dict[str, set[str]] = {}
+    document_frequency: defaultdict[str, int] = defaultdict(int)
+    for task in scoped_tasks:
+        terms = _routing_tokens(
+            " ".join(
+                [
+                    task.title,
+                    task.question,
+                    task.acceptance_criteria,
+                    *task.target_fields,
+                    *task.search_queries,
+                ]
+            )
+        )
+        task_terms[task.task_id] = terms
+        for term in terms:
+            document_frequency[term] += 1
+
+    parsed = urlsplit(canonical_url)
+    candidate_terms = _routing_tokens(
+        " ".join(
+            [
+                provider_source.title,
+                parsed.hostname or "",
+                parsed.path.replace("/", " ").replace("-", " ").replace("_", " "),
+            ]
+        )
+    )
+    scores: list[tuple[int, str, list[str]]] = []
+    for task in scoped_tasks:
+        matched = sorted(candidate_terms.intersection(task_terms[task.task_id]))
+        score = sum(
+            4 if document_frequency[term] == 1 else 1
+            for term in matched
+            if document_frequency[term] < len(scoped_tasks)
+        )
+        scores.append((score, task.task_id, matched))
+    scores.sort(key=lambda item: (-item[0], item[1]))
+    best_score, best_task_id, best_terms = scores[0] if scores else (0, "", [])
+    runner_up_score = scores[1][0] if len(scores) > 1 else 0
+    if best_score >= 8 and len(best_terms) >= 2 and best_score - runner_up_score >= 4:
+        return CandidateRouteDecision(
+            canonical_url=canonical_url,
+            title=provider_source.title,
+            action_ids=action_ids,
+            decision="routed",
+            routed_task_id=best_task_id,
+            score=best_score,
+            runner_up_score=runner_up_score,
+            matched_terms=best_terms,
+            reason_code="unique_lexical_match",
+        )
+    return CandidateRouteDecision(
+        canonical_url=canonical_url,
+        title=provider_source.title,
+        action_ids=action_ids,
+        decision="unassigned",
+        routed_task_id=None,
+        score=best_score,
+        runner_up_score=runner_up_score,
+        matched_terms=best_terms,
+        reason_code=(
+            "ambiguous_scope"
+            if best_score and best_score - runner_up_score < 4
+            else "insufficient_lexical_evidence"
+        ),
+    )
 
 
 def _candidate_domain(value: str) -> str:
@@ -479,6 +617,7 @@ class SearcherAgent:
         min_queries_per_task: int = 1,
         max_retry_tasks: int = 0,
         retry_search_calls: int = 1,
+        max_candidate_routes: int = DEFAULT_MAX_CANDIDATE_ROUTES,
         query_overrides: dict[str, list[str]] | None = None,
     ) -> SearchResults:
         if iteration < 1:
@@ -500,6 +639,10 @@ class SearcherAgent:
         if retry_search_calls < 1 or retry_search_calls > 10:
             raise SearcherValidationError(
                 "Searcher retry search calls must be between 1 and 10."
+            )
+        if max_candidate_routes < 0 or max_candidate_routes > 100:
+            raise SearcherValidationError(
+                "Searcher max candidate routes must be between 0 and 100."
             )
         if max_retry_tasks and max_search_calls < 2:
             raise SearcherValidationError(
@@ -607,6 +750,7 @@ class SearcherAgent:
                 for task in sanitized
             ]
             actions = []
+            candidate_routes: list[CandidateRouteDecision] = []
             agent_usage = []
             warnings.append("Free Searcher performs no network search.")
             if sources:
@@ -654,11 +798,12 @@ class SearcherAgent:
                 )
                 generations = [generation]
                 removed_action_url_count = removed_action_urls
-                initial_sources, initial_task_results, _ = self._merge_generation(
+                initial_sources, initial_task_results, _, _ = self._merge_generation(
                     sanitized,
                     generation,
                     created_at,
                     min_queries_per_task=min_queries_per_task,
+                    max_candidate_routes=max_candidate_routes,
                 )
             except Exception as exc:
                 raise _paid_postprocessing_error(exc, agent_usage) from None
@@ -757,11 +902,12 @@ class SearcherAgent:
 
             try:
                 combined_generation = _combine_generations(generations)
-                sources, task_results, merge_warnings = self._merge_generation(
+                sources, task_results, merge_warnings, candidate_routes = self._merge_generation(
                     sanitized,
                     combined_generation,
                     created_at,
                     min_queries_per_task=min_queries_per_task,
+                    max_candidate_routes=max_candidate_routes,
                 )
             except Exception as exc:
                 raise _paid_postprocessing_error(exc, agent_usage) from None
@@ -802,11 +948,13 @@ class SearcherAgent:
                     min_queries_per_task=min_queries_per_task,
                     max_retry_tasks=max_retry_tasks,
                     retry_search_calls=retry_search_calls,
+                    max_candidate_routes=max_candidate_routes,
                     query_overrides=overrides,
                 ),
                 selected_task_ids=selected_ids,
                 unselected_task_ids=unselected_ids,
                 actions=actions,
+                candidate_routes=candidate_routes,
                 sources=sources,
                 task_results=task_results,
                 warnings=_deduplicate(warnings),
@@ -860,7 +1008,13 @@ class SearcherAgent:
         discovered_at: datetime,
         *,
         min_queries_per_task: int,
-    ) -> tuple[list[SearchSource], list[SearchTaskResult], list[str]]:
+        max_candidate_routes: int,
+    ) -> tuple[
+        list[SearchSource],
+        list[SearchTaskResult],
+        list[str],
+        list[CandidateRouteDecision],
+    ]:
         selected_ids = {task.task_id for task in tasks}
         warnings: list[str] = []
         provider_by_canonical: dict[str, ProviderSearchSource] = {}
@@ -985,6 +1139,8 @@ class SearcherAgent:
         actionless_provider_sources = 0
         promotional_provider_sources = 0
         refined_source_types = 0
+        candidate_routes: list[CandidateRouteDecision] = []
+        routed_candidate_count = 0
         task_by_id = {task.task_id: task for task in tasks}
         for canonical, provider_source in provider_by_canonical.items():
             candidate_task_ids = [
@@ -1002,8 +1158,43 @@ class SearcherAgent:
                 )
             ]
             if not mapped_task_ids:
-                unassigned_provider_sources += 1
-                continue
+                if not url_action_ids:
+                    actionless_provider_sources += 1
+                    continue
+                route = _candidate_route_decision(
+                    canonical,
+                    provider_source,
+                    url_action_ids,
+                    completed_action_by_id,
+                    tasks,
+                )
+                if route.decision == "routed":
+                    assert route.routed_task_id is not None
+                    route_tasks = [task_by_id[route.routed_task_id]]
+                    if _is_unrelated_promotional_source(canonical, route_tasks):
+                        promotional_provider_sources += 1
+                        route = route.model_copy(
+                            update={
+                                "decision": "excluded",
+                                "routed_task_id": None,
+                                "reason_code": "promotional_source_excluded",
+                            }
+                        )
+                    elif routed_candidate_count >= max_candidate_routes:
+                        route = route.model_copy(
+                            update={
+                                "decision": "limit_reached",
+                                "routed_task_id": None,
+                                "reason_code": "route_limit_reached",
+                            }
+                        )
+                    else:
+                        mapped_task_ids = [route.routed_task_id]
+                        routed_candidate_count += 1
+                candidate_routes.append(route)
+                if not mapped_task_ids:
+                    unassigned_provider_sources += 1
+                    continue
             observed_action_ids = [
                 action_id
                 for action_id in url_action_ids
@@ -1022,6 +1213,21 @@ class SearcherAgent:
             relevance_note = (
                 draft_source.relevance_note if draft_source else ""
             )
+            matching_route = next(
+                (
+                    route
+                    for route in candidate_routes
+                    if route.canonical_url == canonical
+                    and route.decision == "routed"
+                ),
+                None,
+            )
+            if matching_route is not None:
+                relevance_note = (
+                    "Deterministic Candidate Router assigned this provider-observed "
+                    f"URL to {matching_route.routed_task_id} using "
+                    f"{matching_route.reason_code}."
+                )
             proposed_source_type = (
                 draft_source.source_type
                 if draft_source
@@ -1065,6 +1271,11 @@ class SearcherAgent:
                 f"Left {unassigned_provider_sources} unassigned provider URL "
                 "candidates in the action trace instead of forwarding them to "
                 "Extractor."
+            )
+        if routed_candidate_count:
+            warnings.append(
+                f"Candidate Router deterministically assigned {routed_candidate_count} "
+                "previously unassigned provider URL candidate(s)."
             )
         if actionless_provider_sources:
             warnings.append(
@@ -1202,4 +1413,4 @@ class SearcherAgent:
                     notes=draft.notes if draft is not None else "",
                 )
             )
-        return sources, task_results, warnings
+        return sources, task_results, warnings, candidate_routes

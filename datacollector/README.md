@@ -192,7 +192,13 @@ using the old field still load, but new artifacts serialize the new name. Exact
 unambiguous; batched activity remains auditable through `observed_in_action_ids`.
 An executed derived query may be assigned to a task only when the model reports
 that exact provider-observed query for one task; ambiguous multi-task assignments
-remain action-only. Third-party registry aggregators are classified as
+remain action-only. Searcher schema `1.3.0` also records `candidate_routes` for
+provider-observed URLs that the model did not map. Candidate Router promotes a
+URL only when its completed action has one task, or when URL/title terms produce
+a unique, thresholded task match with a minimum margin. Ambiguous candidates stay
+in the action trace. The default promotion ceiling is five per Searcher run and
+can be changed with `--max-candidate-routes`; `0` disables promotion while keeping
+the audit decisions. Third-party registry aggregators are classified as
 `routing_lead`, draft legislation as `legislative_project`, and unrelated
 contest/campaign URLs are kept out of Extractor inputs.
 
@@ -402,7 +408,7 @@ Only accepted, semantically eligible claims may create a scored contradiction.
 A rejected claim (for example, a legislative proposal rejected as evidence of
 current law) cannot conflict with an accepted current-law claim or deduct score.
 
-Checker contract `1.2.0` keeps semantic acceptance separate from source
+Checker contract `1.3.0` keeps semantic acceptance separate from source
 corroboration. A directly supported claim can therefore be `accepted` while its
 field remains `needs_corroboration`. Multi-valued fields with both supported and
 unresolved values use `partial`, so accepted evidence keeps partial quality
@@ -443,6 +449,27 @@ provider request per run. If that call is unusable, or its final artifact cannot
 be used, known usage (or an explicit unknown-token attempt) is retained in the
 Checker artifact. If that final artifact cannot be published, the same attempt
 facts are written best-effort to the run's `attempts/` ledger.
+
+After Executor, an incremental pass can reuse only successful paid judgments
+from the exact predecessor Checker/Extractor/Searcher lineage:
+
+```bash
+.venv/bin/python -m datacollector check \
+  --extractions datacollector/data/runs/zabka/<run>/extractions-r018.json \
+  --iteration 18 \
+  --incremental \
+  --max-claims 500 \
+  --max-evidence-chars 500000
+```
+
+The task is the invalidation boundary: one added, removed or changed claim,
+citation, cited-source semantic metadata or document parse metadata causes every
+claim in that task to be reviewed again. Unchanged task judgments,
+contradictions and safely scoped unsafe items retain their original decisions.
+The artifact records `reviewed_*` and `inherited_claim_ids`; provider usage scope
+must match only `reviewed_task_ids` and `reviewed_source_ids`. Incremental mode
+refuses free or failed/unreviewed predecessors and verifies exact SHA-256 lineage
+before inheriting anything.
 
 ## Run Resolver: paid prioritization with deterministic local guards
 
@@ -604,7 +631,8 @@ Run Checker on the paid merged extraction:
 ```bash
 .venv/bin/python -m datacollector check \
   --extractions datacollector/data/runs/zabka/<run>/extractions-r006.json \
-  --iteration 6
+  --iteration 6 \
+  --incremental
 ```
 
 If Checker returns `resolve_gaps`, create another Resolver/Executor repair round.
@@ -667,7 +695,11 @@ does not hide stagnation. Regressions in critical gaps, contradictions, verified
 fields or quality are recorded separately in every round.
 
 When Checker passes, Orchestrator runs the paid Normalizer automatically unless
-`--skip-normalize` is supplied.
+`--skip-normalize` is supplied. Loop uses Incremental Checker after each Executor
+cycle. Before any complete or explicitly incomplete Normalizer run it performs a
+mandatory full paid Checker pass against the same extraction; standalone
+Normalizer rejects an incremental Checker artifact. This prevents inherited
+history from becoming the final publication/import gate.
 For a deliberately incomplete review draft, `--normalize-incomplete` is required;
 it is not run after a budget or unknown-cost stop. Human Review remains mandatory
 in both cases.
@@ -680,6 +712,8 @@ fetches, invokes tools, changes Checker verdicts, fills missing facts, or writes
 to Django. Rejected and `needs_review` claims are excluded. Accepted claims tied
 to a Checker safety finding are also excluded. Every retained value records its
 raw claim IDs, citation IDs and source IDs.
+The input Checker must have `checker_mode=full`; an incremental artifact is valid
+for loop routing and cost control, but never as the final Normalizer gate.
 
 For a Checker that passed, run paid Normalizer directly:
 

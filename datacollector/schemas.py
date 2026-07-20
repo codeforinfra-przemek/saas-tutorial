@@ -24,11 +24,11 @@ from pydantic import (
 
 SCHEMA_VERSION = "1.2.0"
 PROMPT_VERSION = "planner-system-v2"
-SEARCHER_SCHEMA_VERSION = "1.1.0"
+SEARCHER_SCHEMA_VERSION = "1.3.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v3"
 EXTRACTOR_SCHEMA_VERSION = "1.2.0"
 EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
-CHECKER_SCHEMA_VERSION = "1.2.0"
+CHECKER_SCHEMA_VERSION = "1.3.0"
 CHECKER_PROMPT_VERSION = "checker-system-v3"
 CHECKER_SCORING_VERSION = "checker-scoring-v2"
 RESOLVER_SCHEMA_VERSION = "1.2.0"
@@ -757,6 +757,7 @@ class SearchLimits(ClosedModel):
     min_queries_per_task: int = Field(default=1, ge=1, le=20)
     max_retry_tasks: int = Field(default=0, ge=0, le=50)
     retry_search_calls: int = Field(default=1, ge=1, le=10)
+    max_candidate_routes: int = Field(default=5, ge=0, le=100)
     query_overrides: dict[str, list[str]] = Field(default_factory=dict)
 
 
@@ -769,6 +770,27 @@ class SearchAction(ClosedModel):
     queries: list[str] = Field(default_factory=list)
     target_url: str | None = None
     source_urls: list[str] = Field(default_factory=list)
+
+
+class CandidateRouteDecision(ClosedModel):
+    """Deterministic disposition of a provider URL omitted by model mapping."""
+
+    canonical_url: str = Field(min_length=8, max_length=4000)
+    title: str = Field(default="", max_length=500)
+    action_ids: list[str] = Field(min_length=1)
+    decision: Literal["routed", "unassigned", "excluded", "limit_reached"]
+    routed_task_id: str | None = None
+    score: int = Field(default=0, ge=0, le=1000)
+    runner_up_score: int = Field(default=0, ge=0, le=1000)
+    matched_terms: list[str] = Field(default_factory=list, max_length=50)
+    reason_code: Literal[
+        "single_task_action",
+        "unique_lexical_match",
+        "ambiguous_scope",
+        "insufficient_lexical_evidence",
+        "promotional_source_excluded",
+        "route_limit_reached",
+    ]
 
 
 class SearchSource(ClosedModel):
@@ -828,7 +850,7 @@ class SearchAttemptFailure(ClosedModel):
 class SearchResults(ClosedModel):
     """Auditable source-discovery artifact consumed later by Extractor."""
 
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = SEARCHER_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = SEARCHER_SCHEMA_VERSION
     prompt_version: str = SEARCHER_PROMPT_VERSION
     search_id: str
     plan_run_id: str
@@ -857,6 +879,7 @@ class SearchResults(ClosedModel):
     selected_task_ids: list[str] = Field(min_length=1)
     unselected_task_ids: list[str]
     actions: list[SearchAction]
+    candidate_routes: list[CandidateRouteDecision] = Field(default_factory=list)
     sources: list[SearchSource]
     task_results: list[SearchTaskResult] = Field(min_length=1)
     warnings: list[str]
@@ -915,7 +938,7 @@ class SearchResults(ClosedModel):
         populated_action_ids = [item for item in action_ids if item is not None]
         if len(populated_action_ids) != len(set(populated_action_ids)):
             raise ValueError("Search action IDs must be unique when present.")
-        if self.schema_version in {"1.1.0", "1.2.0"} and len(
+        if self.schema_version != "1.0.0" and len(
             populated_action_ids
         ) != len(
             self.actions
@@ -938,7 +961,68 @@ class SearchResults(ClosedModel):
                 raise ValueError(
                     "Search action scopes may reference only selected tasks."
                 )
+        routed_urls: set[str] = set()
+        for route in (
+            self.candidate_routes if self.schema_version == "1.3.0" else []
+        ):
+            if len(route.action_ids) != len(set(route.action_ids)):
+                raise ValueError("Candidate Router action IDs must be unique.")
+            if not set(route.action_ids).issubset(known_actions):
+                raise ValueError("Candidate Router references unknown actions.")
+            if any(
+                route.canonical_url
+                not in {
+                    *action_by_id[action_id].source_urls,
+                    *(
+                        [action_by_id[action_id].target_url]
+                        if action_by_id[action_id].target_url
+                        else []
+                    ),
+                }
+                for action_id in route.action_ids
+            ):
+                raise ValueError(
+                    "Candidate Router URL must occur in every referenced action."
+                )
+            if len(route.matched_terms) != len(set(route.matched_terms)):
+                raise ValueError("Candidate Router matched terms must be unique.")
+            if route.decision == "routed":
+                if route.routed_task_id not in known_tasks:
+                    raise ValueError("Routed candidate requires a selected task.")
+                if route.canonical_url in routed_urls:
+                    raise ValueError("A candidate URL may be routed only once.")
+                if not any(
+                    route.routed_task_id in action_by_id[action_id].scope_task_ids
+                    for action_id in route.action_ids
+                ):
+                    raise ValueError(
+                        "Candidate route must remain within observed action scope."
+                    )
+                routed_urls.add(route.canonical_url)
+            elif route.routed_task_id is not None:
+                raise ValueError("Unrouted candidates cannot name a routed task.")
         source_by_id = {source.source_id: source for source in self.sources}
+        if self.schema_version == "1.3.0":
+            sources_by_url = {
+                source.canonical_url: source for source in self.sources
+            }
+            for route in self.candidate_routes:
+                if route.decision != "routed":
+                    continue
+                routed_source = sources_by_url.get(route.canonical_url)
+                if (
+                    routed_source is None
+                    or route.routed_task_id not in routed_source.task_ids
+                    or (
+                        routed_source.origin != SearchSourceOrigin.INHERITED
+                        and not set(route.action_ids).intersection(
+                            routed_source.observed_in_action_ids
+                        )
+                    )
+                ):
+                    raise ValueError(
+                        "Routed candidate must materialize as a consistently scoped source."
+                    )
         for source in self.sources:
             if len(source.task_ids) != len(set(source.task_ids)):
                 raise ValueError("Search source task IDs must be unique.")
@@ -949,7 +1033,7 @@ class SearchResults(ClosedModel):
             if not set(source.task_ids).issubset(known_tasks):
                 raise ValueError("Search sources may reference only selected tasks.")
             if (
-                self.schema_version in {"1.1.0", "1.2.0"}
+                self.schema_version != "1.0.0"
                 and source.url != source.canonical_url
             ):
                 raise ValueError(
@@ -983,7 +1067,7 @@ class SearchResults(ClosedModel):
                     "Only inherited Searcher sources may name a predecessor."
                 )
             if (
-                self.schema_version in {"1.1.0", "1.2.0"}
+                self.schema_version != "1.0.0"
                 and source.origin == SearchSourceOrigin.OPENAI_WEB_SEARCH
                 and (not source.task_ids or not source.observed_in_action_ids)
             ):
@@ -991,7 +1075,7 @@ class SearchResults(ClosedModel):
                     "Schema 1.1 provider sources must be mapped to tasks and actions."
                 )
             if (
-                self.schema_version in {"1.1.0", "1.2.0"}
+                self.schema_version != "1.0.0"
                 and source.observed_in_action_ids
             ):
                 observed_actions = [
@@ -1117,7 +1201,7 @@ class SearchResults(ClosedModel):
                     raise ValueError(
                         "Task/source mappings must be symmetric in search results."
                     )
-            if self.schema_version in {"1.1.0", "1.2.0"}:
+            if self.schema_version != "1.0.0":
                 if any(
                     action_by_id[action_id].status != "completed"
                     or result.task_id
@@ -1323,7 +1407,7 @@ class SearchResults(ClosedModel):
             usage_by_call_index = {
                 usage.call_index: usage for usage in self.agent_usage
             }
-            if self.schema_version in {"1.1.0", "1.2.0"} and any(
+            if self.schema_version != "1.0.0" and any(
                 set(action.scope_task_ids)
                 != set(usage_by_call_index[action.call_index].scope_task_ids)
                 for action in self.actions
@@ -2338,6 +2422,11 @@ class CheckerVerdict(StrEnum):
     NOT_REVIEWED = "not_reviewed"
 
 
+class CheckerMode(StrEnum):
+    FULL = "full"
+    INCREMENTAL = "incremental"
+
+
 class CheckerModelSemanticFit(StrEnum):
     DIRECT = "direct"
     PARTIAL = "partial"
@@ -2678,7 +2767,7 @@ class CheckerAttemptFailure(ClosedModel):
 class CheckerResults(ClosedModel):
     """Auditable quality decision consumed by Resolver and human review."""
 
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = CHECKER_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = CHECKER_SCHEMA_VERSION
     prompt_version: Literal[
         "checker-system-v1", "checker-system-v2", "checker-system-v3"
     ] = (
@@ -2702,11 +2791,21 @@ class CheckerResults(ClosedModel):
     target_country: str = Field(pattern=r"^[A-Z]{2}$")
     depth: ResearchDepth
     provider_executed: bool
+    checker_mode: CheckerMode = CheckerMode.FULL
+    prior_check_id: str | None = None
+    prior_check_sha256: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    prior_check_reference: str | None = Field(default=None, min_length=1)
     quality_threshold: int = Field(ge=0, le=100)
     limits: CheckerLimits
     selected_task_ids: list[str] = Field(min_length=1)
     selected_source_ids: list[str] = Field(min_length=1)
     selected_claim_ids: list[str]
+    reviewed_task_ids: list[str] = Field(default_factory=list)
+    reviewed_source_ids: list[str] = Field(default_factory=list)
+    reviewed_claim_ids: list[str] = Field(default_factory=list)
+    inherited_claim_ids: list[str] = Field(default_factory=list)
     unevaluated_task_ids: list[str]
     unevaluated_source_ids: list[str]
     scope_complete: bool
@@ -2742,11 +2841,22 @@ class CheckerResults(ClosedModel):
                 raise ValueError(f"{field_name} must be a valid UUIDv4.") from exc
             if parsed.version != 4:
                 raise ValueError(f"{field_name} must be a valid UUIDv4.")
+        if self.prior_check_id is not None:
+            try:
+                prior_check_uuid = UUID(self.prior_check_id)
+            except (ValueError, AttributeError) as exc:
+                raise ValueError("prior_check_id must be a valid UUIDv4.") from exc
+            if prior_check_uuid.version != 4:
+                raise ValueError("prior_check_id must be a valid UUIDv4.")
 
         for values, field_name in (
             (self.selected_task_ids, "selected_task_ids"),
             (self.selected_source_ids, "selected_source_ids"),
             (self.selected_claim_ids, "selected_claim_ids"),
+            (self.reviewed_task_ids, "reviewed_task_ids"),
+            (self.reviewed_source_ids, "reviewed_source_ids"),
+            (self.reviewed_claim_ids, "reviewed_claim_ids"),
+            (self.inherited_claim_ids, "inherited_claim_ids"),
             (self.unevaluated_task_ids, "unevaluated_task_ids"),
             (self.unevaluated_source_ids, "unevaluated_source_ids"),
             (self.critical_missing_fields, "critical_missing_fields"),
@@ -2754,6 +2864,62 @@ class CheckerResults(ClosedModel):
         ):
             if len(values) != len(set(values)):
                 raise ValueError(f"Checker {field_name} values must be unique.")
+
+        if self.schema_version == "1.3.0":
+            selected_claim_set = set(self.selected_claim_ids)
+            reviewed_claim_set = set(self.reviewed_claim_ids)
+            inherited_claim_set = set(self.inherited_claim_ids)
+            if reviewed_claim_set & inherited_claim_set or (
+                reviewed_claim_set | inherited_claim_set
+            ) != selected_claim_set:
+                raise ValueError(
+                    "Checker reviewed and inherited claims must exactly partition scope."
+                )
+            if self.reviewed_claim_ids != [
+                claim_id
+                for claim_id in self.selected_claim_ids
+                if claim_id in reviewed_claim_set
+            ] or self.inherited_claim_ids != [
+                claim_id
+                for claim_id in self.selected_claim_ids
+                if claim_id in inherited_claim_set
+            ]:
+                raise ValueError(
+                    "Checker reviewed and inherited claims must preserve claim order."
+                )
+            if not set(self.reviewed_task_ids).issubset(self.selected_task_ids):
+                raise ValueError("Checker reviewed tasks exceed selected scope.")
+            if not set(self.reviewed_source_ids).issubset(
+                self.selected_source_ids
+            ):
+                raise ValueError("Checker reviewed sources exceed selected scope.")
+            reviewed_task_set = set(self.reviewed_task_ids)
+            decision_task_by_claim = {
+                decision.claim_id: decision.task_id
+                for decision in self.claim_decisions
+            }
+            if any(
+                decision_task_by_claim[claim_id] not in reviewed_task_set
+                for claim_id in self.reviewed_claim_ids
+            ):
+                raise ValueError("Reviewed claims must belong to reviewed tasks.")
+            lineage = (
+                self.prior_check_id,
+                self.prior_check_sha256,
+                self.prior_check_reference,
+            )
+            if self.checker_mode == CheckerMode.FULL:
+                if any(lineage) or self.inherited_claim_ids:
+                    raise ValueError(
+                        "Full Checker cannot inherit judgments or predecessor lineage."
+                    )
+                if self.reviewed_claim_ids != self.selected_claim_ids:
+                    raise ValueError("Full Checker must review every selected claim.")
+            else:
+                if not all(lineage):
+                    raise ValueError(
+                        "Incremental Checker requires complete predecessor lineage."
+                    )
 
         if [item.source_id for item in self.source_assessments] != (
             self.selected_source_ids
@@ -2831,23 +2997,51 @@ class CheckerResults(ClosedModel):
                 raise ValueError(
                     "Successful paid Checker cannot leave claims unreviewed."
                 )
+            reviewed_claim_set = set(self.reviewed_claim_ids)
             if self.failed_attempts and any(
-                item.verdict != CheckerVerdict.NOT_REVIEWED
-                or item.semantic_fit != CheckerSemanticFit.NOT_REVIEWED
-                or item.source_support != CheckerSourceSupport.NOT_REVIEWED
+                (
+                    item.verdict != CheckerVerdict.NOT_REVIEWED
+                    or item.semantic_fit != CheckerSemanticFit.NOT_REVIEWED
+                    or item.source_support != CheckerSourceSupport.NOT_REVIEWED
+                )
                 for item in self.claim_decisions
+                if self.schema_version != "1.3.0"
+                or item.claim_id in reviewed_claim_set
             ):
                 raise ValueError(
-                    "A failed single-call Checker cannot retain partial judgments."
+                    "A failed Checker cannot retain judgments from its reviewed scope."
                 )
             if (
-                self.selected_claim_ids
+                (
+                    self.reviewed_claim_ids
+                    if self.schema_version == "1.3.0"
+                    else self.selected_claim_ids
+                )
                 and not self.failed_attempts
                 and len(self.agent_usage) != 1
             ):
                 raise ValueError(
                     "Successful paid Checker claims require exactly one usage entry."
                 )
+            if self.schema_version == "1.3.0":
+                expected_scope_tasks = self.reviewed_task_ids
+                expected_scope_sources = self.reviewed_source_ids
+                for usage in self.agent_usage:
+                    if (
+                        usage.scope_task_ids != expected_scope_tasks
+                        or usage.scope_source_ids != expected_scope_sources
+                    ):
+                        raise ValueError(
+                            "Checker usage must match its semantic review scope."
+                        )
+                for attempt in self.failed_attempts:
+                    if (
+                        attempt.scope_task_ids != expected_scope_tasks
+                        or attempt.scope_source_ids != expected_scope_sources
+                    ):
+                        raise ValueError(
+                            "Checker failure must match its semantic review scope."
+                        )
 
         contradiction_ids = [item.contradiction_id for item in self.contradictions]
         if len(contradiction_ids) != len(set(contradiction_ids)):
@@ -3097,7 +3291,7 @@ class CheckerResults(ClosedModel):
             and not blocking_unsafe
         )
         if (
-            self.schema_version == "1.2.0"
+            self.schema_version in {"1.2.0", "1.3.0"}
             and self.selected_scope_ready != expected_selected_scope_ready
         ):
             raise ValueError("Checker selected-scope ready flag is inconsistent.")
@@ -3111,12 +3305,22 @@ class CheckerResults(ClosedModel):
 
         if len(self.agent_usage) > self.limits.max_api_calls:
             raise ValueError("Checker usage exceeds max_api_calls.")
+        expected_usage_task_ids = (
+            self.reviewed_task_ids
+            if self.schema_version == "1.3.0"
+            else self.selected_task_ids
+        )
+        expected_usage_source_ids = (
+            self.reviewed_source_ids
+            if self.schema_version == "1.3.0"
+            else self.selected_source_ids
+        )
         if any(
             item.agent != "checker"
             or item.iteration != self.iteration
             or item.call_index != 1
-            or item.scope_task_ids != self.selected_task_ids
-            or item.scope_source_ids != self.selected_source_ids
+            or item.scope_task_ids != expected_usage_task_ids
+            or item.scope_source_ids != expected_usage_source_ids
             or item.tool_usage
             for item in self.agent_usage
         ):
@@ -3127,8 +3331,8 @@ class CheckerResults(ClosedModel):
             failure = self.failed_attempts[0]
             usage_recorded = bool(self.agent_usage)
             if (
-                failure.scope_task_ids != self.selected_task_ids
-                or failure.scope_source_ids != self.selected_source_ids
+                failure.scope_task_ids != expected_usage_task_ids
+                or failure.scope_source_ids != expected_usage_source_ids
                 or failure.usage_recorded != usage_recorded
                 or failure.token_usage_unknown == usage_recorded
             ):
@@ -3141,7 +3345,7 @@ class CheckerResults(ClosedModel):
         elif self.passed:
             expected_action = CheckerNextAction.HUMAN_REVIEW
         elif (
-            self.schema_version == "1.2.0"
+            self.schema_version in {"1.2.0", "1.3.0"}
             and self.selected_scope_ready
             and (self.unevaluated_task_ids or self.unevaluated_source_ids)
         ):
@@ -3596,6 +3800,7 @@ class ExecutorLimits(ClosedModel):
     min_queries_per_task: int = Field(ge=1, le=20)
     max_retry_tasks: int = Field(default=0, ge=0, le=50)
     retry_search_calls: int = Field(default=1, ge=1, le=10)
+    max_candidate_routes: int = Field(default=5, ge=0, le=100)
     max_document_bytes: int = Field(ge=1024)
     max_document_chars: int = Field(ge=1000, le=250_000)
     max_pdf_scan_chars: int = Field(ge=10_000, le=5_000_000)

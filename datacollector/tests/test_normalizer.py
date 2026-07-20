@@ -19,6 +19,7 @@ from datacollector.schemas import (
     CheckerClaimDecisionDraft,
     CheckerContradiction,
     CheckerContradictionKind,
+    CheckerMode,
     CheckerVerdict,
     NormalizationPrecision,
     NormalizedValueType,
@@ -204,6 +205,18 @@ class NormalizerAgentTests(TestCase):
         )
         self.assertFalse(results.publishable)
         self.assertTrue(results.ready_for_human_review)
+
+    def test_normalizer_rejects_incremental_checker_even_with_accepted_claims(self):
+        incremental = self.checker_results.model_copy(
+            update={"checker_mode": CheckerMode.INCREMENTAL}
+        )
+
+        with self.assertRaisesRegex(NormalizerValidationError, "full Checker"):
+            self._run(
+                FixtureNormalizerLLM(),
+                checker_results=incremental,
+                mode=NormalizerMode.PAID,
+            )
 
     def test_typed_money_draft_uses_decimal_strings(self):
         value = NormalizerValueDraft(

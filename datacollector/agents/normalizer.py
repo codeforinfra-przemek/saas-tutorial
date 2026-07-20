@@ -13,6 +13,7 @@ from ..llm.protocol import NormalizerLLM, NormalizerProviderError
 from ..schemas import (
     AgentIterationUsage,
     CheckerFieldStatus,
+    CheckerMode,
     CheckerResults,
     CheckerSourceSupport,
     CheckerVerdict,
@@ -732,6 +733,11 @@ class NormalizerAgent:
         if checker_results.generated_by != "openai" or checker_results.failed_attempts:
             raise NormalizerValidationError(
                 "Normalizer requires a successful paid Checker artifact."
+            )
+        if checker_results.checker_mode != CheckerMode.FULL:
+            raise NormalizerValidationError(
+                "Normalizer requires a full Checker artifact; incremental judgments "
+                "must be followed by a full paid Checker pass."
             )
         if not checker_results.passed and not allow_incomplete:
             raise NormalizerValidationError(

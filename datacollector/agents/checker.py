@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -26,6 +27,7 @@ from ..schemas import (
     CheckerFollowUpTask,
     CheckerIssueCode,
     CheckerLimits,
+    CheckerMode,
     CheckerNextAction,
     CheckerResults,
     CheckerScoreBreakdown,
@@ -263,6 +265,73 @@ def _not_reviewed_decisions(
     ]
 
 
+def _task_semantic_fingerprint(
+    task_id: str,
+    search_results: SearchResults,
+    extraction_results: ExtractionResults,
+) -> str:
+    """Hash every input that can affect semantic judgments for one task."""
+
+    task_claims = [
+        claim for claim in extraction_results.claims if claim.task_id == task_id
+    ]
+    citation_ids = {
+        citation_id for claim in task_claims for citation_id in claim.citation_ids
+    }
+    citations = [
+        citation
+        for citation in extraction_results.citations
+        if citation.citation_id in citation_ids
+    ]
+    source_ids = {citation.source_id for citation in citations}
+    sources = [
+        source
+        for source in search_results.sources
+        if source.source_id in source_ids
+    ]
+    documents = [
+        document
+        for document in extraction_results.documents
+        if document.source_id in source_ids
+    ]
+    semantic_sources = [
+        {
+            "source_id": item.source_id,
+            "canonical_url": item.canonical_url,
+            "title": item.title,
+            "source_type": item.source_type.value,
+            "relevance_note": item.relevance_note.replace(
+                "Inherited from exact predecessor Searcher artifact. ",
+                "",
+            ),
+        }
+        for item in sources
+    ]
+    semantic_documents = [
+        {
+            "document_id": item.document_id,
+            "source_id": item.source_id,
+            "retrieval_status": item.retrieval_status.value,
+            "parse_status": item.parse_status.value,
+            "media_type": item.media_type,
+            "final_url": item.final_url,
+            "title": item.title,
+            "page_count": item.page_count,
+            "parsed_pages": item.parsed_pages,
+            "text_truncated": item.text_truncated,
+        }
+        for item in documents
+    ]
+    payload = {
+        "claims": [item.model_dump(mode="json") for item in task_claims],
+        "citations": [item.model_dump(mode="json") for item in citations],
+        "sources": semantic_sources,
+        "documents": semantic_documents,
+    }
+    rendered = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
 class CheckerAgent:
     """Combine deterministic policy gates with an optional semantic LLM audit."""
 
@@ -290,6 +359,13 @@ class CheckerAgent:
         iteration: int = 1,
         max_claims: int = DEFAULT_MAX_CLAIMS,
         max_evidence_chars: int = DEFAULT_MAX_EVIDENCE_CHARS,
+        prior_checker_results: CheckerResults | None = None,
+        prior_checker_sha256: str | None = None,
+        prior_checker_reference: str | None = None,
+        prior_extraction_results: ExtractionResults | None = None,
+        prior_extraction_sha256: str | None = None,
+        prior_search_results: SearchResults | None = None,
+        prior_search_sha256: str | None = None,
     ) -> CheckerResults:
         self._validate_inputs(
             plan,
@@ -305,6 +381,19 @@ class CheckerAgent:
             max_claims=max_claims,
             max_evidence_chars=max_evidence_chars,
         )
+
+        incremental = prior_checker_results is not None
+        if incremental:
+            self._validate_incremental_inputs(
+                extraction_results,
+                prior_checker_results,
+                prior_extraction_results,
+                prior_checker_sha256=prior_checker_sha256,
+                prior_checker_reference=prior_checker_reference,
+                prior_extraction_sha256=prior_extraction_sha256,
+                prior_search_results=prior_search_results,
+                prior_search_sha256=prior_search_sha256,
+            )
 
         task_by_id = {task.task_id: task for task in plan.tasks}
         source_by_id = {source.source_id: source for source in search_results.sources}
@@ -329,11 +418,135 @@ class CheckerAgent:
             assessment.source_id: assessment for assessment in source_assessments
         }
 
+        reviewed_task_ids = list(extraction_results.selected_task_ids)
+        inherited_claim_ids: list[str] = []
+        inherited_decision_by_id: dict[str, CheckerClaimDecision] = {}
+        inherited_contradictions: list[CheckerContradiction] = []
+        inherited_unsafe_items: list[CheckerUnsafeItem] = []
+        if incremental:
+            assert prior_checker_results is not None
+            assert prior_extraction_results is not None
+            assert prior_search_results is not None
+            prior_search_fingerprints = {
+                task_id: _task_semantic_fingerprint(
+                    task_id,
+                    search_results,
+                    extraction_results,
+                )
+                for task_id in extraction_results.selected_task_ids
+            }
+            clean_task_ids = {
+                task_id
+                for task_id in extraction_results.selected_task_ids
+                if task_id in prior_checker_results.selected_task_ids
+                and task_id in prior_extraction_results.selected_task_ids
+                and prior_search_fingerprints[task_id]
+                == _task_semantic_fingerprint(
+                    task_id,
+                    prior_search_results,
+                    prior_extraction_results,
+                )
+            }
+            prior_claim_by_id = {
+                claim.claim_id: claim for claim in prior_extraction_results.claims
+            }
+            current_claims_by_task: defaultdict[str, list[RawExtractionClaim]] = (
+                defaultdict(list)
+            )
+            for claim in selected_claims:
+                current_claims_by_task[claim.task_id].append(claim)
+            for task_id in list(clean_task_ids):
+                current_task_claims = current_claims_by_task[task_id]
+                if any(
+                    claim.claim_id not in prior_claim_by_id
+                    or claim.model_dump(mode="json")
+                    != prior_claim_by_id[claim.claim_id].model_dump(mode="json")
+                    for claim in current_task_claims
+                ):
+                    clean_task_ids.discard(task_id)
+            reviewed_task_ids = [
+                task_id
+                for task_id in extraction_results.selected_task_ids
+                if task_id not in clean_task_ids
+            ]
+            prior_decision_by_id = {
+                item.claim_id: item
+                for item in prior_checker_results.claim_decisions
+            }
+            inherited_claim_ids = [
+                claim.claim_id
+                for claim in selected_claims
+                if claim.task_id in clean_task_ids
+            ]
+            inherited_decision_by_id = {
+                claim_id: prior_decision_by_id[claim_id]
+                for claim_id in inherited_claim_ids
+            }
+            inherited_claim_id_set = set(inherited_claim_ids)
+            inherited_contradictions = [
+                item
+                for item in prior_checker_results.contradictions
+                if set(item.claim_ids).issubset(inherited_claim_id_set)
+            ]
+            clean_source_ids = {
+                source_id
+                for source_id in extraction_results.selected_source_ids
+                if not any(
+                    task_id in reviewed_task_ids
+                    for task_id in source_by_id[source_id].task_ids
+                )
+            }
+            inherited_unsafe_items = [
+                item
+                for item in prior_checker_results.unsafe_items
+                if set(item.claim_ids).issubset(inherited_claim_id_set)
+                and set(item.source_ids).issubset(clean_source_ids)
+            ]
+
+        reviewed_task_id_set = set(reviewed_task_ids)
+        reviewed_tasks = [
+            task for task in selected_tasks if task.task_id in reviewed_task_id_set
+        ]
+        reviewed_claims = [
+            claim
+            for claim in selected_claims
+            if claim.task_id in reviewed_task_id_set
+        ]
+        reviewed_claim_ids = [claim.claim_id for claim in reviewed_claims]
+        reviewed_citation_ids = {
+            citation_id
+            for claim in reviewed_claims
+            for citation_id in claim.citation_ids
+        }
+        reviewed_cited_source_ids = {
+            citation.source_id
+            for citation in extraction_results.citations
+            if citation.citation_id in reviewed_citation_ids
+        }
+        reviewed_sources = (
+            list(selected_sources)
+            if not incremental
+            else [
+                source
+                for source in selected_sources
+                if reviewed_task_id_set.intersection(source.task_ids)
+                or source.source_id in reviewed_cited_source_ids
+            ]
+        )
+        reviewed_source_ids = [source.source_id for source in reviewed_sources]
+
         warnings: list[str] = []
         agent_usage: list[AgentIterationUsage] = []
         failed_attempts: list[CheckerAttemptFailure] = []
         contradictions: list[CheckerContradiction] = []
         unsafe_items: list[CheckerUnsafeItem] = []
+        if incremental:
+            warnings.append(
+                "Incremental Checker inherited "
+                f"{len(inherited_claim_ids)} unchanged claim judgment(s) and sent "
+                f"{len(reviewed_claim_ids)} claim(s) from "
+                f"{len(reviewed_task_ids)} changed task(s) for semantic review."
+            )
 
         if self.llm is None:
             decisions = _not_reviewed_decisions(
@@ -345,11 +558,16 @@ class CheckerAgent:
                 "Free Checker verified structure, grounding, lineage, source policy, "
                 "coverage and scoring inputs, but did not perform semantic review."
             )
-        elif not selected_claims:
-            decisions = []
+        elif not reviewed_claims:
+            decisions = [
+                inherited_decision_by_id[claim_id]
+                for claim_id in selected_claim_ids
+            ]
+            contradictions = inherited_contradictions
+            unsafe_items = inherited_unsafe_items
             warnings.append(
                 "Paid Checker made no API request because the Extractor artifact "
-                "contains no raw claims to review."
+                "contains no new or changed semantic scope to review."
             )
         else:
             try:
@@ -363,8 +581,8 @@ class CheckerAgent:
                     plan,
                     search_results,
                     extraction_results,
-                    selected_tasks,
-                    selected_sources,
+                    reviewed_tasks,
+                    reviewed_sources,
                     system_prompt,
                     iteration=iteration,
                     call_index=1,
@@ -375,8 +593,8 @@ class CheckerAgent:
                     try:
                         self._validate_usage(
                             usage,
-                            selected_task_ids=extraction_results.selected_task_ids,
-                            selected_source_ids=extraction_results.selected_source_ids,
+                            selected_task_ids=reviewed_task_ids,
+                            selected_source_ids=reviewed_source_ids,
                             iteration=iteration,
                         )
                     except CheckerValidationError:
@@ -393,18 +611,31 @@ class CheckerAgent:
                 failed_attempts.append(
                     CheckerAttemptFailure(
                         call_index=1,
-                        scope_task_ids=extraction_results.selected_task_ids,
-                        scope_source_ids=extraction_results.selected_source_ids,
+                        scope_task_ids=reviewed_task_ids,
+                        scope_source_ids=reviewed_source_ids,
                         error_code=exc.code,
                         usage_recorded=usage is not None,
                         token_usage_unknown=usage is None,
                     )
                 )
-                decisions = _not_reviewed_decisions(
-                    selected_claims,
+                reviewed_decisions = _not_reviewed_decisions(
+                    reviewed_claims,
                     citation_source_by_id,
                     failed=True,
                 )
+                reviewed_decision_by_id = {
+                    item.claim_id: item for item in reviewed_decisions
+                }
+                decisions = [
+                    (
+                        inherited_decision_by_id[claim_id]
+                        if claim_id in inherited_decision_by_id
+                        else reviewed_decision_by_id[claim_id]
+                    )
+                    for claim_id in selected_claim_ids
+                ]
+                contradictions = inherited_contradictions
+                unsafe_items = inherited_unsafe_items
                 warnings.append(
                     f"Paid Checker call failed with {exc.code}; token usage was "
                     f"{'retained' if usage is not None else 'not returned by the provider'}."
@@ -413,8 +644,8 @@ class CheckerAgent:
                 try:
                     self._validate_usage(
                         generation.usage,
-                        selected_task_ids=extraction_results.selected_task_ids,
-                        selected_source_ids=extraction_results.selected_source_ids,
+                        selected_task_ids=reviewed_task_ids,
+                        selected_source_ids=reviewed_source_ids,
                         iteration=iteration,
                     )
                 except CheckerValidationError:
@@ -429,30 +660,60 @@ class CheckerAgent:
                     ) from None
                 agent_usage.append(generation.usage)
                 try:
-                    decisions, contradictions, unsafe_items = self._ground_draft(
+                    reviewed_decisions, new_contradictions, new_unsafe_items = self._ground_draft(
                         generation.draft,
-                        selected_claims,
+                        reviewed_claims,
                         citation_source_by_id,
-                        extraction_results.selected_source_ids,
+                        reviewed_source_ids,
                     )
+                    reviewed_decision_by_id = {
+                        item.claim_id: item for item in reviewed_decisions
+                    }
+                    decisions = [
+                        (
+                            inherited_decision_by_id[claim_id]
+                            if claim_id in inherited_decision_by_id
+                            else reviewed_decision_by_id[claim_id]
+                        )
+                        for claim_id in selected_claim_ids
+                    ]
+                    contradictions = [
+                        *inherited_contradictions,
+                        *new_contradictions,
+                    ]
+                    unsafe_items = [
+                        *inherited_unsafe_items,
+                        *new_unsafe_items,
+                    ]
                 except Exception:
                     failed_attempts.append(
                         CheckerAttemptFailure(
                             call_index=1,
-                            scope_task_ids=extraction_results.selected_task_ids,
-                            scope_source_ids=extraction_results.selected_source_ids,
+                            scope_task_ids=reviewed_task_ids,
+                            scope_source_ids=reviewed_source_ids,
                             error_code="invalid_checker_output",
                             usage_recorded=True,
                             token_usage_unknown=False,
                         )
                     )
-                    decisions = _not_reviewed_decisions(
-                        selected_claims,
+                    reviewed_decisions = _not_reviewed_decisions(
+                        reviewed_claims,
                         citation_source_by_id,
                         failed=True,
                     )
-                    contradictions = []
-                    unsafe_items = []
+                    reviewed_decision_by_id = {
+                        item.claim_id: item for item in reviewed_decisions
+                    }
+                    decisions = [
+                        (
+                            inherited_decision_by_id[claim_id]
+                            if claim_id in inherited_decision_by_id
+                            else reviewed_decision_by_id[claim_id]
+                        )
+                        for claim_id in selected_claim_ids
+                    ]
+                    contradictions = inherited_contradictions
+                    unsafe_items = inherited_unsafe_items
                     warnings.append(
                         "Paid Checker output failed local exact-coverage or scope "
                         "validation; usage was retained and no semantic verdict was used."
@@ -586,6 +847,16 @@ class CheckerAgent:
             target_country=plan.planner_input.target_country,
             depth=plan.planner_input.depth,
             provider_executed=bool(agent_usage or failed_attempts),
+            checker_mode=(
+                CheckerMode.INCREMENTAL if incremental else CheckerMode.FULL
+            ),
+            prior_check_id=(
+                prior_checker_results.check_id
+                if prior_checker_results is not None
+                else None
+            ),
+            prior_check_sha256=prior_checker_sha256,
+            prior_check_reference=prior_checker_reference,
             quality_threshold=plan.stop_conditions.quality_threshold,
             limits=CheckerLimits(
                 max_claims=max_claims,
@@ -594,6 +865,10 @@ class CheckerAgent:
             selected_task_ids=extraction_results.selected_task_ids,
             selected_source_ids=extraction_results.selected_source_ids,
             selected_claim_ids=selected_claim_ids,
+            reviewed_task_ids=reviewed_task_ids,
+            reviewed_source_ids=reviewed_source_ids,
+            reviewed_claim_ids=reviewed_claim_ids,
+            inherited_claim_ids=inherited_claim_ids,
             unevaluated_task_ids=unevaluated_task_ids,
             unevaluated_source_ids=unevaluated_source_ids,
             scope_complete=scope_complete,
@@ -615,6 +890,74 @@ class CheckerAgent:
             agent_usage=agent_usage,
             failed_attempts=failed_attempts,
         )
+
+    def _validate_incremental_inputs(
+        self,
+        extraction_results: ExtractionResults,
+        prior_checker_results: CheckerResults,
+        prior_extraction_results: ExtractionResults | None,
+        *,
+        prior_checker_sha256: str | None,
+        prior_checker_reference: str | None,
+        prior_extraction_sha256: str | None,
+        prior_search_results: SearchResults | None,
+        prior_search_sha256: str | None,
+    ) -> None:
+        if self.llm is None:
+            raise CheckerValidationError(
+                "Incremental Checker requires paid semantic review for changed scope."
+            )
+        if prior_extraction_results is None or prior_search_results is None:
+            raise CheckerValidationError(
+                "Incremental Checker requires exact predecessor Searcher and Extractor artifacts."
+            )
+        if (
+            prior_checker_sha256 is None
+            or prior_checker_reference is None
+            or prior_extraction_sha256 is None
+            or prior_search_sha256 is None
+        ):
+            raise CheckerValidationError(
+                "Incremental Checker predecessor hashes and reference are required."
+            )
+        if prior_checker_results.generated_by != "openai" or (
+            prior_checker_results.failed_attempts
+            or any(
+                decision.verdict == CheckerVerdict.NOT_REVIEWED
+                for decision in prior_checker_results.claim_decisions
+            )
+        ):
+            raise CheckerValidationError(
+                "Incremental Checker may inherit only successful paid semantic judgments."
+            )
+        if (
+            prior_checker_results.extraction_id
+            != prior_extraction_results.extraction_id
+            or prior_checker_results.extraction_sha256
+            != prior_extraction_sha256
+            or prior_checker_results.search_id != prior_search_results.search_id
+            or prior_checker_results.search_sha256 != prior_search_sha256
+        ):
+            raise CheckerValidationError(
+                "Incremental Checker predecessor artifacts do not match exact Checker lineage."
+            )
+        if (
+            extraction_results.generated_by != "executor"
+            or extraction_results.prior_extraction_id
+            != prior_extraction_results.extraction_id
+            or extraction_results.prior_extraction_sha256
+            != prior_extraction_sha256
+        ):
+            raise CheckerValidationError(
+                "Incremental Checker requires an Executor extraction with exact predecessor lineage."
+            )
+        if (
+            extraction_results.plan_run_id != prior_checker_results.plan_run_id
+            or extraction_results.plan_sha256 != prior_checker_results.plan_sha256
+        ):
+            raise CheckerValidationError(
+                "Incremental Checker predecessor belongs to a different Planner run."
+            )
 
     def _validate_inputs(
         self,

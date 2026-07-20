@@ -9,6 +9,7 @@ from datacollector.agents.searcher import (
     SearcherAgent,
     SearcherValidationError,
     _candidate_domain,
+    _candidate_route_decision,
     _is_unrelated_promotional_source,
     _refine_source_type,
 )
@@ -636,7 +637,7 @@ class SearcherAgentTests(TestCase):
         )
         self.assertEqual(results.sources[0].source_type, SourceType.OFFICIAL)
 
-    def test_paid_searcher_keeps_only_provider_grounded_urls(self):
+    def test_paid_searcher_routes_single_task_provider_candidates(self):
         llm = FakeSearcherLLM()
         results = SearcherAgent(llm).create_search_results(
             self.plan,
@@ -648,7 +649,7 @@ class SearcherAgentTests(TestCase):
 
         self.assertTrue(results.search_executed)
         self.assertEqual(results.generated_by, "openai")
-        self.assertEqual(len(results.sources), 1)
+        self.assertEqual(len(results.sources), 2)
         self.assertEqual(
             results.sources[0].canonical_url,
             "https://example.com/franchise",
@@ -659,15 +660,21 @@ class SearcherAgentTests(TestCase):
             "https://example.com/unmapped-result",
             results.actions[0].source_urls,
         )
-        self.assertNotIn(
+        self.assertIn(
             "https://example.com/unmapped-result",
             [source.canonical_url for source in results.sources],
+        )
+        self.assertEqual(len(results.candidate_routes), 1)
+        self.assertEqual(results.candidate_routes[0].decision, "routed")
+        self.assertEqual(
+            results.candidate_routes[0].reason_code,
+            "single_task_action",
         )
         self.assertEqual(
             results.task_results[0].status,
             SearchTaskStatus.PARTIAL,
         )
-        self.assertIn(
+        self.assertNotIn(
             "source_candidates:1/2",
             results.task_results[0].coverage_gaps,
         )
@@ -682,6 +689,74 @@ class SearcherAgentTests(TestCase):
             any("non-public" in warning for warning in results.warnings)
         )
         self.assertEqual(llm.calls[0][3:], (1, 1, 4, 1))
+
+    def test_candidate_router_respects_zero_route_limit(self):
+        results = SearcherAgent(FakeSearcherLLM()).create_search_results(
+            self.plan,
+            plan_sha256="b" * 64,
+            plan_reference="/tmp/plan.json",
+            task_limit=1,
+            max_candidate_routes=0,
+        )
+
+        self.assertEqual(len(results.sources), 1)
+        self.assertEqual(results.candidate_routes[0].decision, "limit_reached")
+        self.assertEqual(
+            results.candidate_routes[0].reason_code,
+            "route_limit_reached",
+        )
+
+    def test_candidate_router_leaves_ambiguous_multi_task_url_unassigned(self):
+        tasks = self.plan.tasks[:2]
+        action = SearchAction(
+            action_id="multi-task-action",
+            call_index=1,
+            scope_task_ids=[task.task_id for task in tasks],
+            action_type="search",
+            queries=[task.search_queries[0] for task in tasks],
+            source_urls=["https://example.com/general-information"],
+        )
+
+        decision = _candidate_route_decision(
+            "https://example.com/general-information",
+            ProviderSearchSource(
+                url="https://example.com/general-information",
+                title="General information",
+            ),
+            [action.action_id],
+            {action.action_id: action},
+            tasks,
+        )
+
+        self.assertEqual(decision.decision, "unassigned")
+        self.assertIsNone(decision.routed_task_id)
+
+    def test_candidate_router_uses_unique_multi_task_lexical_evidence(self):
+        tasks = self.plan.tasks[:5]
+        url = "https://example.com/company-registry-legal-name-registration-parent-entities"
+        action = SearchAction(
+            action_id="multi-task-action",
+            call_index=1,
+            scope_task_ids=[task.task_id for task in tasks],
+            action_type="search",
+            queries=[task.search_queries[0] for task in tasks],
+            source_urls=[url],
+        )
+
+        decision = _candidate_route_decision(
+            url,
+            ProviderSearchSource(
+                url=url,
+                title="Company registry legal name registration KRS parent entities",
+            ),
+            [action.action_id],
+            {action.action_id: action},
+            tasks,
+        )
+
+        self.assertEqual(decision.decision, "routed")
+        self.assertEqual(decision.routed_task_id, tasks[0].task_id)
+        self.assertEqual(decision.reason_code, "unique_lexical_match")
 
     def test_quality_retry_is_opt_in_and_closes_partial_coverage(self):
         no_retry_llm = FakeRetryingSearcherLLM()

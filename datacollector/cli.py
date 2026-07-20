@@ -63,6 +63,7 @@ from .schemas import (
     AgentFailureArtifact,
     AgentIterationUsage,
     CheckerAttemptFailure,
+    CheckerMode,
     CheckerNextAction,
     ExecutorMode,
     ExtractionAttemptFailure,
@@ -284,6 +285,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum tool calls reserved for each opt-in retry (default: 1).",
     )
     search_parser.add_argument(
+        "--max-candidate-routes",
+        type=_nonnegative_int,
+        default=5,
+        help="Maximum deterministic URL promotions from provider action traces (default: 5).",
+    )
+    search_parser.add_argument(
         "--model", help="Override OPENAI_MODEL for this invocation."
     )
     search_parser.add_argument(
@@ -404,6 +411,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="offline",
         action="store_true",
         help="Run deterministic structural and coverage checks without OpenAI.",
+    )
+    check_parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help=(
+            "Review only changed Executor task scopes and inherit successful paid "
+            "judgments through verified predecessor lineage."
+        ),
     )
     check_parser.add_argument(
         "--iteration",
@@ -583,6 +598,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tool calls reserved per optional Searcher retry (default: 1).",
     )
     execute_parser.add_argument(
+        "--max-candidate-routes",
+        type=_nonnegative_int,
+        default=5,
+        help="Maximum deterministic Candidate Router promotions (default: 5).",
+    )
+    execute_parser.add_argument(
         "--max-document-bytes",
         type=_positive_int,
         default=40 * 1024 * 1024,
@@ -713,6 +734,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=10,
         help="Executor paid web-search tool-call ceiling per cycle (default: 10).",
+    )
+    loop_parser.add_argument(
+        "--max-candidate-routes",
+        type=_nonnegative_int,
+        default=5,
+        help="Maximum deterministic Candidate Router promotions per cycle (default: 5).",
     )
     loop_parser.add_argument(
         "--max-extractor-api-calls",
@@ -1090,6 +1117,7 @@ def _run_search(args: argparse.Namespace) -> int:
                 min_queries_per_task=args.min_queries_per_task,
                 max_retry_tasks=args.max_retry_tasks,
                 retry_search_calls=args.retry_search_calls,
+                max_candidate_routes=args.max_candidate_routes,
             )
         except SearcherProviderError as exc:
             if not exc.usages and not exc.observed_tool_calls:
@@ -1199,6 +1227,12 @@ def _run_search(args: argparse.Namespace) -> int:
         "unselected_tasks": len(results.unselected_task_ids),
         "search_actions": len(results.actions),
         "action_candidate_urls": len(action_candidate_urls),
+        "candidate_routes": {
+            decision: sum(
+                route.decision == decision for route in results.candidate_routes
+            )
+            for decision in ("routed", "unassigned", "excluded", "limit_reached")
+        },
         "sources": len(results.sources),
         "provider_observed_sources": sum(
             source.provider_observed for source in results.sources
@@ -1629,6 +1663,63 @@ def _run_check(args: argparse.Namespace) -> int:
     plan_path = args.plan or Path(extraction_results.plan_reference)
     plan, plan_sha256 = load_research_plan(plan_path)
     iteration = args.iteration or extraction_results.iteration
+    incremental = bool(getattr(args, "incremental", False))
+    if incremental and args.offline:
+        raise CheckerValidationError(
+            "--incremental cannot be combined with --free; changed scope requires paid review."
+        )
+    prior_checker_results = None
+    prior_checker_sha256 = None
+    prior_checker_reference = None
+    prior_extraction_results = None
+    prior_extraction_sha256 = None
+    prior_search_results = None
+    prior_search_sha256 = None
+    if incremental:
+        if (
+            extraction_results.generated_by != "executor"
+            or extraction_results.resolution_reference is None
+            or extraction_results.prior_extraction_reference is None
+        ):
+            raise CheckerValidationError(
+                "Incremental Checker requires Executor resolution and predecessor extraction lineage."
+            )
+        resolution, resolution_sha256 = load_resolver_results(
+            extraction_results.resolution_reference
+        )
+        if (
+            extraction_results.resolution_id != resolution.resolution_id
+            or extraction_results.resolution_sha256 != resolution_sha256
+        ):
+            raise CheckerValidationError(
+                "Executor resolution lineage does not match exact artifact bytes."
+            )
+        prior_checker_reference = str(Path(resolution.check_reference).resolve())
+        prior_checker_results, prior_checker_sha256 = load_checker_results(
+            prior_checker_reference
+        )
+        if (
+            resolution.check_id != prior_checker_results.check_id
+            or resolution.check_sha256 != prior_checker_sha256
+        ):
+            raise CheckerValidationError(
+                "Resolver Checker lineage does not match exact artifact bytes."
+            )
+        prior_extraction_results, prior_extraction_sha256 = load_extraction_results(
+            extraction_results.prior_extraction_reference
+        )
+        if (
+            extraction_results.prior_extraction_id
+            != prior_extraction_results.extraction_id
+            or extraction_results.prior_extraction_sha256
+            != prior_extraction_sha256
+        ):
+            raise CheckerValidationError(
+                "Executor predecessor extraction lineage does not match exact bytes."
+            )
+        prior_search_results, prior_search_sha256 = load_search_results(
+            prior_checker_results.search_reference
+        )
     expected_path = args.extractions.parent / checker_results_filename_for(
         iteration,
         free=args.offline,
@@ -1656,6 +1747,13 @@ def _run_check(args: argparse.Namespace) -> int:
                 iteration=iteration,
                 max_claims=args.max_claims,
                 max_evidence_chars=args.max_evidence_chars,
+                prior_checker_results=prior_checker_results,
+                prior_checker_sha256=prior_checker_sha256,
+                prior_checker_reference=prior_checker_reference,
+                prior_extraction_results=prior_extraction_results,
+                prior_extraction_sha256=prior_extraction_sha256,
+                prior_search_results=prior_search_results,
+                prior_search_sha256=prior_search_sha256,
             )
         except CheckerProviderError as exc:
             requested_model = (
@@ -1772,6 +1870,11 @@ def _run_check(args: argparse.Namespace) -> int:
         "model": results.model,
         "iteration": results.iteration,
         "provider_executed": results.provider_executed,
+        "checker_mode": results.checker_mode.value,
+        "reviewed_tasks": len(results.reviewed_task_ids),
+        "reviewed_sources": len(results.reviewed_source_ids),
+        "reviewed_claims": len(results.reviewed_claim_ids),
+        "inherited_claims": len(results.inherited_claim_ids),
         "selected_tasks": len(results.selected_task_ids),
         "selected_sources": len(results.selected_source_ids),
         "selected_claims": len(results.selected_claim_ids),
@@ -2296,6 +2399,7 @@ def _run_execute(args: argparse.Namespace) -> int:
                 min_queries_per_task=args.min_queries_per_task,
                 max_retry_tasks=args.max_retry_tasks,
                 retry_search_calls=args.retry_search_calls,
+                max_candidate_routes=args.max_candidate_routes,
                 max_document_bytes=args.max_document_bytes,
                 max_document_chars=args.max_document_chars,
                 max_pdf_scan_chars=args.max_pdf_scan_chars,
@@ -2479,6 +2583,13 @@ def _run_execute(args: argparse.Namespace) -> int:
         "merged_search_id": results.merged_search_id,
         "merged_search_sha256": results.merged_search_sha256,
         "merged_sources": len(merged_search.sources),
+        "candidate_routes": {
+            decision: sum(
+                route.decision == decision
+                for route in merged_search.candidate_routes
+            )
+            for decision in ("routed", "unassigned", "excluded", "limit_reached")
+        },
         "merged_extraction_id": results.merged_extraction_id,
         "merged_extraction_sha256": results.merged_extraction_sha256,
         "merged_documents": len(merged_extraction.documents),
@@ -2494,6 +2605,7 @@ def _run_execute(args: argparse.Namespace) -> int:
         "next_command": (
             f".venv/bin/python -m datacollector check --extractions "
             f"{merged_extraction_path} --iteration {iteration}"
+            f"{' --incremental' if results.execution_mode == ExecutorMode.PAID else ''}"
         ),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -2540,6 +2652,11 @@ def _save_normalizer_failure_ledger(results, reference_path: Path) -> Path:
 
 def _run_normalize(args: argparse.Namespace) -> int:
     checker_results, check_sha256 = load_checker_results(args.check)
+    if checker_results.checker_mode == CheckerMode.INCREMENTAL:
+        raise NormalizerValidationError(
+            "Normalizer requires a full Checker artifact. Run `datacollector check` "
+            "without --incremental against the same extraction first."
+        )
     if not checker_results.passed and not args.allow_incomplete:
         raise NormalizerValidationError(
             "Checker did not pass. Review its documented gaps and rerun with "
@@ -3020,6 +3137,7 @@ def _run_loop(args: argparse.Namespace) -> int:
                     plan=None,
                     sources=None,
                     offline=False,
+                    incremental=False,
                     iteration=check_iteration,
                     max_claims=args.max_checker_claims,
                     max_evidence_chars=args.max_checker_evidence_chars,
@@ -3089,6 +3207,7 @@ def _run_loop(args: argparse.Namespace) -> int:
                         min_queries_per_task=1,
                         max_retry_tasks=0,
                         retry_search_calls=1,
+                        max_candidate_routes=args.max_candidate_routes,
                         max_document_bytes=args.max_document_bytes,
                         max_document_chars=args.max_document_chars,
                         max_pdf_scan_chars=args.max_pdf_scan_chars,
@@ -3122,6 +3241,7 @@ def _run_loop(args: argparse.Namespace) -> int:
                             plan=None,
                             sources=None,
                             offline=False,
+                            incremental=True,
                             iteration=execution_iteration,
                             max_claims=args.max_checker_claims,
                             max_evidence_chars=args.max_checker_evidence_chars,
@@ -3193,7 +3313,69 @@ def _run_loop(args: argparse.Namespace) -> int:
 
     post_loop_usage: list[LoopStageUsage] = []
     normalization_reference: str | None = None
-    stages_before_normalizer = _loop_stages(rounds)
+    normalization_requested = (
+        current.passed and not args.skip_normalize
+    ) or (
+        not current.passed
+        and args.normalize_incomplete
+        and stop_reason
+        not in {LoopStopReason.BUDGET_EXHAUSTED, LoopStopReason.COST_UNKNOWN}
+    )
+    if (
+        normalization_requested
+        and current.checker_mode == CheckerMode.INCREMENTAL
+    ):
+        cost_before_full_check = _loop_usage_totals(_loop_stages(rounds))[
+            "estimated_cost_usd"
+        ]
+        if (
+            cost_before_full_check is not None
+            and cost_before_full_check < policy.max_estimated_cost_usd
+        ):
+            full_check_iteration = _next_loop_iteration(
+                run_directory,
+                minimum=next_iteration - 1,
+            )
+            full_check_summary = _invoke_loop_stage(
+                _run_check,
+                argparse.Namespace(
+                    extractions=Path(current.extraction_reference),
+                    plan=None,
+                    sources=None,
+                    offline=False,
+                    incremental=False,
+                    iteration=full_check_iteration,
+                    max_claims=args.max_checker_claims,
+                    max_evidence_chars=args.max_checker_evidence_chars,
+                    model=args.model,
+                ),
+            )
+            current_path = Path(str(full_check_summary["check_path"]))
+            current, current_sha256 = load_checker_results(current_path)
+            if (
+                not current.passed
+                and stop_reason == LoopStopReason.CHECKER_PASSED
+            ):
+                stop_reason = LoopStopReason.MAX_ROUNDS
+            post_loop_usage.append(
+                _loop_stage_usage(
+                    "checker_full_pre_normalizer",
+                    full_check_iteration,
+                    current_path,
+                    full_check_summary,
+                )
+            )
+            next_iteration = full_check_iteration + 1
+            warnings.append(
+                "A full paid Checker pass replaced the incremental decision before Normalizer."
+            )
+        else:
+            warnings.append(
+                "Normalizer was not started because a mandatory full Checker pass "
+                "could not start within the known loop cost ceiling."
+            )
+
+    stages_before_normalizer = _loop_stages(rounds, post_loop_usage)
     cost_before_normalizer = _loop_usage_totals(stages_before_normalizer)[
         "estimated_cost_usd"
     ]
@@ -3201,14 +3383,16 @@ def _run_loop(args: argparse.Namespace) -> int:
         cost_before_normalizer is not None
         and cost_before_normalizer < policy.max_estimated_cost_usd
     )
-    should_normalize = (
+    should_normalize = current.checker_mode == CheckerMode.FULL and (
+        (
         current.passed and not args.skip_normalize and budget_allows_normalizer
-    ) or (
+        ) or (
         not current.passed
         and args.normalize_incomplete
         and stop_reason
         not in {LoopStopReason.BUDGET_EXHAUSTED, LoopStopReason.COST_UNKNOWN}
         and budget_allows_normalizer
+        )
     )
     if should_normalize:
         normalizer_iteration = _next_loop_iteration(

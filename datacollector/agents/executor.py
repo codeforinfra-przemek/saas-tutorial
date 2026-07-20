@@ -77,6 +77,13 @@ def _deduplicate(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
 
 
+def _inherited_relevance_note(value: str) -> str:
+    prefix = "Inherited from exact predecessor Searcher artifact. "
+    while value.startswith(prefix):
+        value = value[len(prefix):]
+    return f"{prefix}{value}"[:1000]
+
+
 def _artifact_sha256(value) -> str:
     rendered = (
         json.dumps(value.model_dump(mode="json"), ensure_ascii=False, indent=2)
@@ -339,6 +346,7 @@ class ExecutorAgent:
         min_queries_per_task: int = 1,
         max_retry_tasks: int = 0,
         retry_search_calls: int = 1,
+        max_candidate_routes: int = 5,
         max_document_bytes: int = DEFAULT_MAX_DOCUMENT_BYTES,
         max_document_chars: int = DEFAULT_MAX_DOCUMENT_CHARS,
         max_pdf_scan_chars: int = DEFAULT_MAX_PDF_SCAN_CHARS,
@@ -386,6 +394,7 @@ class ExecutorAgent:
                 min_queries_per_task=min_queries_per_task,
                 max_retry_tasks=max_retry_tasks,
                 retry_search_calls=retry_search_calls,
+                max_candidate_routes=max_candidate_routes,
                 query_overrides=query_overrides,
             )
 
@@ -407,6 +416,7 @@ class ExecutorAgent:
                 min_queries_per_task=min_queries_per_task,
                 max_retry_tasks=max_retry_tasks,
                 retry_search_calls=retry_search_calls,
+                max_candidate_routes=max_candidate_routes,
                 query_overrides=query_overrides,
             )
         except Exception as exc:
@@ -646,6 +656,7 @@ class ExecutorAgent:
                 min_queries_per_task=min_queries_per_task,
                 max_retry_tasks=max_retry_tasks,
                 retry_search_calls=retry_search_calls,
+                max_candidate_routes=max_candidate_routes,
                 max_document_bytes=max_document_bytes,
                 max_document_chars=max_document_chars,
                 max_pdf_scan_chars=max_pdf_scan_chars,
@@ -802,6 +813,7 @@ class ExecutorAgent:
         min_queries_per_task: int,
         max_retry_tasks: int,
         retry_search_calls: int,
+        max_candidate_routes: int,
         query_overrides: dict[str, list[str]],
     ) -> SearchResults:
         materialized_query_overrides = (
@@ -830,9 +842,8 @@ class ExecutorAgent:
                         "observed_in_action_ids": [],
                         "discovered_via_queries": [],
                         "relevance_note": (
-                            "Inherited from exact predecessor Searcher artifact. "
-                            f"{source.relevance_note}"
-                        )[:1000],
+                            _inherited_relevance_note(source.relevance_note)
+                        ),
                         "inherited_from_search_id": prior.search_id,
                     }
                 )
@@ -921,7 +932,7 @@ class ExecutorAgent:
                 )
             )
         return SearchResults(
-            schema_version="1.2.0",
+            schema_version="1.3.0",
             search_id=str(uuid4()),
             plan_run_id=plan.run_id,
             plan_sha256=plan_sha256,
@@ -948,6 +959,7 @@ class ExecutorAgent:
                 min_queries_per_task=min_queries_per_task,
                 max_retry_tasks=max_retry_tasks,
                 retry_search_calls=retry_search_calls,
+                max_candidate_routes=max_candidate_routes,
                 query_overrides=materialized_query_overrides,
             ),
             selected_task_ids=selected_task_ids,
@@ -957,6 +969,7 @@ class ExecutorAgent:
                 if task.task_id not in set(selected_task_ids)
             ],
             actions=list(delta.actions if delta else []),
+            candidate_routes=list(delta.candidate_routes if delta else []),
             sources=sources,
             task_results=task_results,
             warnings=_deduplicate(

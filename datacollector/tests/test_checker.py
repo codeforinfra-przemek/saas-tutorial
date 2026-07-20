@@ -28,6 +28,7 @@ from datacollector.schemas import (
     CheckerFollowUpAction,
     CheckerFollowUpReason,
     CheckerIssueCode,
+    CheckerMode,
     CheckerModelSemanticFit,
     CheckerModelSourceSupport,
     CheckerModelVerdict,
@@ -524,6 +525,84 @@ class CheckerAgentTests(TestCase):
             results.recommended_next_action,
             CheckerNextAction.HUMAN_REVIEW,
         )
+
+    def test_incremental_checker_inherits_unchanged_paid_scope_without_api_call(self):
+        prior = self._run(FixtureCheckerLLM(self._accepted_draft))
+        current = self.extraction_results.model_copy(
+            update={
+                "generated_by": "executor",
+                "resolution_id": str(uuid4()),
+                "resolution_sha256": "d" * 64,
+                "resolution_reference": "/fixtures/resolution.json",
+                "prior_extraction_id": self.extraction_results.extraction_id,
+                "prior_extraction_sha256": EXTRACTION_SHA256,
+                "prior_extraction_reference": EXTRACTION_REFERENCE,
+            }
+        )
+        llm = FixtureCheckerLLM(self._accepted_draft)
+
+        results = self._run(
+            llm,
+            extraction_results=current,
+            extraction_sha256="e" * 64,
+            iteration=4,
+            prior_checker_results=prior,
+            prior_checker_sha256="f" * 64,
+            prior_checker_reference="/fixtures/check-r003.json",
+            prior_extraction_results=self.extraction_results,
+            prior_extraction_sha256=EXTRACTION_SHA256,
+            prior_search_results=self.search_results,
+            prior_search_sha256=SEARCH_SHA256,
+        )
+
+        self.assertEqual(results.checker_mode, CheckerMode.INCREMENTAL)
+        self.assertEqual(results.reviewed_task_ids, [])
+        self.assertEqual(results.reviewed_claim_ids, [])
+        self.assertEqual(results.inherited_claim_ids, results.selected_claim_ids)
+        self.assertEqual(results.agent_usage, [])
+        self.assertEqual(llm.calls, [])
+        self.assertTrue(results.passed)
+
+    def test_incremental_checker_reviews_entire_task_when_one_claim_changes(self):
+        prior = self._run(FixtureCheckerLLM(self._accepted_draft))
+        changed_claim = self.extraction_results.claims[0].model_copy(
+            update={"value_text": "Changed value forces task-level review."}
+        )
+        current = self.extraction_results.model_copy(
+            update={
+                "generated_by": "executor",
+                "resolution_id": str(uuid4()),
+                "resolution_sha256": "d" * 64,
+                "resolution_reference": "/fixtures/resolution.json",
+                "prior_extraction_id": self.extraction_results.extraction_id,
+                "prior_extraction_sha256": EXTRACTION_SHA256,
+                "prior_extraction_reference": EXTRACTION_REFERENCE,
+                "claims": [
+                    changed_claim,
+                    *self.extraction_results.claims[1:],
+                ],
+            }
+        )
+        llm = FixtureCheckerLLM(self._accepted_draft)
+
+        results = self._run(
+            llm,
+            extraction_results=current,
+            extraction_sha256="e" * 64,
+            iteration=4,
+            prior_checker_results=prior,
+            prior_checker_sha256="f" * 64,
+            prior_checker_reference="/fixtures/check-r003.json",
+            prior_extraction_results=self.extraction_results,
+            prior_extraction_sha256=EXTRACTION_SHA256,
+            prior_search_results=self.search_results,
+            prior_search_sha256=SEARCH_SHA256,
+        )
+
+        self.assertEqual(results.reviewed_task_ids, [self.task.task_id])
+        self.assertEqual(results.reviewed_claim_ids, results.selected_claim_ids)
+        self.assertEqual(results.inherited_claim_ids, [])
+        self.assertEqual(len(llm.calls), 1)
 
     def test_direct_claim_is_accepted_even_when_it_needs_corroboration(self):
         target_field = self.task.target_fields[0]

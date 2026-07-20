@@ -443,7 +443,7 @@ class ExecutorAgentTests(TestCase):
             {changed_item.task_id: normalized_queries},
         )
         self.assertTrue(merged_search.search_executed)
-        self.assertEqual(len(execution.new_source_ids), 1)
+        self.assertEqual(len(execution.new_source_ids), 2)
         self.assertIn(
             execution.new_source_ids[0],
             merged_extraction.selected_source_ids,
