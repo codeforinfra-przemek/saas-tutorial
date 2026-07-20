@@ -706,6 +706,52 @@ class CheckerAgentTests(TestCase):
         field = results.task_results[0].field_results[0]
         self.assertNotEqual(field.status, CheckerFieldStatus.CONFLICTING)
 
+    def test_equivalent_polish_currency_aliases_are_not_a_contradiction(self):
+        claims = [
+            RawExtractionClaim(
+                claim_id=f"claim-{index:016x}",
+                task_id="task-investment",
+                target_field="investment.currency",
+                value_text=value,
+                currency_text=value,
+                citation_ids=[f"citation-{index:016x}"],
+                confidence=ExtractionConfidence.HIGH,
+            )
+            for index, value in ((1, "zł"), (2, "złotych"))
+        ]
+        draft = CheckerDraft(
+            decisions=[
+                CheckerClaimDecisionDraft(
+                    claim_id=claim.claim_id,
+                    verdict=CheckerModelVerdict.ACCEPTED,
+                    semantic_fit=CheckerModelSemanticFit.DIRECT,
+                    source_support=CheckerModelSourceSupport.SUFFICIENT,
+                    rationale="The quote directly identifies the currency.",
+                )
+                for claim in claims
+            ],
+            contradictions=[
+                CheckerContradictionDraft(
+                    target_field="investment.currency",
+                    claim_ids=[claim.claim_id for claim in claims],
+                    kind=CheckerContradictionKind.SCOPE_MISMATCH,
+                    rationale="The surrounding amounts differ.",
+                )
+            ],
+        )
+
+        _, contradictions, _ = CheckerAgent._ground_draft(
+            draft,
+            claims,
+            {
+                f"citation-{index:016x}": f"source-{index:016x}"
+                for index in (1, 2)
+            },
+            [f"source-{index:016x}" for index in (1, 2)],
+        )
+
+        self.assertEqual(contradictions, [])
+
     def test_terminal_anti_bot_document_is_not_retryable(self):
         document = self.extraction_results.documents[0].model_copy(
             update={

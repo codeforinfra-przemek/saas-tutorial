@@ -88,6 +88,74 @@ Available depths are cumulative:
 - `risk`: adds unit economics, interviews, controversies, tax and resilience;
 - `unit`: adds location-level inventory and reputation signals.
 
+Legacy `--depth` remains available for old artifacts and scripts. New Polish
+research should normally use the country-calibrated Research Profiles v2 instead:
+
+```bash
+.venv/bin/python -m datacollector profiles --country PL
+.venv/bin/python -m datacollector questions --country PL --profile PL:L1
+```
+
+`--profile` and `--depth` are mutually exclusive. Profile aliases resolve to an
+immutable versioned ID (`PL:L1` becomes `PL:L1:v1`), and Planner stores the full
+materialized profile plus a self-verifying SHA-256 in plan schema `1.3.0`.
+
+### Polish Research Profiles v2
+
+| Profile | Questions | Fields | Completion gate | Intended use |
+| --- | ---: | ---: | ---: | --- |
+| `PL:L1:v1` | 13 | 61 | 30 | mass population of a useful public directory profile |
+| `PL:L2:v1` | 26 | 179 | 77 | multi-source public verification, registries and manual risk checks |
+| `PL:L3:v1` | 34 | 273 | 101 | public due diligence covering the FDD 1–23 benchmark and documenting private gaps |
+
+The levels are cumulative: L1 questions and fields are retained in L2, and L2
+is retained in L3. Common Planner task IDs are stable between levels. A higher
+level adds scope and can strengthen evidence requirements; it cannot silently
+weaken an inherited minimum-source or corroboration rule.
+
+Availability is recorded per field, independently from task priority:
+
+- `public_expected`: expected on an official or otherwise public page;
+- `public_optional`: useful when published, but absence does not block completion;
+- `registry_expected`: expected in an official public register;
+- `manual_research_required`: public research requiring a person or a dedicated connector;
+- `private_document_required`: requires an authorized agreement or disclosure document;
+- `confidential_deal_room`: only for a separately authorized private-data profile;
+- `system_derived`: calculated from the collected artifact rather than searched;
+- `not_applicable`: excluded by the country policy.
+
+The completion gate is also per field. In the current public PL profiles it
+includes `public_expected`; L2/L3 additionally include `registry_expected` and
+`manual_research_required`. `public_optional`, `private_document_required` and
+`system_derived` fields do not masquerade as critical public facts in the profile
+contract. Private document gaps remain visible in L3. The current legacy Checker
+and Resolver do not consume this classification yet, so do not start an unattended
+paid L2/L3 loop until profile-aware scoring and routing are enabled in the next
+pipeline stage.
+
+PL profiles use Polish search-query templates and freeze the appropriate Polish
+authorities in the snapshot (CEIDG/Biznes.gov.pl, KRS/PRS/RDF, UOKiK, UPRP,
+ELI and EUR-Lex). The FTC/FDD material remains a comparative coverage framework,
+not a claim that US disclosure law applies in Poland.
+
+Create a no-API profile plan:
+
+```bash
+.venv/bin/python -m datacollector plan \
+  --brand "Żabka" \
+  --country PL \
+  --profile PL:L1 \
+  --offline
+```
+
+Remove `--offline` for an OpenAI-guided Planner run. The profile still controls
+coverage and completion; the model may enrich guidance but cannot remove fields.
+The current Checker continues to expose its legacy aggregate quality score and
+Resolver may still route unresolved private/system-derived fields as ordinary
+follow-ups. Availability-aware scoring, action routing, country-level reuse and
+cross-plan L1→L2→L3 reuse are the next pipeline stage; this release provides the
+versioned policy and immutable lineage required to implement them safely.
+
 ## Create a deterministic plan (free, offline)
 
 ```bash
@@ -425,8 +493,12 @@ judgments.
 Only accepted, semantically eligible claims may create a scored contradiction.
 A rejected claim (for example, a legislative proposal rejected as evidence of
 current law) cannot conflict with an accepted current-law claim or deduct score.
+Checker also canonicalizes common currency labels before accepting a currency
+contradiction. For example, `PLN`, `zł`, `złoty` and `złotych` describe the same
+currency; different cited investment amounts remain separate values on their
+amount field but no longer create a false `investment.currency` conflict.
 
-Checker contract `1.3.0` keeps semantic acceptance separate from source
+Checker contract `1.4.0` keeps semantic acceptance separate from source
 corroboration. A directly supported claim can therefore be `accepted` while its
 field remains `needs_corroboration`. Multi-valued fields with both supported and
 unresolved values use `partial`, so accepted evidence keeps partial quality
@@ -443,7 +515,7 @@ claim IDs, suggested plan queries, the minimum additional source count,
 independence requirement and an explicit completion criterion. This lets the next
 agent act on existing Searcher results before paying for another broad search.
 
-The defaults impose a hard preflight ceiling of 100 claims and 100,000 quoted
+The defaults impose a hard preflight ceiling of 500 claims and 100,000 quoted
 evidence characters. Checker refuses an artifact above either ceiling instead of
 silently truncating its semantic-review scope; raise the limits deliberately
 after inspecting the extraction. `unevaluated_task_ids` and
@@ -514,7 +586,13 @@ Known unprocessed sources are selected before blocked-source retries or new
 searches. A `mentioned_not_obtained` document cannot be resolved by merely
 re-extracting the page that mentioned it. Work is grouped into
 `extract_known_source`, `retry_retrieval`, `reextract_existing`,
-`search_new_source`, or `human_review` execution batches.
+`search_new_source`, `local_audit`, or `human_review` execution batches.
+
+The final `data_quality` catalog tasks describe the pipeline's own evidence,
+status, scoring, stopping and approval contracts. They are not franchise facts
+and must not be researched on the web. Resolver therefore materializes them as
+deterministic `local_audit` work, skips its paid model call when the selected
+batch contains only such work, and supplies no queries or source actions.
 
 Resolver does not schedule `reextract_existing` for a routing-only lead, an
 unparsed/inaccessible document, or a source already recorded as semantically
@@ -551,6 +629,13 @@ slice from `unevaluated_task_ids`, bounded by both `--max-follow-ups` and
 sources or plan tasks are recorded as deferred scope work. Executor then uses its
 immutable merge path to add the new task, source, document, claim and usage state
 to the exact predecessor artifacts.
+
+Executor completes `local_audit` batches without Searcher, network retrieval or
+Extractor calls and adds the task scope to the merged artifacts. The following
+paid Checker then derives each `quality.*` result from validated immutable local
+artifacts, stores a human-readable `audit_basis`, and creates neither fake web
+citations nor follow-up searches. An incremental Checker with no other changed
+claims also skips its model call.
 
 `retry_retrieval` is a plan for the next Extractor round, not proof of a completed
 download. Terminal `anti_bot_page` and `access_denied` results are not retry
@@ -719,6 +804,10 @@ bypasses budget or stagnation stops. Loop progress now counts quality-gate
 improvements and newly evaluated tasks; merely collecting more URLs or raw claims
 does not hide stagnation. Regressions in critical gaps, contradictions, verified
 fields or quality are recorded separately in every round.
+Once documented-gap progression reaches complete plan scope, the Orchestrator
+returns `inspect_gaps` instead of suggesting another empty progression loop.
+Further paid work must then be an explicit gap-repair decision or a deliberate
+incomplete finalization for Human Review.
 
 When Checker passes, Orchestrator runs the paid Normalizer automatically unless
 `--skip-normalize` is supplied. Loop uses Incremental Checker after each Executor
@@ -771,7 +860,7 @@ values, units and ISO currencies remain explicit. Local code rejects invented,
 missing, duplicated or cross-field claim IDs and falls back to one conservative
 text value per accepted claim while retaining usage/cost metadata. When claim
 coverage and grouping are sound but individual typed groups violate a local
-semantic rule, schema `1.1.0` preserves valid provider groups and replaces only
+semantic rule, Normalizer schema `1.2.0` preserves valid provider groups and replaces only
 the invalid groups with deterministic text values. `repair_summary` records
 counts and non-sensitive rule codes; it never stores rejected model prose.
 
@@ -789,7 +878,10 @@ It writes `normalized-r012-free.json`; paid mode writes
 `normalized-r012.json`. Both are immutable, review-only staging artifacts.
 Field results preserve the Checker's verification status, rejected and
 needs-review partitions, unresolved contradictions, missing fields and
-corroboration requirements. The only next action is `human_review`. A later
+corroboration requirements. Locally audited `quality.*` fields use the explicit
+`derived` status and retain their audit basis as notes; they do not fabricate a
+normalized value, claim, citation or source. The only next action is
+`human_review`. A later
 Importer must consume a separately approved review artifact, never raw
 Normalizer output.
 

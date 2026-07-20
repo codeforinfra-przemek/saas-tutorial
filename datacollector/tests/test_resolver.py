@@ -7,7 +7,9 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from datacollector.agents.checker import CheckerAgent
+from datacollector.agents.planner import PlannerAgent
 from datacollector.agents.resolver import ResolverAgent, ResolverValidationError
+from datacollector.catalog import load_question_catalog
 from datacollector.cli import main
 from datacollector.llm.protocol import ResolverGeneration, ResolverProviderError
 from datacollector.schemas import (
@@ -24,6 +26,7 @@ from datacollector.schemas import (
     DocumentParseStatus,
     DocumentRetrievalStatus,
     ExtractionSemanticScope,
+    PlannerInput,
     ResearchPlan,
     ResolverAction,
     ResolverDraft,
@@ -38,6 +41,28 @@ from datacollector.tests import test_checker as checker_fixtures
 
 CHECK_SHA256 = "d" * 64
 CHECK_REFERENCE = "/fixtures/check-r004.json"
+
+
+def plan_with_local_quality_task(base_plan):
+    complete_plan = PlannerAgent(load_question_catalog()).create_plan(
+        PlannerInput(
+            brand_name="Example",
+            target_country="PL",
+            depth="catalog",
+        )
+    )
+    quality_task = next(
+        task for task in complete_plan.tasks if task.section_id == "data_quality"
+    ).model_copy(update={"depends_on": []})
+    plan_payload = base_plan.model_dump(mode="python")
+    plan_payload["tasks"] = [base_plan.tasks[0], quality_task]
+    plan_payload["critical_fields"] = [
+        field
+        for task in plan_payload["tasks"]
+        if task.priority.value == "critical"
+        for field in task.target_fields
+    ]
+    return ResearchPlan.model_validate(plan_payload), quality_task
 
 
 class FixtureResolverLLM:
@@ -483,6 +508,54 @@ class ResolverAgentTests(TestCase):
         )
         self.assertTrue(
             any("unresolved selected-scope gaps" in item for item in results.warnings)
+        )
+
+    def test_local_quality_scope_skips_paid_resolver_and_web_search(self):
+        expanded_plan, quality_task = plan_with_local_quality_task(self.plan)
+        expanded_search = self.search_results.model_copy(
+            update={"unselected_task_ids": [quality_task.task_id]}
+        )
+        checker = self.checker_results.model_copy(
+            update={
+                "unevaluated_task_ids": [quality_task.task_id],
+                "scope_complete": False,
+            }
+        )
+        llm = FixtureResolverLLM()
+
+        results = ResolverAgent(llm).create_resolution_results(
+            expanded_plan,
+            expanded_search,
+            self.extraction_results,
+            checker,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            search_sha256=checker_fixtures.SEARCH_SHA256,
+            extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            check_sha256=CHECK_SHA256,
+            check_reference=CHECK_REFERENCE,
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            search_reference=checker_fixtures.SEARCH_REFERENCE,
+            extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            iteration=4,
+            max_search_tasks=1,
+            completed_gap_rounds=expanded_plan.stop_conditions.max_rounds,
+            force_scope_expansion=True,
+        )
+
+        self.assertEqual(llm.calls, [])
+        self.assertEqual(results.generated_by, "deterministic")
+        self.assertFalse(results.provider_executed)
+        self.assertEqual(results.agent_usage, [])
+        self.assertEqual(results.search_task_ids, [])
+        self.assertEqual(results.execution_source_ids, [])
+        self.assertEqual(len(results.work_items), 1)
+        self.assertEqual(
+            results.work_items[0].selected_action,
+            ResolverAction.LOCAL_AUDIT,
+        )
+        self.assertEqual(results.work_items[0].queries, [])
+        self.assertTrue(
+            any("skipped its provider call" in item for item in results.warnings)
         )
 
     def test_scope_expansion_override_is_rejected_before_repair_limit(self):

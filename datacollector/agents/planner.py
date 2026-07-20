@@ -9,6 +9,11 @@ from uuid import uuid4
 
 from ..catalog import select_questions
 from ..llm.protocol import PlannerLLM
+from ..profiles import (
+    ResearchProfileCatalog,
+    load_profile_catalog,
+    materialize_profile,
+)
 from ..query_utils import normalize_search_queries
 from ..schemas import (
     PRIORITY_ORDER,
@@ -20,6 +25,7 @@ from ..schemas import (
     QuestionCatalog,
     Requirement,
     ResearchPlan,
+    ResearchProfileSnapshot,
     ResearchTask,
     StopConditions,
     TaskAction,
@@ -75,17 +81,44 @@ class PlannerAgent:
         llm: PlannerLLM | None = None,
         *,
         prompt_path: Path | str = DEFAULT_PROMPT_PATH,
+        profile_catalog: ResearchProfileCatalog | None = None,
     ):
         self.catalog = catalog
         self.llm = llm
         self.prompt_path = Path(prompt_path)
+        self.profile_catalog = profile_catalog
 
     def create_plan(
         self, planner_input: PlannerInput, *, iteration: int = 1
     ) -> ResearchPlan:
         if iteration < 1:
             raise PlannerValidationError("Planner iteration must be at least 1.")
-        selected = select_questions(self.catalog, planner_input)
+        profile_snapshot: ResearchProfileSnapshot | None = None
+        effective_input = planner_input
+        if planner_input.profile_id is not None:
+            profile_catalog = self.profile_catalog or load_profile_catalog()
+            try:
+                profile_snapshot, selected = materialize_profile(
+                    profile_catalog,
+                    self.catalog,
+                    planner_input.profile_id,
+                    allow_personal_data=planner_input.allow_personal_data,
+                )
+            except ValueError as exc:
+                raise PlannerValidationError(str(exc)) from exc
+            if profile_snapshot.country != planner_input.target_country:
+                raise PlannerValidationError(
+                    f"Profile {profile_snapshot.profile_id} is for "
+                    f"{profile_snapshot.country}, not {planner_input.target_country}."
+                )
+            effective_input = planner_input.model_copy(
+                update={
+                    "profile_id": profile_snapshot.profile_id,
+                    "depth": profile_snapshot.legacy_depth,
+                }
+            )
+        else:
+            selected = select_questions(self.catalog, planner_input)
         if not selected:
             raise PlannerValidationError("No catalog questions match the requested scope.")
 
@@ -103,7 +136,7 @@ class PlannerAgent:
 
         # Validate deterministic catalog coverage before making a paid API call.
         draft, agent_usage = self._create_draft(
-            planner_input,
+            effective_input,
             [item[1] for item in selected],
             iteration=iteration,
         )
@@ -121,11 +154,26 @@ class PlannerAgent:
             guidance.catalog_question_id: guidance
             for guidance in draft.task_guidance
         }
-        task_id_by_question = {
-            question.id: f"task-{index:03d}-{question.id.replace('.', '-')}"
-            for index, (_, question) in enumerate(selected, start=1)
-        }
-        existing_fields = set(planner_input.existing_fields)
+        if profile_snapshot is not None:
+            catalog_ordinals = {
+                question.id: index
+                for index, question in enumerate(
+                    self.catalog.all_questions(), start=1
+                )
+            }
+            task_id_by_question = {
+                question.id: (
+                    f"task-{catalog_ordinals[question.id]:03d}-"
+                    f"{question.id.replace('.', '-')}"
+                )
+                for _, question in selected
+            }
+        else:
+            task_id_by_question = {
+                question.id: f"task-{index:03d}-{question.id.replace('.', '-')}"
+                for index, (_, question) in enumerate(selected, start=1)
+            }
+        existing_fields = set(effective_input.existing_fields)
         tasks: list[ResearchTask] = []
         filtered_guidance_query_count = 0
         normalized_query_count = 0
@@ -138,7 +186,7 @@ class PlannerAgent:
                 if guidance
                 else base_priority
             )
-            canonical_queries = _render_queries(question, planner_input)
+            canonical_queries = _render_queries(question, effective_input)
             raw_guided_queries = guidance.search_queries if guidance else []
             guided_queries = [
                 query for query in raw_guided_queries if _is_executable_query(query)
@@ -150,7 +198,7 @@ class PlannerAgent:
                 canonical_queries + guided_queries
             )
             normalized_query_count += normalized_count
-            search_queries = search_queries[: planner_input.max_queries_per_task]
+            search_queries = search_queries[: effective_input.max_queries_per_task]
             fields_to_verify = [
                 field for field in question.target_fields if field in existing_fields
             ]
@@ -166,7 +214,11 @@ class PlannerAgent:
             rationale = (
                 guidance.rationale
                 if guidance
-                else "Required by the versioned franchise research catalog."
+                else (
+                    f"Required by research profile {profile_snapshot.profile_id}."
+                    if profile_snapshot is not None
+                    else "Required by the versioned franchise research catalog."
+                )
             )
             tasks.append(
                 ResearchTask(
@@ -202,18 +254,33 @@ class PlannerAgent:
                 )
             )
 
-        critical_fields = _deduplicate(
-            [
-                field
-                for task in tasks
-                if task.priority == Priority.CRITICAL
-                for field in task.target_fields
-            ]
-        )
+        if profile_snapshot is not None:
+            critical_fields = _deduplicate(
+                [
+                    field.target_field
+                    for question in profile_snapshot.questions
+                    for field in question.fields
+                    if field.required_for_completion
+                ]
+            )
+        else:
+            critical_fields = _deduplicate(
+                [
+                    field
+                    for task in tasks
+                    if task.priority == Priority.CRITICAL
+                    for field in task.target_fields
+                ]
+            )
         scope_warnings = _deduplicate(
             [self.catalog.legal_note, *draft.scope_warnings]
         )
         planning_notes = list(draft.planning_notes)
+        if profile_snapshot is not None:
+            planning_notes.append(
+                f"Applied research profile {profile_snapshot.profile_id}; field "
+                "availability policies are frozen in profile_snapshot."
+            )
         if filtered_guidance_query_count:
             planning_notes.append(
                 "Removed "
@@ -242,7 +309,8 @@ class PlannerAgent:
             created_at=datetime.now(timezone.utc),
             generated_by="openai" if self.llm else "offline",
             model=self.llm.model_name if self.llm else None,
-            planner_input=planner_input,
+            planner_input=effective_input,
+            profile_snapshot=profile_snapshot,
             objective=draft.objective,
             planning_notes=planning_notes,
             assumptions=draft.assumptions,
@@ -250,10 +318,14 @@ class PlannerAgent:
             tasks=tasks,
             critical_fields=critical_fields,
             stop_conditions=StopConditions(
-                quality_threshold=planner_input.quality_threshold,
-                max_rounds=planner_input.max_rounds,
+                quality_threshold=effective_input.quality_threshold,
+                max_rounds=effective_input.max_rounds,
             ),
-            authoritative_sources=self.catalog.authoritative_sources,
+            authoritative_sources=(
+                profile_snapshot.country_authoritative_sources
+                if profile_snapshot is not None
+                else self.catalog.authoritative_sources
+            ),
             source_policy=self.catalog.source_policy,
             compliance_rules=_deduplicate(compliance_rules),
             agent_usage=agent_usage,
@@ -283,8 +355,10 @@ class PlannerAgent:
 
         return PlannerDraft(
             objective=(
-                f"Create an auditable {planner_input.depth.value} research plan "
-                f"for {planner_input.brand_name} in {planner_input.target_country}."
+                "Create an auditable "
+                f"{planner_input.profile_id or planner_input.depth.value} research "
+                f"plan for {planner_input.brand_name} in "
+                f"{planner_input.target_country}."
             ),
             planning_notes=[
                 "Offline mode: canonical priorities and query templates were used.",

@@ -59,6 +59,13 @@ from .loop import (
     LoopStopReason,
     LoopValidationError,
 )
+from .profiles import (
+    ProfileCatalogError,
+    available_profiles,
+    load_profile_catalog,
+    materialize_profile,
+    resolve_profile_definition,
+)
 from .schemas import (
     AgentFailureArtifact,
     AgentIterationUsage,
@@ -162,10 +169,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Research language; repeatable (default: pl, en).",
     )
-    plan_parser.add_argument(
+    plan_scope = plan_parser.add_mutually_exclusive_group()
+    plan_scope.add_argument(
         "--depth",
         choices=[depth.value for depth in ResearchDepth],
-        default=ResearchDepth.DUE_DILIGENCE.value,
+        help="Legacy cumulative depth; defaults to due_diligence without --profile.",
+    )
+    plan_scope.add_argument(
+        "--profile",
+        help="Versioned research profile, for example PL:L1 or PL:L1:v1.",
     )
     plan_parser.add_argument("--known-legal-name")
     plan_parser.add_argument("--known-official-website")
@@ -212,12 +224,27 @@ def build_parser() -> argparse.ArgumentParser:
     questions_parser.add_argument(
         "--country", default="PL", help="Two-letter target country code."
     )
-    questions_parser.add_argument(
+    question_scope = questions_parser.add_mutually_exclusive_group()
+    question_scope.add_argument(
         "--depth",
         choices=[depth.value for depth in ResearchDepth],
-        default=ResearchDepth.DUE_DILIGENCE.value,
+        help="Legacy cumulative depth; defaults to due_diligence without --profile.",
+    )
+    question_scope.add_argument(
+        "--profile",
+        help="Versioned research profile, for example PL:L1 or PL:L1:v1.",
     )
     questions_parser.add_argument("--allow-personal-data", action="store_true")
+
+    profiles_parser = subparsers.add_parser(
+        "profiles", help="List or inspect versioned research profiles without API use."
+    )
+    profiles_parser.add_argument(
+        "--country", help="Optional two-letter country filter."
+    )
+    profiles_parser.add_argument(
+        "--profile", help="Show one profile by canonical ID or alias."
+    )
 
     search_parser = subparsers.add_parser(
         "search",
@@ -978,7 +1005,8 @@ def _planner_input_from_args(args: argparse.Namespace) -> PlannerInput:
         target_country=args.country,
         target_regions=args.region,
         research_languages=args.language or ["pl", "en"],
-        depth=args.depth,
+        depth=args.depth or ResearchDepth.DUE_DILIGENCE.value,
+        profile_id=args.profile,
         known_legal_name=args.known_legal_name,
         known_official_website=args.known_official_website,
         existing_fields=args.existing_field,
@@ -992,6 +1020,7 @@ def _planner_input_from_args(args: argparse.Namespace) -> PlannerInput:
 def _run_plan(args: argparse.Namespace) -> int:
     catalog = load_question_catalog()
     planner_input = _planner_input_from_args(args)
+    profile_catalog = load_profile_catalog() if planner_input.profile_id else None
 
     llm = None
     if not args.offline:
@@ -1000,7 +1029,11 @@ def _run_plan(args: argparse.Namespace) -> int:
             settings = replace(settings, model=args.model)
         llm = OpenAIPlannerClient(settings)
 
-    plan = PlannerAgent(catalog, llm).create_plan(
+    plan = PlannerAgent(
+        catalog,
+        llm,
+        profile_catalog=profile_catalog,
+    ).create_plan(
         planner_input,
         iteration=args.iteration,
     )
@@ -1010,6 +1043,14 @@ def _run_plan(args: argparse.Namespace) -> int:
         "brand": plan.planner_input.brand_name,
         "country": plan.planner_input.target_country,
         "depth": plan.planner_input.depth.value,
+        "profile": (
+            plan.profile_snapshot.profile_id if plan.profile_snapshot else None
+        ),
+        "profile_catalog_version": (
+            plan.profile_snapshot.profile_catalog_version
+            if plan.profile_snapshot
+            else None
+        ),
         "generated_by": plan.generated_by,
         "model": plan.model,
         "tasks": len(plan.tasks),
@@ -2865,6 +2906,28 @@ def _next_loop_iteration(directory: Path, minimum: int) -> int:
     return max(observed) + 1
 
 
+def _loop_recommended_next_action(
+    *,
+    normalization_reference: str | None,
+    checker_passed: bool,
+    scope_complete: bool,
+    stop_reason: LoopStopReason,
+    advance_with_documented_gaps: bool,
+) -> LoopNextAction:
+    if normalization_reference is not None:
+        return LoopNextAction.HUMAN_REVIEW
+    if checker_passed:
+        return LoopNextAction.NORMALIZE
+    if scope_complete and advance_with_documented_gaps:
+        return LoopNextAction.INSPECT_GAPS
+    if stop_reason in {
+        LoopStopReason.MAX_ROUNDS,
+        LoopStopReason.BUDGET_EXHAUSTED,
+    }:
+        return LoopNextAction.RESUME_LOOP
+    return LoopNextAction.INSPECT_GAPS
+
+
 def _loop_stage_usage(
     stage: str,
     iteration: int,
@@ -3459,17 +3522,22 @@ def _run_loop(args: argparse.Namespace) -> int:
             "last already-started agent cycle."
         )
 
-    if normalization_reference is not None:
-        recommended_next_action = LoopNextAction.HUMAN_REVIEW
-    elif current.passed:
-        recommended_next_action = LoopNextAction.NORMALIZE
-    elif stop_reason in {
-        LoopStopReason.MAX_ROUNDS,
-        LoopStopReason.BUDGET_EXHAUSTED,
-    }:
-        recommended_next_action = LoopNextAction.RESUME_LOOP
-    else:
-        recommended_next_action = LoopNextAction.INSPECT_GAPS
+    recommended_next_action = _loop_recommended_next_action(
+        normalization_reference=normalization_reference,
+        checker_passed=current.passed,
+        scope_complete=current.scope_complete,
+        stop_reason=stop_reason,
+        advance_with_documented_gaps=policy.advance_with_documented_gaps,
+    )
+    if (
+        recommended_next_action == LoopNextAction.INSPECT_GAPS
+        and current.scope_complete
+        and policy.advance_with_documented_gaps
+    ):
+        warnings.append(
+            "Plan scope is complete; documented-gap progression has no remaining "
+            "task batch, so another identical loop is not recommended."
+        )
 
     results = LoopRunResults(
         loop_id=str(uuid4()),
@@ -3811,15 +3879,88 @@ def _run_questions(args: argparse.Namespace) -> int:
     planner_input = PlannerInput(
         brand_name="<brand>",
         target_country=args.country,
-        depth=args.depth,
+        depth=args.depth or ResearchDepth.DUE_DILIGENCE.value,
+        profile_id=args.profile,
         allow_personal_data=args.allow_personal_data,
     )
-    selected = select_questions(catalog, planner_input)
+    profile_snapshot = None
+    if planner_input.profile_id:
+        profile_catalog = load_profile_catalog()
+        profile_snapshot, selected = materialize_profile(
+            profile_catalog,
+            catalog,
+            planner_input.profile_id,
+            allow_personal_data=planner_input.allow_personal_data,
+        )
+        if profile_snapshot.country != planner_input.target_country:
+            raise ProfileCatalogError(
+                f"Profile {profile_snapshot.profile_id} is for "
+                f"{profile_snapshot.country}, not {planner_input.target_country}."
+            )
+        policy_by_question = {
+            question.question_id: question
+            for question in profile_snapshot.questions
+        }
+    else:
+        selected = select_questions(catalog, planner_input)
+        policy_by_question = {}
+    availability_counts: dict[str, int] = {}
+    for policy in policy_by_question.values():
+        for field_policy in policy.fields:
+            availability = field_policy.availability.value
+            availability_counts[availability] = (
+                availability_counts.get(availability, 0) + 1
+            )
+    field_count = sum(len(question.target_fields) for _, question in selected)
+    if profile_snapshot:
+        critical_fields = {
+            field.target_field
+            for question in profile_snapshot.questions
+            for field in question.fields
+            if field.required_for_completion
+        }
+    else:
+        critical_fields = {
+            field
+            for _, question in selected
+            if question.requirement.value == "critical"
+            for field in question.target_fields
+        }
     output = {
         "catalog_version": catalog.version,
         "country": planner_input.target_country,
-        "depth": planner_input.depth.value,
+        "selection_mode": "profile" if profile_snapshot else "legacy_depth",
+        "depth": (
+            profile_snapshot.legacy_depth.value
+            if profile_snapshot
+            else planner_input.depth.value
+        ),
+        "profile": profile_snapshot.profile_id if profile_snapshot else None,
+        "profile_catalog_version": (
+            profile_snapshot.profile_catalog_version if profile_snapshot else None
+        ),
+        "profile_sha256": (
+            profile_snapshot.profile_sha256 if profile_snapshot else None
+        ),
         "question_count": len(selected),
+        "field_count": field_count,
+        "critical_fields": len(critical_fields),
+        "availability": availability_counts,
+        "completion_required_availabilities": (
+            [
+                availability.value
+                for availability in (
+                    profile_snapshot.completion_required_availabilities
+                )
+            ]
+            if profile_snapshot
+            else []
+        ),
+        "country_authoritative_sources": (
+            profile_snapshot.country_authoritative_sources
+            if profile_snapshot
+            else []
+        ),
         "questions": [
             {
                 "id": question.id,
@@ -3829,9 +3970,106 @@ def _run_questions(args: argparse.Namespace) -> int:
                 "title": question.title,
                 "question": question.question,
                 "target_fields": question.target_fields,
+                "field_availability": (
+                    {
+                        field.target_field: field.availability.value
+                        for field in policy_by_question[question.id].fields
+                    }
+                    if question.id in policy_by_question
+                    else {}
+                ),
+                "field_completion_required": (
+                    {
+                        field.target_field: field.required_for_completion
+                        for field in policy_by_question[question.id].fields
+                    }
+                    if question.id in policy_by_question
+                    else {}
+                ),
+                "reuse_scope": (
+                    policy_by_question[question.id].reuse_scope.value
+                    if question.id in policy_by_question
+                    else "brand"
+                ),
             }
             for section_id, question in selected
         ],
+    }
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_profiles(args: argparse.Namespace) -> int:
+    catalog = load_question_catalog()
+    profile_catalog = load_profile_catalog()
+    country = (
+        PlannerInput(
+            brand_name="<brand>", target_country=args.country
+        ).target_country
+        if args.country
+        else None
+    )
+    if args.profile:
+        definitions = [resolve_profile_definition(profile_catalog, args.profile)]
+    else:
+        definitions = available_profiles(profile_catalog, country=country)
+    if not definitions:
+        raise ProfileCatalogError(
+            f"No research profiles are available for country {country}."
+        )
+    if country and any(profile.country != country for profile in definitions):
+        raise ProfileCatalogError(
+            f"Requested profile does not belong to country {country}."
+        )
+
+    profiles = []
+    for definition in definitions:
+        snapshot, selected = materialize_profile(
+            profile_catalog,
+            catalog,
+            definition.profile_id,
+        )
+        availability_counts: dict[str, int] = {}
+        for question in snapshot.questions:
+            for field in question.fields:
+                availability_counts[field.availability.value] = (
+                    availability_counts.get(field.availability.value, 0) + 1
+                )
+        profiles.append(
+            {
+                "profile_id": snapshot.profile_id,
+                "aliases": definition.aliases,
+                "country": snapshot.country,
+                "level": snapshot.level.value,
+                "name": snapshot.name,
+                "description": snapshot.description,
+                "intended_use": snapshot.intended_use,
+                "access_scope": snapshot.access_scope.value,
+                "legacy_depth": snapshot.legacy_depth.value,
+                "questions": len(selected),
+                "fields": sum(len(question.target_fields) for _, question in selected),
+                "completion_required_fields": sum(
+                    field.required_for_completion
+                    for question in snapshot.questions
+                    for field in question.fields
+                ),
+                "completion_required_availabilities": [
+                    availability.value
+                    for availability in (
+                        snapshot.completion_required_availabilities
+                    )
+                ],
+                "availability": availability_counts,
+                "country_authoritative_sources": (
+                    snapshot.country_authoritative_sources
+                ),
+                "profile_sha256": snapshot.profile_sha256,
+            }
+        )
+    output = {
+        "profile_catalog_version": profile_catalog.version,
+        "question_catalog_version": profile_catalog.question_catalog_version,
+        "profiles": profiles,
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
@@ -3863,8 +4101,11 @@ def main(argv: list[str] | None = None) -> int:
             return _run_reconcile(args)
         if args.command == "questions":
             return _run_questions(args)
+        if args.command == "profiles":
+            return _run_profiles(args)
     except (
         CatalogError,
+        ProfileCatalogError,
         ConfigurationError,
         PlannerProviderError,
         PlannerValidationError,

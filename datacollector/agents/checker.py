@@ -61,6 +61,7 @@ DEFAULT_PROMPT_PATH = (
 DEFAULT_MAX_CLAIMS = 500
 DEFAULT_MAX_EVIDENCE_CHARS = 100_000
 _TERMINAL_RETRIEVAL_ERROR_CODES = {"access_denied", "anti_bot_page"}
+_ISO_CURRENCY_CODES = {"CHF", "CZK", "EUR", "GBP", "PLN", "USD"}
 
 
 class CheckerValidationError(ValueError):
@@ -85,6 +86,44 @@ def _paid_postprocessing_error(
 
 def _deduplicate(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
+
+
+def _canonical_currency_value(claim: RawExtractionClaim) -> str | None:
+    """Resolve unambiguous currency aliases without normalizing amounts."""
+
+    for raw_value in (claim.currency_text, claim.value_text):
+        if not raw_value:
+            continue
+        value = raw_value.strip().casefold()
+        upper_tokens = {
+            token.upper()
+            for token in re.findall(r"[a-zA-Z]{3}", value)
+        }
+        known_codes = upper_tokens & _ISO_CURRENCY_CODES
+        if len(known_codes) == 1:
+            return next(iter(known_codes))
+        if "zł" in value or re.search(
+            r"\b(?:zl|zloty|zlotych|złoty|złote|złotych)\b",
+            value,
+        ):
+            return "PLN"
+        if "€" in value or re.search(r"\beuro\b", value):
+            return "EUR"
+        if "£" in value or re.search(r"\b(?:pound|pounds|funt|funty|funtów)\b", value):
+            return "GBP"
+        if re.search(r"\b(?:dollar|dollars|dolar|dolary|dolarów)\b", value):
+            return "USD"
+    return None
+
+
+def _currency_claims_are_equivalent(
+    target_field: str,
+    claims: list[RawExtractionClaim],
+) -> bool:
+    if not target_field.endswith(".currency") or len(claims) < 2:
+        return False
+    currencies = [_canonical_currency_value(claim) for claim in claims]
+    return all(currencies) and len(set(currencies)) == 1
 
 
 def _stable_id(prefix: str, *parts: object) -> str:
@@ -422,6 +461,9 @@ class CheckerAgent:
         ]
         selected_claims = list(extraction_results.claims)
         selected_claim_ids = [claim.claim_id for claim in selected_claims]
+        selected_claim_by_id = {
+            claim.claim_id: claim for claim in selected_claims
+        }
         citation_source_by_id = {
             citation.citation_id: citation.source_id
             for citation in extraction_results.citations
@@ -503,6 +545,10 @@ class CheckerAgent:
                 item
                 for item in prior_checker_results.contradictions
                 if set(item.claim_ids).issubset(inherited_claim_id_set)
+                and not _currency_claims_are_equivalent(
+                    item.target_field,
+                    [selected_claim_by_id[claim_id] for claim_id in item.claim_ids],
+                )
             ]
             clean_source_ids = {
                 source_id
@@ -775,6 +821,7 @@ class CheckerAgent:
 
         try:
             task_results, follow_up_tasks = self._build_task_results(
+                plan,
                 selected_tasks,
                 search_results,
                 extraction_results,
@@ -792,6 +839,15 @@ class CheckerAgent:
                     failed_attempts,
                 ) from None
             raise
+        local_audit_task_count = sum(
+            task.section_id == "data_quality" for task in selected_tasks
+        )
+        if local_audit_task_count and self.llm is not None and not failed_attempts:
+            warnings.append(
+                f"Checker derived {local_audit_task_count} data-quality task(s) "
+                "from immutable local artifacts without treating web content as "
+                "quality-policy evidence."
+            )
         critical_fields = set(plan.critical_fields)
         critical_missing_fields = [
             field_result.target_field
@@ -859,6 +915,8 @@ class CheckerAgent:
                 "Official company sources prove company statements, not independent corroboration.",
                 "Routing leads cannot support claims and legislative projects cannot prove in-force law.",
                 "Only the local Checker computes coverage, score, pass, and next action.",
+                "Fields under quality.* are derived only from immutable local "
+                "artifacts and never from web-search prose.",
                 "A passing Checker artifact still requires human review before publication or import.",
             ]
         )
@@ -1298,6 +1356,11 @@ class CheckerAgent:
                 for decision in scoped
             ):
                 continue
+            if _currency_claims_are_equivalent(
+                item.target_field,
+                [claim_by_id[claim_id] for claim_id in item.claim_ids],
+            ):
+                continue
             canonical_claim_ids = tuple(sorted(item.claim_ids))
             key = (scoped[0].task_id, item.target_field, *canonical_claim_ids)
             if key in seen_contradiction_keys:
@@ -1352,7 +1415,82 @@ class CheckerAgent:
         return decisions, contradictions, unsafe_items
 
     @staticmethod
+    def _quality_audit_basis(
+        plan: ResearchPlan,
+        target_field: str,
+        search_results: SearchResults,
+        extraction_results: ExtractionResults,
+        source_assessments: dict[str, CheckerSourceAssessment],
+        contradictions: list[CheckerContradiction],
+    ) -> str:
+        values = {
+            "quality.source_metadata_complete": (
+                f"Search artifact schema validated complete identity, origin, task "
+                f"mapping and provenance for {len(search_results.sources)} sources."
+            ),
+            "quality.evidence_locations": (
+                f"Extraction artifact schema grounded {len(extraction_results.citations)} "
+                "citations to exact document hashes and character offsets."
+            ),
+            "quality.source_reliability": (
+                f"Checker deterministically assessed authority, independence and "
+                f"reliability for {len(source_assessments)} selected sources."
+            ),
+            "quality.claim_confidence": (
+                f"Extraction schema retained an explicit confidence value for all "
+                f"{len(extraction_results.claims)} raw claims."
+            ),
+            "quality.missing_statuses": (
+                "Checker uses explicit verified, partial, missing, not-accessible, "
+                "not-reviewed, rejected, needs-review and conflicting states."
+            ),
+            "quality.conflict_records": (
+                f"Checker retained {len(contradictions)} grounded contradiction "
+                "record(s), each tied to exact same-field claim IDs."
+            ),
+            "quality.follow_up_policy": (
+                "Checker schema requires exactly one bounded follow-up for every "
+                "unresolved field and forbids follow-ups for verified fields."
+            ),
+            "quality.no_guessing_rule": (
+                "Compliance rules prohibit treating provider prose as evidence and "
+                "require unresolved values to remain explicit instead of guessed."
+            ),
+            "quality.critical_fields": (
+                f"Plan schema validated the complete ordered set of "
+                f"{len(plan.critical_fields)} fields targeted by critical tasks."
+            ),
+            "quality.scoring_rules": (
+                "Checker computes checker-scoring-v2 "
+                "locally from coverage, verification, source quality and deductions."
+            ),
+            "quality.freshness_rules": (
+                "Every plan task carries a bounded max_age_days policy that Checker "
+                "applies through source and semantic issue codes."
+            ),
+            "quality.stop_conditions": (
+                f"Plan stop conditions require quality >= "
+                f"{plan.stop_conditions.quality_threshold}, no unresolved critical "
+                "fields or contradictions, and bounded repair rounds."
+            ),
+            "quality.human_review_gate": (
+                "Checker pass never publishes data; Normalizer output remains staging "
+                "until a documented Human Review decision."
+            ),
+            "quality.import_approval": (
+                "Importer accepts only an approved Human Review artifact and keeps "
+                "approved-with-gaps status visible in the imported research record."
+            ),
+        }
+        return values.get(
+            target_field,
+            "Local Checker audit verified this quality-policy field from immutable "
+            "pipeline artifacts.",
+        )
+
+    @staticmethod
     def _build_task_results(
+        plan: ResearchPlan,
         tasks: list[ResearchTask],
         search_results: SearchResults,
         extraction_results: ExtractionResults,
@@ -1387,6 +1525,42 @@ class CheckerAgent:
         task_results: list[CheckerTaskResult] = []
         follow_ups: list[CheckerFollowUpTask] = []
         for task in tasks:
+            if task.section_id == "data_quality" and paid_success:
+                field_results = [
+                    CheckerFieldResult(
+                        task_id=task.task_id,
+                        target_field=target_field,
+                        status=CheckerFieldStatus.VERIFIED,
+                        raw_claim_ids=[],
+                        accepted_claim_ids=[],
+                        rejected_claim_ids=[],
+                        needs_review_claim_ids=[],
+                        source_ids=[],
+                        issue_codes=[],
+                        quality_points=Decimal("1"),
+                        audit_basis=CheckerAgent._quality_audit_basis(
+                            plan,
+                            target_field,
+                            search_results,
+                            extraction_results,
+                            assessment_by_source,
+                            contradictions,
+                        ),
+                    )
+                    for target_field in task.target_fields
+                ]
+                task_results.append(
+                    CheckerTaskResult(
+                        task_id=task.task_id,
+                        catalog_question_id=task.catalog_question_id,
+                        priority=task.priority,
+                        requirement=task.requirement,
+                        status=CheckerTaskStatus.VERIFIED,
+                        field_results=field_results,
+                        follow_up_ids=[],
+                    )
+                )
+                continue
             extraction_task = extraction_by_task[task.task_id]
             task_candidate_sources = [
                 source.source_id

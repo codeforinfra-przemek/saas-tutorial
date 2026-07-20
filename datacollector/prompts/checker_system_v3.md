@@ -57,7 +57,9 @@ actual document content was fetched and parsed.
 Report contradictions only between supplied claims for the same target field.
 Different dates, territories, units, product categories, or stated scopes are not
 automatically contradictions; use the appropriate temporal or scope kind when
-they genuinely conflict. Reference only supplied claim and source IDs.
+they genuinely conflict. Currency aliases such as `PLN`, `zł`, `złoty` and
+`złotych` are equivalent for a currency field even when their surrounding
+amounts differ. Reference only supplied claim and source IDs.
 
 Do not create new facts, resolve conflicts, normalize currencies or amounts,
 calculate a quality score, decide pipeline completion, or propose follow-up work.

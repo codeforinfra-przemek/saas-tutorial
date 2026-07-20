@@ -40,6 +40,21 @@ class PlannerInputTests(TestCase):
                 with self.assertRaises(ValidationError):
                     PlannerInput(brand_name="Example", target_country=invalid_code)
 
+    def test_profile_id_is_canonicalized(self):
+        planner_input = PlannerInput(
+            brand_name="Example", profile_id=" pl:l2:V1 "
+        )
+
+        self.assertEqual(planner_input.profile_id, "PL:L2:v1")
+
+    def test_profile_id_rejects_unknown_level_or_version_shape(self):
+        for invalid_profile in ("PL:L4", "PL:L1:latest", "Poland:L1"):
+            with self.subTest(profile=invalid_profile):
+                with self.assertRaises(ValidationError):
+                    PlannerInput(
+                        brand_name="Example", profile_id=invalid_profile
+                    )
+
 
 class ResearchPlanContractTests(TestCase):
     @classmethod
@@ -77,7 +92,7 @@ class ResearchPlanContractTests(TestCase):
             )
 
     def test_older_schema_plans_remain_readable(self):
-        for version in ("1.0.0", "1.1.0"):
+        for version in ("1.0.0", "1.1.0", "1.2.0"):
             with self.subTest(version=version):
                 legacy_payload = self.plan.model_dump(mode="json")
                 legacy_payload["schema_version"] = version

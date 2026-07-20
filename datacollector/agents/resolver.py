@@ -268,7 +268,16 @@ class ResolverAgent:
         scope_task_ids = _deduplicate(
             [item.task_id for item in deterministic_items]
         )
-        if self.llm is not None:
+        local_audit_only = bool(deterministic_items) and all(
+            item.selected_action == ResolverAction.LOCAL_AUDIT
+            for item in deterministic_items
+        )
+        if self.llm is not None and local_audit_only:
+            warnings.append(
+                "Resolver skipped its provider call because every selected item "
+                "is a deterministic local data-quality audit."
+            )
+        elif self.llm is not None:
             generated_by = "openai"
             model = self.llm.model_name
             provider_executed = True
@@ -386,6 +395,8 @@ class ResolverAgent:
                 "or searching broadly.",
                 "Do not overwrite prior immutable artifacts; the next round must preserve lineage.",
                 "Do not send unresolved data to Normalizer until a new Checker pass accepts it.",
+                "Data-quality governance tasks are audited from immutable local "
+                "artifacts and never trigger web search or document extraction.",
             ]
         )
         result_payload = {
@@ -599,8 +610,9 @@ class ResolverAgent:
         follow_ups: list[CheckerFollowUpTask] = []
         for task_id in checker_results.unevaluated_task_ids:
             task = task_by_id[task_id]
-            queries = _deduplicate(task.search_queries)
-            if not queries:
+            local_audit = task.section_id == "data_quality"
+            queries = [] if local_audit else _deduplicate(task.search_queries)
+            if not local_audit and not queries:
                 queries = [
                     f'"{plan.planner_input.brand_name}" {task.title} '
                     f"{plan.planner_input.target_country}"
@@ -618,22 +630,32 @@ class ResolverAgent:
                         "Research the previously unevaluated plan task: "
                         f"{task.question}"
                     ),
-                    required_source_types=task.preferred_source_types,
+                    required_source_types=(
+                        [] if local_audit else task.preferred_source_types
+                    ),
                     related_claim_ids=[],
                     supporting_claim_ids=[],
-                    action=CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE,
+                    action=(
+                        CheckerFollowUpAction.SEMANTIC_REVIEW
+                        if local_audit
+                        else CheckerFollowUpAction.FIND_ALTERNATIVE_SOURCE
+                    ),
                     candidate_source_ids=[],
                     retry_source_ids=[],
                     reextract_source_ids=[],
-                    minimum_additional_sources=task.min_sources,
+                    minimum_additional_sources=(0 if local_audit else task.min_sources),
                     requires_independent_source=(
                         task.requires_independent_corroboration
                     ),
                     suggested_queries=queries[:10],
                     completion_criteria=(
-                        "Complete when this plan task has been searched, its mapped "
-                        "sources have been extracted, and a new Checker pass has "
-                        "evaluated every target field."
+                        "Complete when the local Checker audit derives every quality "
+                        "field from immutable plan, search, extraction, and checker "
+                        "artifacts without external evidence calls."
+                        if local_audit
+                        else "Complete when this plan task has been searched, its "
+                        "mapped sources have been extracted, and a new Checker pass "
+                        "has evaluated every target field."
                     ),
                 )
             )
@@ -679,6 +701,35 @@ class ResolverAgent:
 
         for sequence, follow_up in enumerate(follow_ups, start=1):
             if follow_up.reason == CheckerFollowUpReason.SCOPE_NOT_STARTED:
+                if follow_up.action == CheckerFollowUpAction.SEMANTIC_REVIEW:
+                    items.append(
+                        ResolverWorkItem(
+                            resolution_item_id=_stable_id(
+                                "resolution-item", follow_up.follow_up_id
+                            ),
+                            follow_up_id=follow_up.follow_up_id,
+                            task_id=follow_up.task_id,
+                            target_field=follow_up.target_field,
+                            priority=follow_up.priority,
+                            reason=follow_up.reason,
+                            sequence=sequence,
+                            allowed_actions=[ResolverAction.LOCAL_AUDIT],
+                            selected_action=ResolverAction.LOCAL_AUDIT,
+                            selected_source_ids=[],
+                            fallback_source_ids=[],
+                            queries=[],
+                            related_claim_ids=[],
+                            supporting_claim_ids=[],
+                            minimum_additional_sources=0,
+                            requires_independent_source=False,
+                            completion_criteria=follow_up.completion_criteria,
+                            rationale=(
+                                "Data-quality policy is derived from local immutable "
+                                "artifacts and must not trigger web research."
+                            ),
+                        )
+                    )
+                    continue
                 queries = _deduplicate(follow_up.suggested_queries)[
                     :max_queries_per_item
                 ]

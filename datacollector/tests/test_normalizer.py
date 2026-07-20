@@ -19,6 +19,7 @@ from datacollector.schemas import (
     CheckerClaimDecisionDraft,
     CheckerContradiction,
     CheckerContradictionKind,
+    CheckerFieldStatus,
     CheckerMode,
     CheckerVerdict,
     NormalizationPrecision,
@@ -206,6 +207,47 @@ class NormalizerAgentTests(TestCase):
         self.assertFalse(results.publishable)
         self.assertTrue(results.ready_for_human_review)
 
+    def test_local_quality_audit_becomes_derived_field_without_a_fake_value(self):
+        task_result = self.checker_results.task_results[0]
+        audit_field = task_result.field_results[0].model_copy(
+            update={
+                "target_field": "quality.no_guessing_rule",
+                "status": CheckerFieldStatus.VERIFIED,
+                "raw_claim_ids": [],
+                "accepted_claim_ids": [],
+                "rejected_claim_ids": [],
+                "needs_review_claim_ids": [],
+                "source_ids": [],
+                "issue_codes": [],
+                "audit_basis": (
+                    "Local compliance rules require unresolved facts to remain "
+                    "explicit instead of guessed."
+                ),
+            }
+        )
+        checker = self.checker_results.model_copy(
+            update={
+                "task_results": [
+                    task_result.model_copy(update={"field_results": [audit_field]})
+                ],
+                "contradictions": [],
+            }
+        )
+
+        fields, ignored = NormalizerAgent._build_field_results(
+            checker,
+            [],
+            eligible_claim_ids=[],
+            unsafe_excluded_claim_ids=[],
+        )
+
+        self.assertEqual(ignored, 0)
+        self.assertEqual(len(fields), 1)
+        self.assertEqual(fields[0].status, NormalizerFieldStatus.DERIVED)
+        self.assertEqual(fields[0].normalized_value_ids, [])
+        self.assertEqual(fields[0].source_ids, [])
+        self.assertTrue(fields[0].notes)
+
     def test_normalizer_rejects_incremental_checker_even_with_accepted_claims(self):
         incremental = self.checker_results.model_copy(
             update={"checker_mode": CheckerMode.INCREMENTAL}
@@ -252,7 +294,7 @@ class NormalizerAgentTests(TestCase):
     def test_paid_normalizer_groups_equivalent_claims_and_records_usage(self):
         results = self._run(FixtureNormalizerLLM(), mode=NormalizerMode.PAID)
 
-        self.assertEqual(results.schema_version, "1.1.0")
+        self.assertEqual(results.schema_version, "1.2.0")
         self.assertEqual(results.prompt_version, "normalizer-system-v2")
         self.assertEqual(results.strategy_source, NormalizerStrategySource.OPENAI)
         self.assertEqual(len(results.agent_usage), 1)

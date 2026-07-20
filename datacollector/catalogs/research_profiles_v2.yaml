@@ -1,0 +1,762 @@
+version: "2.0.0"
+title: "Country-calibrated franchise research profiles"
+question_catalog_version: "1.0.0"
+
+profiles:
+  - profile_id: "PL:L1:v1"
+    aliases: ["PL:L1"]
+    country: "PL"
+    level: "L1"
+    name: "Polska — podstawowy profil katalogowy"
+    description: >-
+      Podstawowe, porównywalne dane o ofercie franczyzowej, które przeciętny
+      użytkownik może znaleźć na oficjalnej stronie i popularnych portalach.
+    intended_use: >-
+      Masowe nasycanie katalogu marek świeżymi danymi podstawowymi bez
+      sugerowania, że wykonano pełne due diligence.
+    access_scope: public
+    legacy_depth: due_diligence
+    default_availability: public_expected
+    country_authoritative_sources:
+      - "https://biznes.gov.pl/"
+    completion_required_availabilities: [public_expected]
+    question_rules:
+      - question_id: scope.brand_identity
+        requirement: critical
+        title: "Publiczny profil marki i oficjalne kanały"
+        question: >-
+          Jaka marka i oferta franczyzowa są publicznie przedstawiane, jaka jest
+          kategoria i krótki opis modelu oraz które strony i ogólne kanały
+          biznesowe są oficjalne?
+        search_query_templates:
+          - '"{brand}" franczyza oficjalna strona {country}'
+          - '"{brand}" franczyza oferta kontakt'
+        fields:
+          brand.name: public_expected
+          brand.aliases: public_optional
+          brand.category: public_expected
+          brand.public_summary: public_expected
+          websites.official: public_expected
+          websites.franchise_offer: public_expected
+          contact.generic_business_route: public_expected
+        min_sources: 1
+        preferred_source_types: [official, industry, marketplace]
+        acceptance_criteria: >-
+          Marka, opis i kanały pochodzą z datowanego źródła, a droga kontaktu jest
+          ogólnym kanałem biznesowym, nie prywatnymi danymi osoby.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: []
+
+      - question_id: scope.offer_and_transaction
+        requirement: critical
+        title: "Format oferty i podstawowe wymagania kandydata"
+        question: >-
+          Jakie formaty i rodzaje współpracy są oferowane oraz jakie publiczne
+          wymagania kapitałowe, lokalowe, doświadczenia i zaangażowania dotyczą
+          kandydata?
+        search_query_templates:
+          - '"{brand}" franczyza wymagania kandydat wkład lokal'
+          - '"{brand}" franczyza formaty współpracy'
+        fields:
+          offer.type: public_expected
+          offer.unit_formats: public_expected
+          offer.new_or_resale: public_optional
+          offer.target_investor: public_optional
+          candidate.capital_requirement: public_expected
+          candidate.experience: public_optional
+          candidate.time_commitment: public_optional
+          candidate.premises_requirements: public_expected
+          candidate.other_requirements: public_optional
+        min_sources: 1
+        preferred_source_types: [official, industry, marketplace]
+        acceptance_criteria: >-
+          Różne formaty placówek i transakcji nie są łączone, a każde wymaganie
+          zachowuje kontekst konkretnej oferty.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity]
+
+      - question_id: scope.jurisdictions
+        requirement: required
+        title: "Geografia dostępnej oferty"
+        question: >-
+          W jakim kraju, regionach i lokalizacjach marka publicznie poszukuje
+          franczyzobiorców lub oferuje nowe placówki?
+        search_query_templates:
+          - '"{brand}" franczyza lokalizacje regiony Polska'
+          - '"{brand}" gdzie otworzyć placówkę franczyzową'
+        fields:
+          jurisdictions.target_country: public_expected
+          jurisdictions.target_regions: public_expected
+          jurisdictions.offer_locations: public_optional
+        min_sources: 1
+        preferred_source_types: [official, industry, marketplace]
+        acceptance_criteria: >-
+          Geografia opisuje dostępność oferty, a nie wywnioskowany zasięg całej
+          sieci lub niepotwierdzoną możliwość otwarcia.
+        requires_independent_corroboration: false
+        max_age_days: 180
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd01.business_background
+        requirement: required
+        title: "Publiczne podsumowanie modelu i historii"
+        question: >-
+          Jaki jest model działalności, od kiedy działa marka i franczyza oraz jak
+          oficjalnie opisuje swój rynek i historię operacyjną?
+        search_query_templates:
+          - '"{brand}" historia marki franczyza model biznesowy'
+          - '"{brand}" od kiedy franczyza Polska'
+        fields:
+          business.model: public_expected
+          franchisor.operating_history: public_optional
+          franchisor.franchising_history: public_expected
+          market.summary: public_optional
+          brand.founded_year: public_optional
+          brand.franchising_since: public_expected
+        min_sources: 1
+        preferred_source_types: [official, industry, reputable_media]
+        acceptance_criteria: >-
+          Daty i opis modelu są przypisane do właściwej marki lub podmiotu i nie
+          zamieniają deklaracji marketingowej w niezależnie potwierdzony fakt.
+        requires_independent_corroboration: false
+        max_age_days: 730
+        dependencies: [scope.brand_identity]
+
+      - question_id: fdd05.initial_fees
+        requirement: critical
+        title: "Reklamowana opłata wejściowa"
+        question: >-
+          Czy oferta publicznie wskazuje opłatę za przystąpienie do sieci i jaka
+          jest jej kwota, waluta, podstawa podatkowa oraz data obowiązywania?
+        search_query_templates:
+          - '"{brand}" franczyza opłata wstępna opłata za przystąpienie'
+          - '"{brand}" franczyza opłata wpisowa warunki'
+        fields:
+          fees.joining_fee: public_expected
+          fees.joining_fee_currency: public_expected
+          fees.joining_fee_tax_basis: public_optional
+          fees.joining_fee_as_of: public_expected
+        min_sources: 1
+        preferred_source_types: [official, legal_document]
+        acceptance_criteria: >-
+          Opłata za przystąpienie jest oddzielona od wkładu własnego, pakietu
+          startowego i całkowitej inwestycji oraz zachowuje netto/brutto i datę.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd06.other_fees
+        requirement: required
+        title: "Publicznie podawane opłaty bieżące"
+        question: >-
+          Jakie opłaty royalty, marketingowe lub inne cykliczne są publicznie
+          podawane wraz z podstawą naliczenia i częstotliwością?
+        search_query_templates:
+          - '"{brand}" franczyza opłata miesięczna royalty marketingowa'
+          - '"{brand}" franczyza opłaty bieżące'
+        fields:
+          fees.royalty: public_optional
+          fees.marketing: public_optional
+          fees.other: public_optional
+        min_sources: 1
+        preferred_source_types: [official, legal_document]
+        acceptance_criteria: >-
+          Każda opłata zachowuje kwotę lub formułę, podstawę naliczenia,
+          częstotliwość, walutę i kontekst formatu placówki.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd07.initial_investment
+        requirement: critical
+        title: "Reklamowana inwestycja, wkład i pakiet startowy"
+        question: >-
+          Jaki publicznie deklarowany zakres całkowitej inwestycji, wkład własny
+          i pakiet startowy dotyczą poszczególnych formatów placówki?
+        search_query_templates:
+          - '"{brand}" franczyza koszt inwestycji wkład własny'
+          - '"{brand}" franczyza pakiet startowy koszt otwarcia'
+        fields:
+          investment.total_low: public_expected
+          investment.total_high: public_expected
+          investment.currency: public_expected
+          investment.own_contribution: public_expected
+          investment.startup_package: public_optional
+          investment.tax_basis: public_optional
+          investment.as_of: public_expected
+        min_sources: 1
+        preferred_source_types: [official, legal_document, industry]
+        acceptance_criteria: >-
+          Całkowita inwestycja, wkład własny, opłata wejściowa i pakiet startowy
+          są oddzielnymi wartościami z walutą, VAT, datą i formatem placówki.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [fdd05.initial_fees, scope.offer_and_transaction]
+
+      - question_id: fdd10.financing
+        requirement: recommended
+        title: "Publiczna dostępność finansowania"
+        question: >-
+          Czy marka lub wskazany partner publicznie oferuje albo organizuje
+          finansowanie inwestycji?
+        search_query_templates:
+          - '"{brand}" franczyza finansowanie inwestycji partner'
+          - '"{brand}" franczyza kredyt leasing'
+        fields:
+          financing.available: public_optional
+          financing.provider: public_optional
+        min_sources: 1
+        preferred_source_types: [official, government]
+        acceptance_criteria: >-
+          Sama wzmianka o finansowaniu nie jest przedstawiana jako zatwierdzona
+          oferta kredytu i identyfikuje podmiot, który ją deklaruje.
+        requires_independent_corroboration: false
+        max_age_days: 180
+        dependencies: [fdd07.initial_investment]
+
+      - question_id: fdd11.assistance_and_opening
+        requirement: required
+        title: "Publicznie deklarowane wsparcie i otwarcie"
+        question: >-
+          Jakie wsparcie przed otwarciem, przy wyborze lokalu, uruchomieniu i
+          bieżącym prowadzeniu placówki marka publicznie deklaruje?
+        search_query_templates:
+          - '"{brand}" franczyza wsparcie otwarcie lokal'
+          - '"{brand}" wsparcie franczyzobiorcy prowadzenie placówki'
+        fields:
+          support.pre_opening: public_expected
+          support.site_selection: public_optional
+          support.hiring_and_opening: public_optional
+          support.ongoing: public_expected
+          support.estimated_opening_time: public_optional
+        min_sources: 1
+        preferred_source_types: [official, industry]
+        acceptance_criteria: >-
+          Deklarowane wsparcie jest przypisane do etapu i warunków oferty, bez
+          sugerowania zobowiązania umownego, jeśli umowy nie zbadano.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd11.advertising_it_training
+        requirement: required
+        title: "Publiczne szkolenie, reklama i systemy"
+        question: >-
+          Jak marka opisuje szkolenie, wsparcie reklamowe i podstawowe systemy
+          wykorzystywane przez franczyzobiorcę?
+        search_query_templates:
+          - '"{brand}" franczyza szkolenie reklama system informatyczny'
+          - '"{brand}" szkolenie franczyzobiorcy'
+        fields:
+          support.training_program: public_expected
+          support.advertising_program: public_optional
+          support.it_systems: public_optional
+        min_sources: 1
+        preferred_source_types: [official, industry]
+        acceptance_criteria: >-
+          Zakres szkolenia i systemów zachowuje informację, kto, kiedy i pod jakimi
+          warunkami je zapewnia; brak publicznej ceny nie jest zerowym kosztem.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [fdd11.assistance_and_opening]
+
+      - question_id: fdd15.owner_participation
+        requirement: required
+        title: "Publiczny model zaangażowania właściciela"
+        question: >-
+          Czy właściciel musi osobiście prowadzić placówkę, czy może ustanowić
+          managera i jakie podstawowe kwalifikacje są publicznie wymagane?
+        search_query_templates:
+          - '"{brand}" franczyza właściciel manager zaangażowanie'
+          - '"{brand}" franczyza prowadzenie sklepu wymagania'
+        fields:
+          operator.owner_participation_required: public_expected
+          operator.manager_allowed: public_optional
+          operator.manager_qualifications: public_optional
+        min_sources: 1
+        preferred_source_types: [official, industry]
+        acceptance_criteria: >-
+          Model właściciel-operator i dopuszczenie managera są przedstawione jako
+          publiczna deklaracja, a nie pełna interpretacja umowy.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.offer_and_transaction]
+
+      - question_id: fdd19.fpr_status
+        requirement: recommended
+        title: "Publiczne deklaracje wyników"
+        question: >-
+          Czy marka publicznie podaje przychody, zysk, marżę, break-even lub okres
+          zwrotu i gdzie dokładnie opublikowano te twierdzenia?
+        search_query_templates:
+          - '"{brand}" franczyza przychód zysk rentowność'
+          - '"{brand}" franczyza okres zwrotu break even'
+        fields:
+          performance.disclosure_status: public_optional
+          performance.claims: public_optional
+          performance.claim_locations: public_optional
+          performance.unapproved_or_conflicting_claims: public_optional
+        min_sources: 1
+        preferred_source_types: [official, legal_document, reputable_media]
+        acceptance_criteria: >-
+          Każda deklaracja wyniku jest dokładnie cytowana i opisana jako twierdzenie
+          wskazanego autora, bez dorabiania brakującej metodologii.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity]
+
+      - question_id: fdd20.systemwide_outlet_history
+        requirement: critical
+        title: "Aktualny obraz sieci"
+        question: >-
+          Ile placówek działa obecnie, ile jest franczyzowych i własnych oraz jakiego
+          kraju lub zakresu geograficznego dotyczy liczba?
+        search_query_templates:
+          - '"{brand}" liczba placówek Polska franczyzowych'
+          - '"{brand}" sieć ile sklepów placówek rok'
+        fields:
+          outlets.current_total: public_expected
+          outlets.current_franchised: public_optional
+          outlets.current_company_owned: public_optional
+          outlets.snapshot_scope: public_expected
+          outlets.as_of: public_expected
+        min_sources: 1
+        preferred_source_types: [official, registry, industry]
+        acceptance_criteria: >-
+          Liczba placówek zachowuje datę, geografię i typ własności; globalna liczba
+          sieci nie jest przedstawiana jako liczba placówek w Polsce.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity]
+
+  - profile_id: "PL:L2:v1"
+    aliases: ["PL:L2"]
+    country: "PL"
+    level: "L2"
+    name: "Polska — zweryfikowany profil publiczny"
+    description: >-
+      Kumulatywny profil wieloźródłowy uzupełniony o rejestry, historię podmiotu,
+      publiczne ryzyka, znaki, finanse i bardziej szczegółowe warunki oferty.
+    intended_use: >-
+      Pogłębianie najważniejszych marek i tworzenie publicznego profilu wyraźnie
+      bogatszego oraz lepiej udokumentowanego niż typowy katalog franczyz.
+    access_scope: public
+    legacy_depth: due_diligence
+    inherits: "PL:L1:v1"
+    default_availability: public_optional
+    country_authoritative_sources:
+      - "https://www.gov.pl/web/gov/uzyskaj-informacje-z-krajowego-rejestru-sadowego"
+      - "https://prs.ms.gov.pl/"
+      - "https://www.gov.pl/web/sprawiedliwosc/przegladarka-dokumentow-finansowych"
+      - "https://decyzje.uokik.gov.pl/"
+      - "https://uprp.gov.pl/pl/uslugi-online/e-wyszukiwarka"
+    completion_required_availabilities:
+      - public_expected
+      - registry_expected
+      - manual_research_required
+    question_rules:
+      - question_id: scope.brand_identity
+        include_all_catalog_fields: true
+        default_availability: registry_expected
+        search_query_templates:
+          - '"{brand}" oficjalna strona franczyza {country}'
+          - '"{legal_name}" KRS rejestr przedsiębiorców'
+        min_sources: 2
+        preferred_source_types: [registry, official, government]
+        acceptance_criteria: >-
+          Marka jest powiązana z właściwym oferentem i rejestrem, a dane marki,
+          spółki i grupy kapitałowej nie są ze sobą mieszane.
+        requires_independent_corroboration: true
+
+      - question_id: scope.offer_and_transaction
+        min_sources: 2
+        requires_independent_corroboration: true
+
+      - question_id: scope.document_inventory
+        include_all_catalog_fields: true
+        requirement: recommended
+        default_availability: public_optional
+        search_query_templates:
+          - '"{brand}" franczyza dokument umowa regulamin PDF'
+          - 'site:gov.pl "{legal_name}" franczyza dokument'
+        dependencies: [scope.brand_identity]
+
+      - question_id: fdd01.business_background
+        include_all_catalog_fields: true
+        default_availability: public_optional
+        search_query_templates:
+          - '"{legal_name}" KRS struktura grupa kapitałowa'
+          - '"{brand}" historia działalności franczyza Polska'
+        fields:
+          franchisor.structure: registry_expected
+          franchisor.principal_address: registry_expected
+          franchisor.entity_type: registry_expected
+          franchisor.formation_jurisdiction: registry_expected
+          franchisor.service_agent: registry_expected
+          franchisor.affiliates: registry_expected
+        min_sources: 2
+        requires_independent_corroboration: true
+
+      - question_id: fdd02.management_experience
+        requirement: recommended
+        search_query_templates:
+          - '"{legal_name}" zarząd członkowie KRS'
+          - '"{brand}" zarząd dyrektor franczyzy'
+        fields:
+          management.people: public_optional
+          management.roles: public_optional
+          management.tenure: public_optional
+          management.covered_people_and_responsibility: public_optional
+          management.current_position: public_optional
+        dependencies: [scope.brand_identity]
+
+      - question_id: fdd03.litigation
+        requirement: required
+        search_query_templates:
+          - '"{legal_name}" wyrok pozew postępowanie UOKiK'
+          - 'site:uokik.gov.pl "{brand}" decyzja'
+        fields:
+          legal.litigation_covered_subjects: manual_research_required
+          legal.litigation: manual_research_required
+          legal.regulatory_actions: manual_research_required
+          legal.case_status: manual_research_required
+          legal.outcomes: manual_research_required
+        dependencies: [scope.brand_identity]
+
+      - question_id: fdd04.bankruptcy
+        requirement: required
+        search_query_templates:
+          - '"{legal_name}" upadłość restrukturyzacja KRZ'
+          - '"{legal_name}" niewypłacalność postępowanie'
+        fields:
+          legal.bankruptcies: registry_expected
+          legal.insolvency_proceedings: registry_expected
+          legal.distress_period_checked: manual_research_required
+          legal.franchisor_parent_predecessor_affiliate_bankruptcies: registry_expected
+          legal.bankruptcy_case_details_and_outcomes: registry_expected
+        dependencies: [scope.brand_identity]
+
+      - question_id: fdd05.initial_fees
+        fields:
+          fees.initial_formula: public_optional
+          fees.initial_due_date: public_optional
+          fees.initial_refundability: public_optional
+          fees.initial_variation: public_optional
+        min_sources: 2
+        requires_independent_corroboration: true
+
+      - question_id: fdd06.other_fees
+        fields:
+          fees.technology: public_optional
+          fees.training: public_optional
+        min_sources: 2
+        requires_independent_corroboration: true
+
+      - question_id: fdd07.initial_investment
+        fields:
+          investment.line_items: public_optional
+          investment.working_capital_period: public_optional
+          investment.estimation_basis: public_optional
+        min_sources: 2
+        requires_independent_corroboration: true
+
+      - question_id: fdd08.required_suppliers
+        include_all_catalog_fields: true
+        requirement: required
+        default_availability: public_optional
+        search_query_templates:
+          - '"{brand}" franczyza dostawcy obowiązkowe zakupy logistyka'
+          - '"{brand}" franczyzobiorca zaopatrzenie dostawy'
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd11.assistance_and_opening
+        include_all_catalog_fields: true
+        default_availability: public_optional
+        min_sources: 2
+        requires_independent_corroboration: true
+
+      - question_id: fdd11.advertising_it_training
+        include_all_catalog_fields: true
+        default_availability: public_optional
+        min_sources: 2
+        requires_independent_corroboration: true
+
+      - question_id: fdd12.territory
+        include_all_catalog_fields: true
+        requirement: required
+        default_availability: public_optional
+        search_query_templates:
+          - '"{brand}" franczyza wyłączność terytorialna obszar'
+          - '"{brand}" franczyza lokalizacja konkurencja teren'
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd13.trademarks
+        search_query_templates:
+          - '"{brand}" znak towarowy EUIPO UPRP'
+          - '"{legal_name}" właściciel znaku towarowego'
+        fields:
+          ip.trademarks: registry_expected
+          ip.trademark_owner: registry_expected
+          ip.trademark_registrations: registry_expected
+          ip.trademark_limitations: public_optional
+          ip.trademark_disputes: manual_research_required
+        dependencies: [scope.brand_identity]
+
+      - question_id: fdd16.sales_restrictions
+        include_all_catalog_fields: true
+        requirement: recommended
+        default_availability: public_optional
+        search_query_templates:
+          - '"{brand}" franczyza asortyment kanały sprzedaży online'
+          - '"{brand}" franczyzobiorca oferta produkty usługi'
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd19.fpr_methodology
+        include_all_catalog_fields: true
+        requirement: recommended
+        default_availability: public_optional
+        search_query_templates:
+          - '"{brand}" franczyza wyniki metodologia średni przychód'
+          - '"{brand}" franczyza rentowność założenia okres danych'
+        dependencies: [fdd19.fpr_status]
+
+      - question_id: fdd20.systemwide_outlet_history
+        include_all_catalog_fields: true
+        default_availability: public_optional
+        min_sources: 2
+        requires_independent_corroboration: true
+
+      - question_id: fdd20.outlet_changes
+        include_all_catalog_fields: true
+        requirement: recommended
+        default_availability: manual_research_required
+        search_query_templates:
+          - '"{brand}" zamknięte otwarte placówki franczyza'
+          - '"{brand}" liczba sklepów zmiana rok do roku'
+        dependencies: [fdd20.systemwide_outlet_history]
+
+      - question_id: fdd20.pipeline_and_references
+        requirement: recommended
+        search_query_templates:
+          - '"{brand}" nowe otwarcia plan rozwoju franczyza'
+          - '"{brand}" franczyzobiorcy stowarzyszenie opinie'
+        fields:
+          outlets.signed_not_open: public_optional
+          outlets.projected_next_year: public_optional
+          franchisees.reference_availability: public_optional
+          franchisees.former_reference_availability: public_optional
+          franchisees.associations: public_optional
+          franchisees.confidentiality_disclosure: public_optional
+          outlets.resale_ownership_history: public_optional
+        dependencies: [fdd20.systemwide_outlet_history]
+
+      - question_id: fdd21.financial_statements
+        include_all_catalog_fields: true
+        requirement: required
+        default_availability: registry_expected
+        search_query_templates:
+          - '"{legal_name}" sprawozdanie finansowe KRS RDF'
+          - '"{legal_name}" sprawozdanie finansowe PDF'
+        dependencies: [scope.brand_identity]
+
+      - question_id: dd.market_demand_competition
+        include_all_catalog_fields: true
+        requirement: required
+        default_availability: manual_research_required
+        search_query_templates:
+          - '"{brand}" rynek konkurencja Polska franczyza'
+          - '"{brand}" udział rynku popyt lokalizacje'
+        dependencies: [scope.brand_identity, scope.jurisdictions]
+
+  - profile_id: "PL:L3:v1"
+    aliases: ["PL:L3"]
+    country: "PL"
+    level: "L3"
+    name: "Polska — publiczne due diligence zgodne z benchmarkiem FDD"
+    description: >-
+      Pełny publiczny research pytań inspirowanych FDD z jawnym rozróżnieniem
+      danych oczekiwanych publicznie, rejestrowych, ręcznych i wymagających
+      uprawnionego dostępu do prywatnego dokumentu.
+    intended_use: >-
+      Pogłębiony research wybranych marek i udokumentowanie zarówno zdobytych
+      danych, jak i granic publicznej dostępności bez nieskończonych pętli search.
+    access_scope: public
+    legacy_depth: due_diligence
+    inherits: "PL:L2:v1"
+    include_depth: due_diligence
+    reset_catalog_definition_for_included_questions: true
+    exclude_question_ids:
+      - quality.source_metadata
+      - quality.conflicts_and_statuses
+      - quality.completion_and_human_gate
+    default_availability: public_optional
+    country_authoritative_sources:
+      - "https://eli.gov.pl/"
+      - "https://eur-lex.europa.eu/"
+    completion_required_availabilities:
+      - public_expected
+      - registry_expected
+      - manual_research_required
+    question_rules:
+      - question_id: scope.local_legal_overlay
+        include_all_catalog_fields: true
+        default_availability: public_expected
+        reuse_scope: country
+        search_query_templates:
+          - 'Polska umowa franczyzy prawo obowiązki przedumowne'
+          - 'site:gov.pl franczyza projekt ustawy status'
+
+      - question_id: scope.document_inventory
+        fields:
+          documents.missing: system_derived
+
+      - question_id: fdd02.management_experience
+        include_all_catalog_fields: true
+        default_availability: manual_research_required
+
+      - question_id: fdd03.litigation
+        include_all_catalog_fields: true
+        default_availability: manual_research_required
+
+      - question_id: fdd04.bankruptcy
+        include_all_catalog_fields: true
+        default_availability: manual_research_required
+
+      - question_id: fdd05.initial_fees
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        exclude_fields: [fees.initial, fees.initial_currency]
+
+      - question_id: fdd06.other_fees
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+
+      - question_id: fdd07.initial_investment
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        fields:
+          investment.payment_and_refund_terms: private_document_required
+
+      - question_id: fdd08.required_suppliers
+        include_all_catalog_fields: true
+        fields:
+          suppliers.affiliated_interests: private_document_required
+          suppliers.rebates_and_revenue: private_document_required
+          suppliers.purchase_share: private_document_required
+          suppliers.material_benefits: private_document_required
+
+      - question_id: fdd09.franchisee_obligations
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        search_query_templates:
+          - '"{brand}" umowa franczyzy obowiązki franczyzobiorcy'
+          - '"{brand}" standardy operacyjne obowiązki placówki'
+
+      - question_id: fdd10.financing
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+
+      - question_id: fdd11.assistance_and_opening
+        fields:
+          support.contractual_obligations: private_document_required
+
+      - question_id: fdd11.advertising_it_training
+        fields:
+          support.contractual_program_terms: private_document_required
+
+      - question_id: fdd12.territory
+        fields:
+          territory.contractual_terms: private_document_required
+
+      - question_id: fdd13.trademarks
+        include_all_catalog_fields: true
+        fields:
+          ip.trademark_defense_and_change: private_document_required
+
+      - question_id: fdd14.other_ip
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        search_query_templates:
+          - '"{brand}" licencja know how prawa autorskie franczyza'
+          - '"{brand}" patent wzór przemysłowy UPRP'
+        fields:
+          ip.patents: public_optional
+          ip.copyrights: public_optional
+
+      - question_id: fdd15.owner_participation
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        fields:
+          operator.contractual_requirements: private_document_required
+
+      - question_id: fdd16.sales_restrictions
+        fields:
+          sales.contractual_restrictions: private_document_required
+
+      - question_id: fdd17.term_renewal_termination
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        search_query_templates:
+          - '"{brand}" umowa franczyzy okres wypowiedzenie rozwiązanie'
+          - '"{brand}" franczyza odnowienie umowy kara'
+
+      - question_id: fdd17.transfer_and_disputes
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        search_query_templates:
+          - '"{brand}" umowa franczyzy cesja sprzedaż spory'
+          - '"{brand}" franczyza arbitraż właściwość sądu'
+
+      - question_id: fdd18.public_figures
+        include_all_catalog_fields: true
+        default_availability: public_optional
+        search_query_templates:
+          - '"{brand}" ambasador franczyzy płatna rekomendacja'
+          - '"{brand}" osoba publiczna promocja franczyzy'
+
+      - question_id: fdd19.fpr_status
+        fields:
+          performance.formal_disclosure_document: private_document_required
+
+      - question_id: fdd19.fpr_methodology
+        fields:
+          performance.substantiation: private_document_required
+
+      - question_id: fdd20.systemwide_outlet_history
+        fields:
+          outlets.fdd_tables: private_document_required
+
+      - question_id: fdd20.outlet_changes
+        fields:
+          outlets.full_change_tables: private_document_required
+
+      - question_id: fdd20.pipeline_and_references
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        fields:
+          franchisees.permitted_business_contact_route: private_document_required
+
+      - question_id: fdd21.financial_statements
+        include_all_catalog_fields: true
+        default_availability: registry_expected
+
+      - question_id: fdd22.contracts
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        search_query_templates:
+          - '"{brand}" wzór umowy franczyzy załączniki PDF'
+          - '"{brand}" umowa najmu dostawy gwarancja franczyza'
+        fields:
+          contracts.missing_documents: system_derived
+
+      - question_id: fdd23.receipt_and_sellers
+        include_all_catalog_fields: true
+        default_availability: private_document_required
+        search_query_templates:
+          - '"{brand}" dokument oferta franczyzowa data wydania'
+          - '"{brand}" umowa franczyzy przedstawiciel sprzedawca'
+        fields:
+          disclosure.issue_date: public_optional
+          disclosure.exhibits: public_optional

@@ -340,5 +340,5 @@ class PlannerAgentTests(TestCase):
             self.assertEqual(plan_path.name, "plan-free.json")
             self.assertIn("zabka", str(plan_path.parent.parent))
             self.assertEqual(payload["run_id"], plan.run_id)
-            self.assertEqual(payload["schema_version"], "1.2.0")
+            self.assertEqual(payload["schema_version"], "1.3.0")
             self.assertTrue(payload["tasks"])

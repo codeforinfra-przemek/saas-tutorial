@@ -857,6 +857,11 @@ class ExecutorAgent:
             [
                 *prior.selected_task_ids,
                 *(delta.selected_task_ids if delta else []),
+                *(
+                    item.task_id
+                    for item in resolution.work_items
+                    if item.selected_action == ResolverAction.LOCAL_AUDIT
+                ),
             ]
         )
         source_ids_by_task = {
@@ -870,6 +875,12 @@ class ExecutorAgent:
         prior_tasks = {item.task_id: item for item in prior.task_results}
         delta_tasks = {
             item.task_id: item for item in (delta.task_results if delta else [])
+        }
+        task_by_id = {task.task_id: task for task in plan.tasks}
+        local_audit_task_ids = {
+            item.task_id
+            for item in resolution.work_items
+            if item.selected_action == ResolverAction.LOCAL_AUDIT
         }
         task_results: list[SearchTaskResult] = []
         for task_id in selected_task_ids:
@@ -903,6 +914,31 @@ class ExecutorAgent:
                                 "source candidates."
                             ),
                         }
+                    )
+                )
+                continue
+            if task_id in local_audit_task_ids and task_id not in prior_tasks:
+                task = task_by_id[task_id]
+                task_results.append(
+                    SearchTaskResult(
+                        task_id=task.task_id,
+                        catalog_question_id=task.catalog_question_id,
+                        status=SearchTaskStatus.NOT_SEARCHED,
+                        planned_queries=[],
+                        attempted_queries=[],
+                        planned_queries_attempted=[],
+                        derived_queries_attempted=[],
+                        query_coverage=SearchQueryCoverage.NONE,
+                        minimum_query_attempts=0,
+                        minimum_sources=0,
+                        action_ids=[],
+                        source_ids=[],
+                        coverage_gaps=[],
+                        unresolved_targets=[],
+                        notes=(
+                            "Local data-quality audit task; web search is neither "
+                            "required nor permitted."
+                        ),
                     )
                 )
                 continue
@@ -1183,6 +1219,11 @@ class ExecutorAgent:
         selected_task_id_set = {
             task_id for document in documents for task_id in document.task_ids
         }
+        selected_task_id_set.update(
+            item.task_id
+            for item in resolution.work_items
+            if item.selected_action == ResolverAction.LOCAL_AUDIT
+        )
         selected_tasks = [
             task for task in plan.tasks if task.task_id in selected_task_id_set
         ]
@@ -1381,6 +1422,22 @@ class ExecutorAgent:
                         requested_queries=batch.queries,
                         warnings=[
                             "Human-review work was preserved and not automated."
+                        ],
+                    )
+                )
+                continue
+            if batch.action == ResolverAction.LOCAL_AUDIT:
+                results.append(
+                    ExecutorBatchResult(
+                        batch_id=batch.batch_id,
+                        action=batch.action,
+                        status=ExecutorBatchStatus.COMPLETED,
+                        resolution_item_ids=batch.resolution_item_ids,
+                        follow_up_ids=batch.follow_up_ids,
+                        task_ids=batch.task_ids,
+                        warnings=[
+                            "Local data-quality scope was materialized without "
+                            "network, provider, or document-extraction calls."
                         ],
                     )
                 )

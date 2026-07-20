@@ -643,7 +643,9 @@ class NormalizerAgent:
                         ),
                     ]
                 )
-                if key in conflicting_keys:
+                if field.audit_basis is not None:
+                    status = NormalizerFieldStatus.DERIVED
+                elif key in conflicting_keys:
                     status = NormalizerFieldStatus.CONFLICTING
                 elif eligible_for_field and needs_review_ids:
                     status = NormalizerFieldStatus.NEEDS_REVIEW
@@ -656,6 +658,8 @@ class NormalizerAgent:
                 else:
                     status = NormalizerFieldStatus.MISSING
                 notes: list[str] = []
+                if field.audit_basis is not None:
+                    notes.append(field.audit_basis)
                 if any(value.needs_corroboration for value in values):
                     notes.append("One or more accepted values still need corroboration.")
                 if key in conflicting_keys:

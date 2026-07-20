@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from datetime import date, datetime
 from decimal import Decimal
@@ -22,19 +23,19 @@ from pydantic import (
 )
 
 
-SCHEMA_VERSION = "1.2.0"
+SCHEMA_VERSION = "1.3.0"
 PROMPT_VERSION = "planner-system-v2"
 SEARCHER_SCHEMA_VERSION = "1.5.0"
 SEARCHER_PROMPT_VERSION = "searcher-system-v4"
 EXTRACTOR_SCHEMA_VERSION = "1.2.0"
 EXTRACTOR_PROMPT_VERSION = "extractor-system-v2"
-CHECKER_SCHEMA_VERSION = "1.3.0"
+CHECKER_SCHEMA_VERSION = "1.4.0"
 CHECKER_PROMPT_VERSION = "checker-system-v3"
 CHECKER_SCORING_VERSION = "checker-scoring-v2"
-RESOLVER_SCHEMA_VERSION = "1.2.0"
+RESOLVER_SCHEMA_VERSION = "1.3.0"
 RESOLVER_PROMPT_VERSION = "resolver-system-v2"
-EXECUTOR_SCHEMA_VERSION = "1.0.0"
-NORMALIZER_SCHEMA_VERSION = "1.1.0"
+EXECUTOR_SCHEMA_VERSION = "1.1.0"
+NORMALIZER_SCHEMA_VERSION = "1.2.0"
 NORMALIZER_PROMPT_VERSION = "normalizer-system-v2"
 HUMAN_REVIEW_SCHEMA_VERSION = "1.0.0"
 
@@ -58,6 +59,37 @@ DEPTH_ORDER = {
     ResearchDepth.RISK: 3,
     ResearchDepth.UNIT: 4,
 }
+
+
+class ResearchLevel(StrEnum):
+    """User-facing data maturity level, independent from legacy task depth."""
+
+    L1 = "L1"
+    L2 = "L2"
+    L3 = "L3"
+
+
+class FieldAvailability(StrEnum):
+    """Expected lawful source availability for one profile field."""
+
+    PUBLIC_EXPECTED = "public_expected"
+    PUBLIC_OPTIONAL = "public_optional"
+    REGISTRY_EXPECTED = "registry_expected"
+    PRIVATE_DOCUMENT_REQUIRED = "private_document_required"
+    MANUAL_RESEARCH_REQUIRED = "manual_research_required"
+    CONFIDENTIAL_DEAL_ROOM = "confidential_deal_room"
+    SYSTEM_DERIVED = "system_derived"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ProfileAccessScope(StrEnum):
+    PUBLIC = "public"
+    AUTHORIZED_PRIVATE = "authorized_private"
+
+
+class ProfileReuseScope(StrEnum):
+    BRAND = "brand"
+    COUNTRY = "country"
 
 
 class Requirement(StrEnum):
@@ -183,6 +215,126 @@ class CatalogQuestion(ClosedModel):
         return values
 
 
+class ResearchProfileFieldPolicy(ClosedModel):
+    target_field: str = Field(pattern=r"^[a-z][a-z0-9_.-]+$")
+    availability: FieldAvailability
+    required_for_completion: bool
+
+
+class ResearchProfileQuestionSnapshot(ClosedModel):
+    """Resolved profile policy for one materialized Planner question."""
+
+    question_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]+$")
+    section_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]+$")
+    title: str = Field(min_length=3)
+    question: str = Field(min_length=10)
+    fdd_items: list[int] = Field(default_factory=list)
+    requirement: Requirement
+    fields: list[ResearchProfileFieldPolicy] = Field(min_length=1)
+    min_sources: int = Field(ge=1, le=10)
+    preferred_source_types: list[SourceType] = Field(min_length=1)
+    acceptance_criteria: str = Field(min_length=10)
+    requires_independent_corroboration: bool
+    max_age_days: int | None = Field(default=None, ge=1)
+    search_query_templates: list[str] = Field(min_length=1)
+    dependencies: list[str] = Field(default_factory=list)
+    sensitivity: Sensitivity
+    reuse_scope: ProfileReuseScope = ProfileReuseScope.BRAND
+
+    @model_validator(mode="after")
+    def validate_profile_question(self) -> "ResearchProfileQuestionSnapshot":
+        field_names = [field.target_field for field in self.fields]
+        if len(field_names) != len(set(field_names)):
+            raise ValueError("Profile question fields must be unique.")
+        if len(self.fdd_items) != len(set(self.fdd_items)) or any(
+            item < 1 or item > 23 for item in self.fdd_items
+        ):
+            raise ValueError("Profile FDD items must be unique numbers from 1 to 23.")
+        if len(self.search_query_templates) != len(
+            set(self.search_query_templates)
+        ):
+            raise ValueError("Profile query templates must be unique.")
+        if len(self.dependencies) != len(set(self.dependencies)):
+            raise ValueError("Profile question dependencies must be unique.")
+        return self
+
+
+class ResearchProfileSnapshot(ClosedModel):
+    """Immutable, fully materialized profile contract stored in a plan."""
+
+    profile_catalog_version: str = Field(min_length=1)
+    profile_id: str = Field(pattern=r"^[A-Z]{2}:L[1-3]:v[1-9][0-9]*$")
+    profile_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    question_catalog_version: str = Field(min_length=1)
+    country: str = Field(pattern=r"^[A-Z]{2}$")
+    level: ResearchLevel
+    name: str = Field(min_length=3, max_length=200)
+    description: str = Field(min_length=10, max_length=2000)
+    intended_use: str = Field(min_length=10, max_length=2000)
+    access_scope: ProfileAccessScope
+    legacy_depth: ResearchDepth
+    country_authoritative_sources: list[str] = Field(min_length=1)
+    completion_required_availabilities: list[FieldAvailability] = Field(
+        min_length=1
+    )
+    questions: list[ResearchProfileQuestionSnapshot] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_profile_snapshot(self) -> "ResearchProfileSnapshot":
+        question_ids = [question.question_id for question in self.questions]
+        if len(question_ids) != len(set(question_ids)):
+            raise ValueError("Profile snapshot question IDs must be unique.")
+        target_fields = [
+            field.target_field
+            for question in self.questions
+            for field in question.fields
+        ]
+        if len(target_fields) != len(set(target_fields)):
+            raise ValueError(
+                "Profile snapshot target fields must belong to exactly one question."
+            )
+        if len(self.completion_required_availabilities) != len(
+            set(self.completion_required_availabilities)
+        ):
+            raise ValueError(
+                "Profile completion-required availabilities must be unique."
+            )
+        if len(self.country_authoritative_sources) != len(
+            set(self.country_authoritative_sources)
+        ):
+            raise ValueError("Country authoritative sources must be unique.")
+        if any(
+            not source.startswith("https://")
+            for source in self.country_authoritative_sources
+        ):
+            raise ValueError("Country authoritative sources must use HTTPS.")
+        required_availabilities = set(self.completion_required_availabilities)
+        for question in self.questions:
+            for field in question.fields:
+                if field.required_for_completion != (
+                    field.availability in required_availabilities
+                ):
+                    raise ValueError(
+                        "Profile field completion gate must match its availability."
+                    )
+        prefix, level, _ = self.profile_id.split(":")
+        if prefix != self.country or level != self.level.value:
+            raise ValueError("Profile ID must match snapshot country and level.")
+        payload = self.model_dump(mode="json")
+        supplied_hash = payload.pop("profile_sha256")
+        expected_hash = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if supplied_hash != expected_hash:
+            raise ValueError("Profile snapshot SHA-256 does not match its content.")
+        return self
+
+
 class CatalogSection(ClosedModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]+$")
     title: str = Field(min_length=3)
@@ -255,6 +407,7 @@ class PlannerInput(ClosedModel):
     target_regions: list[str] = Field(default_factory=list)
     research_languages: list[str] = Field(default_factory=lambda: ["pl", "en"])
     depth: ResearchDepth = ResearchDepth.DUE_DILIGENCE
+    profile_id: str | None = Field(default=None, max_length=30)
     known_legal_name: str | None = Field(default=None, max_length=300)
     known_official_website: str | None = Field(default=None, max_length=1000)
     existing_fields: list[str] = Field(default_factory=list)
@@ -277,6 +430,29 @@ class PlannerInput(ClosedModel):
         if not isinstance(value, str):
             raise ValueError("target_country must be a two-letter country code.")
         return value.strip().upper()
+
+    @field_validator("profile_id", mode="before")
+    @classmethod
+    def normalize_profile_id(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("profile_id must be a string.")
+        parts = [part.strip() for part in value.split(":")]
+        if len(parts) not in {2, 3}:
+            raise ValueError("profile_id must look like PL:L1 or PL:L1:v1.")
+        country = parts[0].upper()
+        level = parts[1].upper()
+        version = parts[2].lower() if len(parts) == 3 else None
+        if not re.fullmatch(r"[A-Z]{2}", country) or not re.fullmatch(
+            r"L[1-3]", level
+        ):
+            raise ValueError("profile_id must look like PL:L1 or PL:L1:v1.")
+        if version is not None and not re.fullmatch(r"v[1-9][0-9]*", version):
+            raise ValueError("profile_id version must look like v1.")
+        return ":".join(
+            part for part in (country, level, version) if part is not None
+        )
 
     @field_validator(
         "target_regions", "research_languages", "existing_fields", mode="after"
@@ -590,7 +766,7 @@ class AgentFailureArtifact(ClosedModel):
 
 
 class ResearchPlan(ClosedModel):
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = SCHEMA_VERSION
     catalog_version: str
     prompt_version: str = PROMPT_VERSION
     run_id: str
@@ -598,6 +774,7 @@ class ResearchPlan(ClosedModel):
     generated_by: Literal["offline", "openai"]
     model: str | None
     planner_input: PlannerInput
+    profile_snapshot: ResearchProfileSnapshot | None = None
     objective: str
     planning_notes: list[str]
     assumptions: list[str]
@@ -619,6 +796,28 @@ class ResearchPlan(ClosedModel):
         if parsed_run_id.version != 4:
             raise ValueError("run_id must be a valid UUIDv4.")
 
+        if (self.planner_input.profile_id is None) != (
+            self.profile_snapshot is None
+        ):
+            raise ValueError(
+                "Planner profile_id and profile_snapshot must be present together."
+            )
+        if self.profile_snapshot is not None:
+            snapshot = self.profile_snapshot
+            if self.schema_version != "1.3.0":
+                raise ValueError(
+                    "Research profiles require plan schema version 1.3.0."
+                )
+            if (
+                self.planner_input.profile_id != snapshot.profile_id
+                or self.planner_input.target_country != snapshot.country
+                or self.planner_input.depth != snapshot.legacy_depth
+                or self.catalog_version != snapshot.question_catalog_version
+            ):
+                raise ValueError(
+                    "Plan profile snapshot does not match Planner input and catalog."
+                )
+
         if self.generated_by == "offline" and self.model is not None:
             raise ValueError("Offline plans cannot declare an OpenAI model.")
         if self.generated_by == "openai" and (
@@ -628,11 +827,11 @@ class ResearchPlan(ClosedModel):
         if self.generated_by == "offline" and self.agent_usage:
             raise ValueError("Offline plans cannot contain provider usage.")
         if (
-            self.schema_version in {"1.1.0", "1.2.0"}
+            self.schema_version in {"1.1.0", "1.2.0", "1.3.0"}
             and self.generated_by == "openai"
             and not self.agent_usage
         ):
-            raise ValueError("OpenAI-generated schema 1.1 plans must contain usage.")
+            raise ValueError("OpenAI-generated plans must contain usage.")
 
         usage_keys = [
             (item.agent, item.iteration, item.call_index)
@@ -649,6 +848,44 @@ class ResearchPlan(ClosedModel):
         question_ids = [task.catalog_question_id for task in self.tasks]
         if len(question_ids) != len(set(question_ids)):
             raise ValueError("Each catalog question may produce only one task.")
+        if self.profile_snapshot is not None:
+            profile_questions = self.profile_snapshot.questions
+            if question_ids != [item.question_id for item in profile_questions]:
+                raise ValueError(
+                    "Profile plan tasks must exactly follow the profile snapshot."
+                )
+            profile_by_question = {
+                item.question_id: item for item in profile_questions
+            }
+            task_id_by_question = {
+                task.catalog_question_id: task.task_id for task in self.tasks
+            }
+            for task in self.tasks:
+                policy = profile_by_question[task.catalog_question_id]
+                if (
+                    task.section_id != policy.section_id
+                    or task.title != policy.title
+                    or task.question != policy.question
+                    or task.fdd_items != policy.fdd_items
+                    or task.requirement != policy.requirement
+                    or task.target_fields
+                    != [field.target_field for field in policy.fields]
+                    or task.min_sources != policy.min_sources
+                    or task.preferred_source_types != policy.preferred_source_types
+                    or task.acceptance_criteria != policy.acceptance_criteria
+                    or task.requires_independent_corroboration
+                    != policy.requires_independent_corroboration
+                    or task.max_age_days != policy.max_age_days
+                    or task.depends_on
+                    != [
+                        task_id_by_question[dependency]
+                        for dependency in policy.dependencies
+                    ]
+                    or task.sensitivity != policy.sensitivity
+                ):
+                    raise ValueError(
+                        "Profile plan task does not match its materialized policy."
+                    )
 
         known_task_ids = set(task_ids)
         graph: dict[str, list[str]] = {}
@@ -679,15 +916,23 @@ class ResearchPlan(ClosedModel):
 
         if len(self.critical_fields) != len(set(self.critical_fields)):
             raise ValueError("critical_fields values must be unique.")
-        expected_critical_fields = {
-            field
-            for task in self.tasks
-            if task.priority == Priority.CRITICAL
-            for field in task.target_fields
-        }
+        if self.profile_snapshot is not None:
+            expected_critical_fields = {
+                field.target_field
+                for question in self.profile_snapshot.questions
+                for field in question.fields
+                if field.required_for_completion
+            }
+        else:
+            expected_critical_fields = {
+                field
+                for task in self.tasks
+                if task.priority == Priority.CRITICAL
+                for field in task.target_fields
+            }
         if set(self.critical_fields) != expected_critical_fields:
             raise ValueError(
-                "critical_fields must equal the fields targeted by critical tasks."
+                "critical_fields must equal the active completion gate fields."
             )
         return self
 
@@ -2784,6 +3029,7 @@ class CheckerFieldResult(ClosedModel):
     source_ids: list[str] = Field(default_factory=list)
     issue_codes: list[CheckerIssueCode] = Field(default_factory=list)
     quality_points: Decimal = Field(ge=0, le=1)
+    audit_basis: str | None = Field(default=None, min_length=10, max_length=2000)
 
 
 class CheckerFollowUpTask(ClosedModel):
@@ -2863,7 +3109,9 @@ class CheckerAttemptFailure(ClosedModel):
 class CheckerResults(ClosedModel):
     """Auditable quality decision consumed by Resolver and human review."""
 
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = CHECKER_SCHEMA_VERSION
+    schema_version: Literal[
+        "1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"
+    ] = CHECKER_SCHEMA_VERSION
     prompt_version: Literal[
         "checker-system-v1", "checker-system-v2", "checker-system-v3"
     ] = (
@@ -2961,7 +3209,7 @@ class CheckerResults(ClosedModel):
             if len(values) != len(set(values)):
                 raise ValueError(f"Checker {field_name} values must be unique.")
 
-        if self.schema_version == "1.3.0":
+        if self.schema_version in {"1.3.0", "1.4.0"}:
             selected_claim_set = set(self.selected_claim_ids)
             reviewed_claim_set = set(self.reviewed_claim_ids)
             inherited_claim_set = set(self.inherited_claim_ids)
@@ -3101,7 +3349,7 @@ class CheckerResults(ClosedModel):
                     or item.source_support != CheckerSourceSupport.NOT_REVIEWED
                 )
                 for item in self.claim_decisions
-                if self.schema_version != "1.3.0"
+                if self.schema_version not in {"1.3.0", "1.4.0"}
                 or item.claim_id in reviewed_claim_set
             ):
                 raise ValueError(
@@ -3110,7 +3358,7 @@ class CheckerResults(ClosedModel):
             if (
                 (
                     self.reviewed_claim_ids
-                    if self.schema_version == "1.3.0"
+                    if self.schema_version in {"1.3.0", "1.4.0"}
                     else self.selected_claim_ids
                 )
                 and not self.failed_attempts
@@ -3119,7 +3367,7 @@ class CheckerResults(ClosedModel):
                 raise ValueError(
                     "Successful paid Checker claims require exactly one usage entry."
                 )
-            if self.schema_version == "1.3.0":
+            if self.schema_version in {"1.3.0", "1.4.0"}:
                 expected_scope_tasks = self.reviewed_task_ids
                 expected_scope_sources = self.reviewed_source_ids
                 for usage in self.agent_usage:
@@ -3233,6 +3481,25 @@ class CheckerResults(ClosedModel):
                 ):
                     raise ValueError(
                         "Checker field decision partitions are inconsistent."
+                    )
+                if field_result.audit_basis is not None and (
+                    not field_result.target_field.startswith("quality.")
+                    or field_result.status != CheckerFieldStatus.VERIFIED
+                    or field_result.raw_claim_ids
+                    or field_result.source_ids
+                ):
+                    raise ValueError(
+                        "Checker local audit basis is valid only for derived, "
+                        "verified quality fields without source claims."
+                    )
+                if (
+                    field_result.target_field.startswith("quality.")
+                    and field_result.status == CheckerFieldStatus.VERIFIED
+                    and not field_result.raw_claim_ids
+                    and field_result.audit_basis is None
+                ):
+                    raise ValueError(
+                        "Verified claim-free quality fields require an audit basis."
                     )
                 if self.generated_by == "deterministic" and (
                     field_result.status == CheckerFieldStatus.VERIFIED
@@ -3387,7 +3654,7 @@ class CheckerResults(ClosedModel):
             and not blocking_unsafe
         )
         if (
-            self.schema_version in {"1.2.0", "1.3.0"}
+            self.schema_version in {"1.2.0", "1.3.0", "1.4.0"}
             and self.selected_scope_ready != expected_selected_scope_ready
         ):
             raise ValueError("Checker selected-scope ready flag is inconsistent.")
@@ -3403,12 +3670,12 @@ class CheckerResults(ClosedModel):
             raise ValueError("Checker usage exceeds max_api_calls.")
         expected_usage_task_ids = (
             self.reviewed_task_ids
-            if self.schema_version == "1.3.0"
+            if self.schema_version in {"1.3.0", "1.4.0"}
             else self.selected_task_ids
         )
         expected_usage_source_ids = (
             self.reviewed_source_ids
-            if self.schema_version == "1.3.0"
+            if self.schema_version in {"1.3.0", "1.4.0"}
             else self.selected_source_ids
         )
         if any(
@@ -3441,7 +3708,7 @@ class CheckerResults(ClosedModel):
         elif self.passed:
             expected_action = CheckerNextAction.HUMAN_REVIEW
         elif (
-            self.schema_version in {"1.2.0", "1.3.0"}
+            self.schema_version in {"1.2.0", "1.3.0", "1.4.0"}
             and self.selected_scope_ready
             and (self.unevaluated_task_ids or self.unevaluated_source_ids)
         ):
@@ -3458,6 +3725,7 @@ class ResolverAction(StrEnum):
     RETRY_RETRIEVAL = "retry_retrieval"
     REEXTRACT_EXISTING = "reextract_existing"
     SEARCH_NEW_SOURCE = "search_new_source"
+    LOCAL_AUDIT = "local_audit"
     HUMAN_REVIEW = "human_review"
 
 
@@ -3559,6 +3827,15 @@ class ResolverWorkItem(ClosedModel):
             and not self.queries
         ):
             raise ValueError("Resolver search actions require at least one query.")
+        if self.selected_action == ResolverAction.LOCAL_AUDIT and (
+            self.selected_source_ids
+            or self.fallback_source_ids
+            or self.queries
+            or self.minimum_additional_sources
+        ):
+            raise ValueError(
+                "Resolver local-audit actions cannot require sources or queries."
+            )
         if any(
             not query.strip() or len(query) > 500 or "\x00" in query
             for query in self.queries
@@ -3597,7 +3874,9 @@ class ResolverAttemptFailure(ClosedModel):
 class ResolverResults(ClosedModel):
     """Bounded repair plan consumed by the next Searcher/Extractor round."""
 
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = RESOLVER_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = (
+        RESOLVER_SCHEMA_VERSION
+    )
     prompt_version: Literal["resolver-system-v1", "resolver-system-v2"] = (
         RESOLVER_PROMPT_VERSION
     )
@@ -3667,7 +3946,7 @@ class ResolverResults(ClosedModel):
             if len(values) != len(set(values)):
                 raise ValueError(f"Resolver {field_name} values must be unique.")
         if self.scope_expansion_override:
-            if self.schema_version != "1.2.0" or not self.work_items:
+            if self.schema_version not in {"1.2.0", "1.3.0"} or not self.work_items:
                 raise ValueError(
                     "Resolver scope-expansion override requires schema 1.2 work."
                 )
@@ -3886,6 +4165,18 @@ class ExecutorBatchResult(ClosedModel):
                 or self.resulting_claim_ids
             ):
                 raise ValueError("Human-review batch cannot claim automated output.")
+        elif self.action == ResolverAction.LOCAL_AUDIT:
+            if (
+                self.status != ExecutorBatchStatus.COMPLETED
+                or self.requested_source_ids
+                or self.requested_queries
+                or self.resulting_source_ids
+                or self.resulting_document_ids
+                or self.resulting_claim_ids
+            ):
+                raise ValueError(
+                    "Local-audit batch must complete without external evidence work."
+                )
         elif self.status == ExecutorBatchStatus.PENDING_HUMAN:
             raise ValueError("Automated Executor batch cannot be pending_human.")
         return self
@@ -3910,7 +4201,7 @@ class ExecutorLimits(ClosedModel):
 class ExecutorResults(ClosedModel):
     """Immutable manifest for one executed Resolver repair round."""
 
-    schema_version: Literal["1.0.0"] = EXECUTOR_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = EXECUTOR_SCHEMA_VERSION
     execution_id: str
     plan_run_id: str
     search_id: str
@@ -4137,6 +4428,7 @@ class NormalizationPrecision(StrEnum):
 
 class NormalizerFieldStatus(StrEnum):
     NORMALIZED = "normalized"
+    DERIVED = "derived"
     MULTIPLE_VALUES = "multiple_values"
     CONFLICTING = "conflicting"
     NEEDS_REVIEW = "needs_review"
@@ -4359,6 +4651,18 @@ class NormalizerFieldResult(ClosedModel):
             self.normalized_value_ids or self.accepted_claim_ids
         ):
             raise ValueError("A missing normalized field cannot contain accepted data.")
+        if self.status == NormalizerFieldStatus.DERIVED and (
+            self.checker_status != CheckerFieldStatus.VERIFIED
+            or self.normalized_value_ids
+            or self.accepted_claim_ids
+            or self.rejected_claim_ids
+            or self.needs_review_claim_ids
+            or self.source_ids
+            or not self.notes
+        ):
+            raise ValueError(
+                "A derived normalized field requires a verified local audit basis."
+            )
         if self.status in {
             NormalizerFieldStatus.NORMALIZED,
             NormalizerFieldStatus.MULTIPLE_VALUES,
@@ -4425,7 +4729,9 @@ class NormalizerAttemptFailure(ClosedModel):
 class NormalizerResults(ClosedModel):
     """Typed, source-linked staging record that always requires human review."""
 
-    schema_version: Literal["1.0.0", "1.1.0"] = NORMALIZER_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = (
+        NORMALIZER_SCHEMA_VERSION
+    )
     prompt_version: Literal[
         "normalizer-system-v1", "normalizer-system-v2"
     ] = NORMALIZER_PROMPT_VERSION
@@ -4485,7 +4791,7 @@ class NormalizerResults(ClosedModel):
             self.schema_version == "1.0.0"
             and self.prompt_version != "normalizer-system-v1"
         ) or (
-            self.schema_version == "1.1.0"
+            self.schema_version in {"1.1.0", "1.2.0"}
             and self.prompt_version != "normalizer-system-v2"
         ):
             raise ValueError("Normalizer schema and prompt versions are inconsistent.")
@@ -4609,7 +4915,7 @@ class NormalizerResults(ClosedModel):
                     or self.repair_summary.accepted_provider_value_groups
                     != self.repair_summary.provider_value_groups
                     or (
-                        self.schema_version == "1.1.0"
+                        self.schema_version in {"1.1.0", "1.2.0"}
                         and self.repair_summary.provider_value_groups == 0
                     )
                 ):
@@ -4618,7 +4924,7 @@ class NormalizerResults(ClosedModel):
                 if len(self.agent_usage) != 1 or self.failed_attempts:
                     raise ValueError("Repaired OpenAI Normalizer requires one usage entry.")
                 if (
-                    self.schema_version != "1.1.0"
+                    self.schema_version not in {"1.1.0", "1.2.0"}
                     or self.repair_summary.repaired_provider_value_groups == 0
                 ):
                     raise ValueError("Repaired OpenAI Normalizer requires repaired groups.")

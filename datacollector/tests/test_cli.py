@@ -11,7 +11,7 @@ from unittest.mock import patch
 from datacollector.agents.planner import PlannerAgent
 from datacollector.agents.searcher import SearcherAgent
 from datacollector.catalog import load_question_catalog
-from datacollector.cli import build_parser, main
+from datacollector.cli import _loop_recommended_next_action, build_parser, main
 from datacollector.config import OpenAISettings
 from datacollector.documents import FetchedDocument, FetchStatus
 from datacollector.llm.protocol import (
@@ -27,6 +27,7 @@ from datacollector.llm.pricing import (
     build_web_search_tool_usage,
     estimate_standard_token_cost,
 )
+from datacollector.loop import LoopNextAction, LoopStopReason
 from datacollector.schemas import (
     AgentIterationUsage,
     CheckerClaimDecisionDraft,
@@ -450,6 +451,17 @@ class CollectorCliTests(TestCase):
         self.assertEqual(args.max_search_calls, 10)
         self.assertEqual(args.min_queries_per_task, 2)
 
+    def test_complete_documented_gap_scope_requires_inspection_not_empty_resume(self):
+        action = _loop_recommended_next_action(
+            normalization_reference=None,
+            checker_passed=False,
+            scope_complete=True,
+            stop_reason=LoopStopReason.MAX_ROUNDS,
+            advance_with_documented_gaps=True,
+        )
+
+        self.assertEqual(action, LoopNextAction.INSPECT_GAPS)
+
     def create_extractor_cli_fixture(self, output_directory):
         plan = PlannerAgent(load_question_catalog()).create_plan(
             PlannerInput(
@@ -618,6 +630,117 @@ class CollectorCliTests(TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("us.state_overlay", question_ids)
         self.assertGreater(payload["question_count"], 20)
+
+    def test_profile_and_legacy_depth_are_mutually_exclusive(self):
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            build_parser().parse_args(
+                [
+                    "plan",
+                    "--brand",
+                    "Example",
+                    "--depth",
+                    "catalog",
+                    "--profile",
+                    "PL:L1",
+                ]
+            )
+
+    def test_profiles_command_lists_country_calibrated_levels(self):
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            exit_code = main(["profiles", "--country", " pl "])
+
+        payload = json.loads(stdout.getvalue())
+        profiles = payload["profiles"]
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            [profile["profile_id"] for profile in profiles],
+            ["PL:L1:v1", "PL:L2:v1", "PL:L3:v1"],
+        )
+        self.assertEqual(
+            [profile["questions"] for profile in profiles], [13, 26, 34]
+        )
+        self.assertEqual(
+            [profile["fields"] for profile in profiles], [61, 179, 273]
+        )
+        self.assertEqual(
+            [profile["completion_required_fields"] for profile in profiles],
+            [30, 77, 101],
+        )
+        self.assertTrue(profiles[1]["country_authoritative_sources"])
+
+    def test_profile_question_preview_matches_plan_completion_gate(self):
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            exit_code = main(
+                ["questions", "--country", "PL", "--profile", "PL:L1"]
+            )
+
+        payload = json.loads(stdout.getvalue())
+        brand_question = next(
+            question
+            for question in payload["questions"]
+            if question["id"] == "scope.brand_identity"
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["selection_mode"], "profile")
+        self.assertEqual(payload["profile"], "PL:L1:v1")
+        self.assertEqual(payload["question_count"], 13)
+        self.assertEqual(payload["field_count"], 61)
+        self.assertEqual(payload["critical_fields"], 30)
+        self.assertEqual(
+            payload["completion_required_availabilities"],
+            ["public_expected"],
+        )
+        self.assertFalse(
+            brand_question["field_completion_required"]["brand.aliases"]
+        )
+        self.assertTrue(
+            brand_question["field_completion_required"]["brand.name"]
+        )
+
+    def test_profiles_command_rejects_country_without_profiles(self):
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            exit_code = main(["profiles", "--country", "XX"])
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("No research profiles", stderr.getvalue())
+
+    def test_offline_profile_plan_freezes_snapshot_and_polish_authorities(self):
+        with TemporaryDirectory() as temporary_directory:
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "plan",
+                        "--brand",
+                        "Żabka",
+                        "--country",
+                        "PL",
+                        "--profile",
+                        "PL:L1",
+                        "--offline",
+                        "--output-dir",
+                        temporary_directory,
+                    ]
+                )
+
+            summary = json.loads(stdout.getvalue())
+            plan_path = Path(summary["plan_path"])
+            artifact = json.loads(plan_path.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(summary["profile"], "PL:L1:v1")
+            self.assertEqual(summary["tasks"], 13)
+            self.assertEqual(summary["critical_fields"], 30)
+            self.assertEqual(artifact["schema_version"], "1.3.0")
+            self.assertEqual(
+                artifact["profile_snapshot"]["profile_id"], "PL:L1:v1"
+            )
+            self.assertEqual(artifact["authoritative_sources"], ["https://biznes.gov.pl/"])
+            self.assertFalse(
+                any("ecfr.gov" in source for source in artifact["authoritative_sources"])
+            )
 
     def test_paid_failure_usage_is_saved_and_output_reservation_is_released(self):
         with TemporaryDirectory() as temporary_directory:
@@ -1330,6 +1453,10 @@ class CollectorCliTests(TestCase):
             )
             self.assertIn(
                 "--min-queries-per-task 2",
+                summary["next_command"],
+            )
+            self.assertIn(
+                "--max-candidate-routes 5",
                 summary["next_command"],
             )
             self.assertTrue(Path(summary["loop_path"]).is_file())

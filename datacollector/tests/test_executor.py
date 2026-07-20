@@ -1,5 +1,6 @@
 from unittest import TestCase
 
+from datacollector.agents.checker import CheckerAgent
 from datacollector.agents.executor import (
     ExecutorAgent,
     _search_sources_requiring_extraction,
@@ -7,6 +8,7 @@ from datacollector.agents.executor import (
 from datacollector.agents.extractor import ExtractorAgent
 from datacollector.agents.searcher import SearcherAgent
 from datacollector.schemas import (
+    CheckerFieldStatus,
     ExecutorBatchStatus,
     ExecutorMode,
     ExecutorNextAction,
@@ -116,6 +118,126 @@ class ExecutorAgentTests(TestCase):
             execution.batch_results[0].status,
             ExecutorBatchStatus.PARTIAL,
         )
+
+    def test_local_quality_audit_completes_without_external_calls(self):
+        expanded_plan, quality_task = (
+            resolver_fixtures.plan_with_local_quality_task(self.plan)
+        )
+        expanded_search = self.search.model_copy(
+            update={"unselected_task_ids": [quality_task.task_id]}
+        )
+        checker = self.checker.model_copy(
+            update={
+                "unevaluated_task_ids": [quality_task.task_id],
+                "scope_complete": False,
+            }
+        )
+        resolver_llm = resolver_fixtures.FixtureResolverLLM()
+        resolution = resolver_fixtures.ResolverAgent(
+            resolver_llm
+        ).create_resolution_results(
+            expanded_plan,
+            expanded_search,
+            self.extraction,
+            checker,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            search_sha256=checker_fixtures.SEARCH_SHA256,
+            extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            check_sha256="d" * 64,
+            check_reference="/fixtures/check-r004.json",
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            search_reference=checker_fixtures.SEARCH_REFERENCE,
+            extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            iteration=4,
+            max_search_tasks=1,
+            completed_gap_rounds=expanded_plan.stop_conditions.max_rounds,
+            force_scope_expansion=True,
+        )
+
+        merged_search, merged_extraction, execution = ExecutorAgent(
+            SearcherAgent(),
+            ExtractorAgent(UnexpectedFetcher()),
+        ).execute(
+            expanded_plan,
+            expanded_search,
+            self.extraction,
+            checker,
+            resolution,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            prior_search_sha256=checker_fixtures.SEARCH_SHA256,
+            prior_extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            check_sha256="d" * 64,
+            resolution_sha256="e" * 64,
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            prior_search_reference=checker_fixtures.SEARCH_REFERENCE,
+            prior_extraction_reference=checker_fixtures.EXTRACTION_REFERENCE,
+            check_reference="/fixtures/check-r004.json",
+            resolution_reference="/fixtures/resolution-r004.json",
+            merged_search_reference="/fixtures/sources-r005.json",
+            merged_extraction_reference="/fixtures/extractions-r005.json",
+            iteration=5,
+            execution_mode=ExecutorMode.PAID,
+        )
+
+        self.assertEqual(resolver_llm.calls, [])
+        self.assertFalse(execution.search_executed)
+        self.assertFalse(execution.network_executed)
+        self.assertFalse(execution.provider_executed)
+        self.assertEqual(execution.agent_usage, [])
+        self.assertEqual(execution.processed_source_ids, [])
+        self.assertEqual(
+            execution.batch_results[0].action,
+            ResolverAction.LOCAL_AUDIT,
+        )
+        self.assertEqual(
+            execution.batch_results[0].status,
+            ExecutorBatchStatus.COMPLETED,
+        )
+        self.assertIn(quality_task.task_id, merged_search.selected_task_ids)
+        self.assertIn(quality_task.task_id, merged_extraction.selected_task_ids)
+        self.assertEqual(
+            merged_extraction.claims,
+            self.extraction.claims,
+        )
+
+        checker_llm = checker_fixtures.FixtureCheckerLLM(
+            checker_fixtures.CheckerAgentTests._accepted_draft
+        )
+        final_check = CheckerAgent(checker_llm).create_check_results(
+            expanded_plan,
+            merged_search,
+            merged_extraction,
+            plan_sha256=checker_fixtures.PLAN_SHA256,
+            search_sha256=execution.merged_search_sha256,
+            extraction_sha256=execution.merged_extraction_sha256,
+            extraction_reference="/fixtures/extractions-r005.json",
+            plan_reference=checker_fixtures.PLAN_REFERENCE,
+            search_reference="/fixtures/sources-r005.json",
+            iteration=5,
+            prior_checker_results=checker,
+            prior_checker_sha256="d" * 64,
+            prior_checker_reference="/fixtures/check-r004.json",
+            prior_extraction_results=self.extraction,
+            prior_extraction_sha256=checker_fixtures.EXTRACTION_SHA256,
+            prior_search_results=expanded_search,
+            prior_search_sha256=checker_fixtures.SEARCH_SHA256,
+        )
+        quality_result = next(
+            item
+            for item in final_check.task_results
+            if item.task_id == quality_task.task_id
+        )
+
+        self.assertEqual(checker_llm.calls, [])
+        self.assertTrue(
+            all(
+                field.status == CheckerFieldStatus.VERIFIED
+                and field.audit_basis
+                and not field.raw_claim_ids
+                for field in quality_result.field_results
+            )
+        )
+        self.assertEqual(quality_result.follow_up_ids, [])
 
     def test_iteration_must_advance_beyond_resolver(self):
         with self.assertRaisesRegex(ValueError, "greater than the Resolver"):
