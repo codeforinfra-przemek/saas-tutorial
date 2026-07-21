@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -287,6 +288,30 @@ class ResearchWorkbenchViewTests(TestCase):
             FranchiseResearchWorkspace.STATUS_APPROVED_WITH_GAPS,
         )
         self.assertEqual(self.workspace.reviewed_by, self.staff)
+
+    def test_finalization_is_staff_only_post_and_redirects_to_report(self):
+        finalize_url = reverse(
+            "backoffice:research_workbench_finalize",
+            args=[self.workspace.workspace_id],
+        )
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.post(finalize_url).status_code, 302)
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.get(finalize_url).status_code, 405)
+        result = SimpleNamespace(
+            research_import=SimpleNamespace(franchise=self.workspace.franchise)
+        )
+        with patch(
+            "backoffice.views.finalize_research_workspace",
+            return_value=(result, True),
+        ) as finalizer:
+            response = self.client.post(finalize_url)
+        self.assertRedirects(
+            response,
+            reverse("franchises:research_detail", args=[self.workspace.franchise.slug]),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(finalizer.call_args.kwargs["actor"], self.staff)
 
     def test_private_document_upload_and_download_are_staff_only(self):
         upload = reverse(

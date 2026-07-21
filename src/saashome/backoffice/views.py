@@ -23,9 +23,14 @@ from franchises.forms import (
 from franchises.models import (
     FranchiseResearchDocument,
     FranchiseResearchEvent,
+    FranchiseResearchFinalization,
     FranchiseResearchJob,
     FranchiseResearchReviewField,
     FranchiseResearchWorkspace,
+)
+from franchises.research_finalizer import (
+    ResearchFinalizationError,
+    finalize_research_workspace,
 )
 from franchises.research_jobs import (
     ResearchJobError,
@@ -232,6 +237,10 @@ def research_workbench_detail_view(request, workspace_id):
             }
             grouped_fields.append(current_group)
         current_group["fields"].append(field)
+    try:
+        finalization = workspace.finalization
+    except FranchiseResearchFinalization.DoesNotExist:
+        finalization = None
     stages = []
     for stage in workspace.stage_summary:
         rendered = dict(stage)
@@ -241,6 +250,7 @@ def research_workbench_detail_view(request, workspace_id):
                 if workspace.status
                 in {
                     FranchiseResearchWorkspace.STATUS_READY,
+                    FranchiseResearchWorkspace.STATUS_APPROVED,
                     FranchiseResearchWorkspace.STATUS_APPROVED_WITH_GAPS,
                 }
                 else "attention"
@@ -248,9 +258,16 @@ def research_workbench_detail_view(request, workspace_id):
                 else "current"
             )
             rendered["summary"] = f"{_workspace_counts(workspace)['progress']}% sprawdzone"
-        if rendered["key"] == "import" and workspace.status == FranchiseResearchWorkspace.STATUS_APPROVED_WITH_GAPS:
-            rendered["status"] = "current"
-            rendered["summary"] = "gotowe do eksportu/importu"
+        if rendered["key"] == "import" and workspace.status in {
+            FranchiseResearchWorkspace.STATUS_APPROVED,
+            FranchiseResearchWorkspace.STATUS_APPROVED_WITH_GAPS,
+        }:
+            rendered["status"] = "complete" if finalization else "current"
+            rendered["summary"] = (
+                "zamrożono i zaimportowano"
+                if finalization
+                else "gotowe do finalizacji i importu"
+            )
         stages.append(rendered)
     jobs = workspace.jobs.select_related("requested_by", "result_workspace")[:10]
     active_job = workspace.jobs.filter(
@@ -278,6 +295,7 @@ def research_workbench_detail_view(request, workspace_id):
             job_form=ResearchJobForm(),
             jobs=jobs,
             active_job=active_job,
+            finalization=finalization,
             documents=workspace.documents.select_related("uploaded_by"),
             events=workspace.events.select_related("actor")[:20],
         ),
@@ -285,6 +303,10 @@ def research_workbench_detail_view(request, workspace_id):
 
 
 def _reopen_workspace_if_needed(workspace):
+    if workspace.is_finalized:
+        raise ResearchFinalizationError(
+            "Sfinalizowany Workbench jest niezmienny. Utwórz nowy draft."
+        )
     if workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
         workspace.status = FranchiseResearchWorkspace.STATUS_REVIEW
         workspace.reviewed_by = None
@@ -311,6 +333,9 @@ def _workbench_return(request, workspace_id, *, anchor=""):
 @require_POST
 def research_workbench_field_action_view(request, workspace_id, pk, action):
     workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
+    if workspace.is_finalized or workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
+        messages.error(request, "Najpierw otwórz Workbench ponownie do edycji.")
+        return _workbench_return(request, workspace_id)
     field = get_object_or_404(workspace.review_fields, pk=pk)
     decisions = {
         "accept": FranchiseResearchReviewField.DECISION_ACCEPTED,
@@ -323,7 +348,11 @@ def research_workbench_field_action_view(request, workspace_id, pk, action):
     if action == "accept" and not field.effective_value:
         messages.error(request, "Najpierw wpisz wartość albo oznacz pole jako udokumentowany brak.")
         return _workbench_return(request, workspace_id, anchor=f"field-{field.pk}")
-    field.decision = decisions[action]
+    field.decision = (
+        FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED
+        if action == "accept" and field.reviewer_value.strip()
+        else decisions[action]
+    )
     if action == "reset":
         field.decided_by = None
         field.decided_at = None
@@ -347,6 +376,9 @@ def research_workbench_field_action_view(request, workspace_id, pk, action):
 @require_POST
 def research_workbench_field_edit_view(request, workspace_id, pk):
     workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
+    if workspace.is_finalized or workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
+        messages.error(request, "Najpierw otwórz Workbench ponownie do edycji.")
+        return _workbench_return(request, workspace_id)
     field = get_object_or_404(workspace.review_fields, pk=pk)
     previous_document_ids = set(field.supporting_documents.values_list("id", flat=True))
     form = ResearchReviewFieldForm(request.POST, instance=field)
@@ -388,6 +420,9 @@ def research_workbench_field_edit_view(request, workspace_id, pk):
 @require_POST
 def research_workbench_document_upload_view(request, workspace_id):
     workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
+    if workspace.is_finalized or workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
+        messages.error(request, "Najpierw otwórz Workbench ponownie do edycji.")
+        return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
     form = ResearchDocumentUploadForm(request.POST, request.FILES)
     if not form.is_valid():
         messages.error(
@@ -431,6 +466,9 @@ def research_workbench_document_upload_view(request, workspace_id):
 @require_POST
 def research_workbench_job_queue_view(request, workspace_id):
     workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
+    if workspace.is_finalized or workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
+        messages.error(request, "Najpierw otwórz Workbench ponownie do edycji.")
+        return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
     form = ResearchJobForm(request.POST)
     if not form.is_valid():
         messages.error(
@@ -538,19 +576,34 @@ def research_workbench_document_download_view(request, workspace_id, pk):
 @require_POST
 def research_workbench_decision_view(request, workspace_id, action):
     workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
+    if workspace.is_finalized:
+        messages.error(request, "Sfinalizowanej decyzji nie można zmienić.")
+        return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
     form = ResearchWorkspaceDecisionForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Nie udało się zapisać decyzji końcowej.")
         return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
     counts = _workspace_counts(workspace)
-    if action == "ready":
+    if action in {"ready", "approve"}:
         if counts["pending"]:
             messages.error(
                 request,
                 f"Pozostało {counts['pending']} pól bez decyzji. Zatwierdź, odrzuć lub oznacz je jako brak.",
             )
             return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
-        status = FranchiseResearchWorkspace.STATUS_READY
+        if counts["gaps"] or counts["rejected"]:
+            messages.error(
+                request,
+                "Pełne zatwierdzenie nie może zawierać odrzuceń ani udokumentowanych braków.",
+            )
+            return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
+        if not workspace.checker_passed or not workspace.scope_complete:
+            messages.error(
+                request,
+                "Checker lub zakres nie pozwala na pełne zatwierdzenie. Użyj zatwierdzenia z brakami.",
+            )
+            return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
+        status = FranchiseResearchWorkspace.STATUS_APPROVED
     elif action == "approve_with_gaps":
         if not form.cleaned_data["acknowledge_gaps"]:
             messages.error(request, "Potwierdź świadome zatwierdzenie udokumentowanych braków.")
@@ -584,3 +637,28 @@ def research_workbench_decision_view(request, workspace_id, action):
     )
     messages.success(request, f"Zapisano status: {workspace.get_status_display()}.")
     return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
+
+
+@staff_member_required
+@require_POST
+def research_workbench_finalize_view(request, workspace_id):
+    workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
+    try:
+        finalization, created = finalize_research_workspace(
+            workspace,
+            actor=request.user,
+        )
+    except (ResearchFinalizationError, OSError, ValueError) as exc:
+        messages.error(request, f"Finalizacja nie powiodła się: {exc}")
+        return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
+    if created:
+        messages.success(
+            request,
+            "Workbench zamrożono, zaimportowano i opublikowano jako audytowalną wersję.",
+        )
+    else:
+        messages.info(request, "Ten Workbench był już wcześniej sfinalizowany.")
+    return redirect(
+        "franchises:research_detail",
+        slug=finalization.research_import.franchise.slug,
+    )

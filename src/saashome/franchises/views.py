@@ -32,6 +32,7 @@ from .models import (
     FranchiseCategory,
     FranchiseLocation,
     FranchiseResearchClaimCitation,
+    FranchiseResearchEditorialDecision,
     FranchiseResearchField,
     FranchiseResearchTask,
     FranchiseResearchValue,
@@ -389,6 +390,43 @@ def franchise_research_detail_view(request, slug):
         ),
         is_current=True,
     )
+    finalization = research_import.workbench_finalizations.order_by(
+        "-finalized_at"
+    ).first()
+    editorial_decisions = []
+    editorial_unmapped = []
+    if finalization is not None:
+        editorial_decisions = list(
+            FranchiseResearchEditorialDecision.objects.filter(
+                finalization=finalization
+            ).prefetch_related("supporting_documents")
+        )
+        editorial_by_key = {
+            (item.task_id, item.target_field): item for item in editorial_decisions
+        }
+        mapped_keys = set()
+        for task in research_import.tasks.all():
+            for field in task.fields.all():
+                key = (task.task_id, field.target_field)
+                field.editorial_decision = editorial_by_key.get(key)
+                field.presentation_values = list(field.values.all())
+                if field.editorial_decision is not None:
+                    mapped_keys.add(key)
+                    if (
+                        field.editorial_decision.value_origin != "ai"
+                        or not field.editorial_decision.is_public
+                    ):
+                        field.presentation_values = []
+        editorial_unmapped = [
+            item
+            for item in editorial_decisions
+            if (item.task_id, item.target_field) not in mapped_keys
+        ]
+    else:
+        for task in research_import.tasks.all():
+            for field in task.fields.all():
+                field.editorial_decision = None
+                field.presentation_values = list(field.values.all())
     normalization_artifact = research_import.artifacts.filter(
         artifact_type="normalization"
     ).first()
@@ -401,6 +439,8 @@ def franchise_research_detail_view(request, slug):
         "research_import": research_import,
         "research_tasks": research_import.tasks.all(),
         "research_sources": research_import.sources.all(),
+        "finalization": finalization,
+        "editorial_unmapped": editorial_unmapped,
         "research_warnings": normalized_payload.get("warnings", []),
         "critical_missing_fields": normalized_payload.get(
             "critical_missing_fields", []

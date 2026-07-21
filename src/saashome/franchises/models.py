@@ -501,6 +501,7 @@ class FranchiseResearchArtifact(models.Model):
     TYPE_CHECK = "check"
     TYPE_NORMALIZATION = "normalization"
     TYPE_REVIEW = "review"
+    TYPE_FINALIZATION = "finalization"
     TYPE_CHOICES = (
         (TYPE_PLAN, "Plan"),
         (TYPE_SEARCH, "Search"),
@@ -508,6 +509,7 @@ class FranchiseResearchArtifact(models.Model):
         (TYPE_CHECK, "Check"),
         (TYPE_NORMALIZATION, "Normalization"),
         (TYPE_REVIEW, "Review"),
+        (TYPE_FINALIZATION, "Workbench finalization"),
     )
 
     research_import = models.ForeignKey(
@@ -793,11 +795,13 @@ class FranchiseResearchWorkspace(models.Model):
 
     STATUS_REVIEW = "review"
     STATUS_READY = "ready"
+    STATUS_APPROVED = "approved"
     STATUS_APPROVED_WITH_GAPS = "approved_with_gaps"
     STATUS_REJECTED = "rejected"
     STATUS_CHOICES = (
         (STATUS_REVIEW, "W trakcie weryfikacji"),
         (STATUS_READY, "Gotowe do zatwierdzenia"),
+        (STATUS_APPROVED, "Zatwierdzone"),
         (STATUS_APPROVED_WITH_GAPS, "Zatwierdzone z udokumentowanymi brakami"),
         (STATUS_REJECTED, "Odrzucone"),
     )
@@ -872,6 +876,10 @@ class FranchiseResearchWorkspace(models.Model):
             decision=FranchiseResearchReviewField.DECISION_PENDING
         ).count()
         return round(reviewed * 100 / total)
+
+    @property
+    def is_finalized(self):
+        return hasattr(self, "finalization")
 
 
 class FranchiseResearchReviewField(models.Model):
@@ -1143,6 +1151,155 @@ class FranchiseResearchJob(models.Model):
     @property
     def is_active(self):
         return self.status in {self.STATUS_QUEUED, self.STATUS_RUNNING}
+
+
+class FranchiseResearchFinalization(models.Model):
+    """Immutable editorial release attached to one Workbench and one import."""
+
+    finalization_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    workspace = models.OneToOneField(
+        FranchiseResearchWorkspace,
+        on_delete=models.PROTECT,
+        related_name="finalization",
+    )
+    research_import = models.ForeignKey(
+        FranchiseResearchImport,
+        on_delete=models.PROTECT,
+        related_name="workbench_finalizations",
+    )
+    decision = models.CharField(max_length=30, choices=FranchiseResearchImport.DECISION_CHOICES)
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="research_finalizations",
+    )
+    reviewer_name = models.CharField(max_length=300)
+    reviewer_notes = models.TextField(blank=True)
+    normalized_sha256 = models.CharField(max_length=64)
+    workspace_state_sha256 = models.CharField(max_length=64)
+    artifact_reference = models.TextField()
+    artifact_sha256 = models.CharField(max_length=64)
+    field_count = models.PositiveIntegerField(default=0)
+    accepted_count = models.PositiveIntegerField(default=0)
+    edited_count = models.PositiveIntegerField(default=0)
+    rejected_count = models.PositiveIntegerField(default=0)
+    gap_count = models.PositiveIntegerField(default=0)
+    pending_count = models.PositiveIntegerField(default=0)
+    document_count = models.PositiveIntegerField(default=0)
+    finalized_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-finalized_at"]
+        indexes = [
+            models.Index(fields=["research_import", "finalized_at"]),
+            models.Index(fields=["decision", "finalized_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.workspace.franchise} finalization {self.finalization_id}"
+
+
+class FranchiseResearchEditorialDocument(models.Model):
+    """Frozen metadata for a private Workbench document; never stores public bytes."""
+
+    finalization = models.ForeignKey(
+        FranchiseResearchFinalization,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+    workbench_document = models.ForeignKey(
+        FranchiseResearchDocument,
+        on_delete=models.PROTECT,
+        related_name="finalized_snapshots",
+    )
+    original_name = models.CharField(max_length=255)
+    document_type = models.CharField(max_length=30)
+    access_level = models.CharField(max_length=30)
+    content_type = models.CharField(max_length=120, blank=True)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    sha256 = models.CharField(max_length=64)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["original_name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["finalization", "workbench_document"],
+                name="unique_finalized_workbench_document",
+            )
+        ]
+
+
+class FranchiseResearchEditorialDecision(models.Model):
+    """Human decision overlay; AI and manually supplied values remain distinguishable."""
+
+    ORIGIN_AI = "ai"
+    ORIGIN_HUMAN = "human"
+    ORIGIN_NONE = "none"
+    ORIGIN_CHOICES = (
+        (ORIGIN_AI, "AI proposal approved by a human"),
+        (ORIGIN_HUMAN, "Human supplied or corrected"),
+        (ORIGIN_NONE, "No publishable value"),
+    )
+
+    finalization = models.ForeignKey(
+        FranchiseResearchFinalization,
+        on_delete=models.CASCADE,
+        related_name="field_decisions",
+    )
+    research_field = models.ForeignKey(
+        FranchiseResearchField,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="editorial_decisions",
+    )
+    task_id = models.CharField(max_length=200)
+    task_title = models.CharField(max_length=500)
+    target_field = models.CharField(max_length=500)
+    requirement = models.CharField(max_length=30, blank=True)
+    priority = models.CharField(max_length=30, blank=True)
+    pipeline_status = models.CharField(max_length=40)
+    checker_status = models.CharField(max_length=40, blank=True)
+    decision = models.CharField(
+        max_length=30,
+        choices=FranchiseResearchReviewField.DECISION_CHOICES,
+    )
+    value_origin = models.CharField(max_length=10, choices=ORIGIN_CHOICES)
+    effective_value = models.TextField(blank=True)
+    proposed_values = models.JSONField(default=list)
+    evidence = models.JSONField(default=list)
+    source_ids = models.JSONField(default=list)
+    reviewer_note = models.TextField(blank=True)
+    decided_by_name = models.CharField(max_length=300, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    supporting_documents = models.ManyToManyField(
+        FranchiseResearchEditorialDocument,
+        blank=True,
+        related_name="field_decisions",
+    )
+
+    class Meta:
+        ordering = ["research_field__task__sort_order", "target_field", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["finalization", "task_id", "target_field"],
+                name="unique_editorial_field_per_finalization",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["finalization", "decision"]),
+            models.Index(fields=["target_field", "decision"]),
+        ]
+
+    @property
+    def is_public(self):
+        return self.decision in {
+            FranchiseResearchReviewField.DECISION_ACCEPTED,
+            FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED,
+        }
 
 
 @receiver(post_delete, sender=FranchiseResearchDocument)

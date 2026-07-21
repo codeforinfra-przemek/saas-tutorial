@@ -924,9 +924,25 @@ verified absence, or undo a decision. Every change records its actor and time.
 Contracts and other private documents are uploaded to a storage root outside
 public `MEDIA_ROOT` and can only be downloaded through a staff-protected view.
 They remain queued for a later extraction run; uploading a document does not
-silently turn it into evidence or publish it. A Workbench approval closes the
-editorial staging step but intentionally does not bypass the immutable signed
-review artifact and Importer described below.
+silently turn it into evidence or publish it. After approval, **Zamroź i
+zaimportuj** runs the Workbench Finalizer. It creates the standard signed review
+and base import when needed, then attaches a separate immutable editorial
+overlay. AI values, human corrections, rejections and documented gaps therefore
+remain distinguishable.
+
+Finalization is idempotent and makes that Workbench read-only. Its canonical
+JSON artifact contains every field decision and only document metadata plus
+SHA-256 digests—never document bytes or private storage paths. The public report
+shows human values and hides rejected AI proposals; it only reports the count of
+supporting private documents. Operations can safely retry the same action with:
+
+```bash
+.venv/bin/python src/saashome/manage.py finalize_research_workspace \
+  --workspace <workspace-uuid>
+```
+
+Further research must produce a new Normalizer artifact and Workbench rather
+than modifying the finalized release.
 
 The command is idempotent by `normalization_id` and exact Normalizer bytes.
 

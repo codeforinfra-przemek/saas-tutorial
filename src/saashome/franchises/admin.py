@@ -12,6 +12,9 @@ from .models import (
     FranchiseResearchImport,
     FranchiseResearchDocument,
     FranchiseResearchEvent,
+    FranchiseResearchFinalization,
+    FranchiseResearchEditorialDecision,
+    FranchiseResearchEditorialDocument,
     FranchiseResearchJob,
     FranchiseResearchReviewField,
     FranchiseResearchSource,
@@ -268,6 +271,61 @@ class FranchiseResearchJobAdmin(admin.ModelAdmin):
     list_filter = ("kind", "status")
     search_fields = ("workspace__franchise__name", "job_id", "error_code")
     readonly_fields = tuple(field.name for field in FranchiseResearchJob._meta.fields)
+
+
+@admin.register(FranchiseResearchFinalization)
+class FranchiseResearchFinalizationAdmin(admin.ModelAdmin):
+    list_display = (
+        "workspace",
+        "decision",
+        "reviewer_name",
+        "field_count",
+        "document_count",
+        "finalized_at",
+    )
+    list_filter = ("decision", "finalized_at")
+    search_fields = ("workspace__franchise__name", "finalization_id", "artifact_sha256")
+    readonly_fields = tuple(
+        field.name for field in FranchiseResearchFinalization._meta.fields
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(FranchiseResearchEditorialDecision)
+class FranchiseResearchEditorialDecisionAdmin(admin.ModelAdmin):
+    list_display = ("target_field", "decision", "value_origin", "finalization")
+    list_filter = ("decision", "value_origin")
+    search_fields = ("target_field", "task_id", "effective_value")
+    readonly_fields = tuple(
+        field.name for field in FranchiseResearchEditorialDecision._meta.fields
+    ) + ("supporting_documents",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(FranchiseResearchEditorialDocument)
+class FranchiseResearchEditorialDocumentAdmin(admin.ModelAdmin):
+    list_display = ("original_name", "access_level", "sha256", "finalization")
+    list_filter = ("document_type", "access_level")
+    search_fields = ("original_name", "sha256")
+    readonly_fields = tuple(
+        field.name for field in FranchiseResearchEditorialDocument._meta.fields
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 for research_model in (
