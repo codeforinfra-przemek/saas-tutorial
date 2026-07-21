@@ -110,6 +110,30 @@ def _record_unknown_provider_failure(
     launch.save(update_fields=["provider_failure_history"])
 
 
+def _apply_failure_history_reserve(launch: FranchiseResearchLaunch) -> None:
+    unknown_attempts = sum(
+        1
+        for item in (launch.provider_failure_history or [])
+        if item.get("token_usage_unknown", True)
+    )
+    summary = dict(launch.cost_summary or {})
+    already_recorded = int(summary.get("unknown_cost_attempts") or 0)
+    missing_attempts = max(unknown_attempts - already_recorded, 0)
+    if not missing_attempts:
+        return
+    reserve = UNKNOWN_PROVIDER_ATTEMPT_RESERVE_USD * unknown_attempts
+    known_cost = _decimal(summary.get("estimated_cost_usd")) or Decimal("0")
+    summary["api_attempts_recorded"] = int(
+        summary.get("api_attempts_recorded") or 0
+    ) + missing_attempts
+    summary["unknown_cost_attempts"] = unknown_attempts
+    summary["unknown_cost_reserve_usd"] = str(reserve)
+    summary["budgeted_cost_usd"] = str(known_cost + reserve)
+    summary["cost_complete"] = False
+    launch.cost_summary = summary
+    launch.save(update_fields=["cost_summary"])
+
+
 def _parse_summary(output: str) -> dict:
     decoder = json.JSONDecoder()
     for index, character in enumerate(output):
@@ -382,6 +406,7 @@ def retry_research_launch(launch: FranchiseResearchLaunch) -> None:
                 error_code=legacy_transient_code,
                 stage=locked.current_stage or "Nieudany etap sprzed wdrożenia retry",
             )
+    _apply_failure_history_reserve(locked)
     locked.status = FranchiseResearchLaunch.STATUS_QUEUED
     locked.current_stage = "Oczekiwanie na wznowienie od ostatniego artefaktu"
     locked.error_code = ""
