@@ -453,6 +453,7 @@ class FranchiseResearchImport(models.Model):
     check_id = models.UUIDField()
     target_country = models.CharField(max_length=2)
     depth = models.CharField(max_length=30)
+    profile_id = models.CharField(max_length=80, blank=True)
     decision = models.CharField(max_length=30, choices=DECISION_CHOICES)
     reviewer = models.CharField(max_length=300)
     reviewer_notes = models.TextField(blank=True)
@@ -933,6 +934,13 @@ class FranchiseResearchReviewField(models.Model):
         blank=True,
         related_name="supported_review_fields",
     )
+    inherited_from = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="carried_forward_to",
+    )
     sort_order = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1066,10 +1074,12 @@ class FranchiseResearchJob(models.Model):
     KIND_LOOP = "loop"
     KIND_CHECK = "check"
     KIND_NORMALIZE = "normalize"
+    KIND_FINALIZE = "finalize"
     KIND_CHOICES = (
         (KIND_LOOP, "Kontynuuj research"),
         (KIND_CHECK, "Ponów kontrolę jakości"),
         (KIND_NORMALIZE, "Utwórz nowy draft danych"),
+        (KIND_FINALIZE, "Zamroź i opublikuj wersję"),
     )
     STATUS_QUEUED = "queued"
     STATUS_RUNNING = "running"
@@ -1153,6 +1163,173 @@ class FranchiseResearchJob(models.Model):
         return self.status in {self.STATUS_QUEUED, self.STATUS_RUNNING}
 
 
+class FranchiseResearchCampaign(models.Model):
+    """A budgeted group of durable first-run research launches."""
+
+    STATUS_QUEUED = "queued"
+    STATUS_RUNNING = "running"
+    STATUS_COMPLETED = "completed"
+    STATUS_COMPLETED_WITH_ERRORS = "completed_with_errors"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = (
+        (STATUS_QUEUED, "W kolejce"),
+        (STATUS_RUNNING, "W trakcie"),
+        (STATUS_COMPLETED, "Zakończona"),
+        (STATUS_COMPLETED_WITH_ERRORS, "Zakończona z błędami"),
+        (STATUS_CANCELLED, "Anulowana"),
+    )
+
+    campaign_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    target_country = models.CharField(max_length=2, default="PL")
+    profile_id = models.CharField(max_length=80)
+    status = models.CharField(
+        max_length=30,
+        choices=STATUS_CHOICES,
+        default=STATUS_QUEUED,
+    )
+    configuration = models.JSONField(default=dict)
+    max_total_cost_usd = models.DecimalField(max_digits=10, decimal_places=2)
+    reserved_cost_usd = models.DecimalField(max_digits=10, decimal_places=2)
+    max_concurrent_runs = models.PositiveSmallIntegerField(default=1)
+    cancel_requested = models.BooleanField(default=False)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="requested_research_campaigns",
+    )
+    queued_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-queued_at", "-id"]
+        indexes = [models.Index(fields=["status", "queued_at"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(max_concurrent_runs__gte=1)
+                & models.Q(max_concurrent_runs__lte=5),
+                name="research_campaign_concurrency_between_1_and_5",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(reserved_cost_usd__gte=0)
+                & models.Q(max_total_cost_usd__gte=models.F("reserved_cost_usd")),
+                name="research_campaign_budget_covers_reservation",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.profile_id})"
+
+    @property
+    def is_active(self):
+        return self.status in {self.STATUS_QUEUED, self.STATUS_RUNNING}
+
+
+class FranchiseResearchLaunch(models.Model):
+    """Durable first-run orchestration before a Workbench exists."""
+
+    STATUS_QUEUED = "queued"
+    STATUS_RUNNING = "running"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = (
+        (STATUS_QUEUED, "W kolejce"),
+        (STATUS_RUNNING, "W trakcie"),
+        (STATUS_SUCCEEDED, "Zakończone"),
+        (STATUS_FAILED, "Błąd"),
+        (STATUS_CANCELLED, "Anulowane"),
+    )
+
+    launch_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    campaign = models.ForeignKey(
+        FranchiseResearchCampaign,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="launches",
+    )
+    campaign_position = models.PositiveIntegerField(null=True, blank=True)
+    franchise = models.ForeignKey(
+        Franchise,
+        on_delete=models.CASCADE,
+        related_name="research_launches",
+    )
+    target_country = models.CharField(max_length=2, default="PL")
+    profile_id = models.CharField(max_length=80)
+    known_legal_name = models.CharField(max_length=300, blank=True)
+    known_official_website = models.URLField(max_length=500, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_QUEUED,
+    )
+    configuration = models.JSONField(default=dict)
+    current_stage = models.CharField(max_length=120, default="Oczekiwanie na worker")
+    progress_percent = models.PositiveSmallIntegerField(default=0)
+    log = models.TextField(blank=True)
+    result_summary = models.JSONField(default=dict)
+    cost_summary = models.JSONField(default=dict)
+    provider_failure_history = models.JSONField(default=list)
+    plan_reference = models.TextField(blank=True)
+    plan_sha256 = models.CharField(max_length=64, blank=True)
+    sources_reference = models.TextField(blank=True)
+    sources_sha256 = models.CharField(max_length=64, blank=True)
+    extractions_reference = models.TextField(blank=True)
+    extractions_sha256 = models.CharField(max_length=64, blank=True)
+    check_reference = models.TextField(blank=True)
+    check_sha256 = models.CharField(max_length=64, blank=True)
+    normalized_reference = models.TextField(blank=True)
+    normalized_sha256 = models.CharField(max_length=64, blank=True)
+    result_workspace = models.ForeignKey(
+        FranchiseResearchWorkspace,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="initial_launches",
+    )
+    error_code = models.CharField(max_length=80, blank=True)
+    error_message = models.TextField(blank=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="requested_research_launches",
+    )
+    queued_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-queued_at", "-id"]
+        indexes = [models.Index(fields=["status", "queued_at"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["franchise"],
+                condition=models.Q(status__in=["queued", "running"]),
+                name="unique_active_research_launch_per_franchise",
+            ),
+            models.UniqueConstraint(
+                fields=["campaign", "franchise"],
+                condition=models.Q(campaign__isnull=False),
+                name="unique_franchise_per_research_campaign",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.franchise} {self.profile_id} {self.status}"
+
+    @property
+    def is_active(self):
+        return self.status in {self.STATUS_QUEUED, self.STATUS_RUNNING}
+
+
 class FranchiseResearchFinalization(models.Model):
     """Immutable editorial release attached to one Workbench and one import."""
 
@@ -1166,6 +1343,14 @@ class FranchiseResearchFinalization(models.Model):
         FranchiseResearchImport,
         on_delete=models.PROTECT,
         related_name="workbench_finalizations",
+    )
+    release_number = models.PositiveIntegerField(default=1)
+    supersedes = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="superseded_by",
     )
     decision = models.CharField(max_length=30, choices=FranchiseResearchImport.DECISION_CHOICES)
     reviewer = models.ForeignKey(
@@ -1300,6 +1485,67 @@ class FranchiseResearchEditorialDecision(models.Model):
             FranchiseResearchReviewField.DECISION_ACCEPTED,
             FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED,
         }
+
+
+class FranchiseResearchPublishedField(models.Model):
+    """Audited projection of one approved editorial value onto Franchise."""
+
+    STATUS_PROJECTED = "projected"
+    STATUS_SKIPPED = "skipped"
+    STATUS_CHOICES = (
+        (STATUS_PROJECTED, "Opublikowano na profilu"),
+        (STATUS_SKIPPED, "Pozostawiono tylko w raporcie"),
+    )
+
+    franchise = models.ForeignKey(
+        Franchise,
+        on_delete=models.CASCADE,
+        related_name="research_published_fields",
+    )
+    finalization = models.ForeignKey(
+        FranchiseResearchFinalization,
+        on_delete=models.PROTECT,
+        related_name="published_fields",
+    )
+    editorial_decision = models.OneToOneField(
+        FranchiseResearchEditorialDecision,
+        on_delete=models.PROTECT,
+        related_name="profile_projection",
+    )
+    target_field = models.CharField(max_length=500)
+    franchise_attribute = models.CharField(max_length=80)
+    value_origin = models.CharField(
+        max_length=10,
+        choices=FranchiseResearchEditorialDecision.ORIGIN_CHOICES,
+    )
+    effective_value = models.TextField()
+    previous_value = models.JSONField(null=True, blank=True)
+    projected_value = models.JSONField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    issue_code = models.CharField(max_length=80, blank=True)
+    is_current = models.BooleanField(default=False)
+    published_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["franchise_attribute", "target_field", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["finalization", "franchise_attribute"],
+                name="unique_publication_attribute_per_finalization",
+            ),
+            models.UniqueConstraint(
+                fields=["franchise", "franchise_attribute"],
+                condition=models.Q(is_current=True, status="projected"),
+                name="unique_current_research_publication_attribute",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["franchise", "is_current"]),
+            models.Index(fields=["finalization", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.franchise}: {self.target_field} → {self.franchise_attribute}"
 
 
 @receiver(post_delete, sender=FranchiseResearchDocument)

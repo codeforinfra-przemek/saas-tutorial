@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -16,10 +16,13 @@ from franchises.models import (
     Franchise,
     FranchiseCategory,
     FranchiseResearchDocument,
+    FranchiseResearchCampaign,
     FranchiseResearchJob,
+    FranchiseResearchLaunch,
     FranchiseResearchReviewField,
     FranchiseResearchWorkspace,
 )
+from saashome.exception_filters import CredentialSafeExceptionReporterFilter
 
 from .models import RevenueEvent, SalesAccount, SalesActivity, SalesOpportunity
 from .services.revenue import get_revenue_overview, get_subscription_mrr
@@ -49,6 +52,17 @@ class BackofficeTests(TestCase):
         response = self.client.get(reverse("backoffice:revenue_dashboard"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["robots_meta"], "noindex,nofollow")
+
+    def test_debug_report_masks_database_connection_url(self):
+        request = RequestFactory().get("/")
+        request.META["DATABASE_URL"] = "postgresql://user:secret@example.test/db"
+
+        safe_meta = CredentialSafeExceptionReporterFilter().get_safe_request_meta(
+            request
+        )
+
+        self.assertEqual(safe_meta["DATABASE_URL"], "********************")
+        self.assertNotIn("secret", safe_meta["DATABASE_URL"])
 
     def test_revenue_overview_uses_monthly_mrr_and_events(self):
         RevenueEvent.objects.create(
@@ -228,6 +242,141 @@ class ResearchWorkbenchViewTests(TestCase):
         self.assertContains(response, "Zapisz i zaakceptuj")
         self.assertContains(response, "Dodaj dokument")
 
+    def test_staff_can_queue_first_research_run_from_backoffice(self):
+        create_url = reverse("backoffice:research_launch_create")
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(create_url).status_code, 302)
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            create_url,
+            {
+                "franchise": self.workspace.franchise_id,
+                "profile_id": "PL:L1",
+                "known_legal_name": "Test Brand sp. z o.o.",
+                "known_official_website": "https://example.com/",
+                "max_cost_usd": "1.25",
+                "initial_task_limit": 5,
+                "max_search_calls": 10,
+                "max_sources": 10,
+                "max_extractor_api_calls": 15,
+                "acknowledge_paid": "on",
+            },
+        )
+        launch = FranchiseResearchLaunch.objects.get()
+        self.assertRedirects(
+            response,
+            reverse("backoffice:research_launch_detail", args=[launch.launch_id]),
+        )
+        self.assertEqual(launch.status, FranchiseResearchLaunch.STATUS_QUEUED)
+        self.assertEqual(launch.profile_id, "PL:L1")
+        self.assertEqual(launch.configuration["max_cost_usd"], "1.25")
+        detail = self.client.get(
+            reverse("backoffice:research_launch_detail", args=[launch.launch_id])
+        )
+        self.assertContains(detail, "pierwszy run od Plannera do Workbencha")
+
+    def test_staff_can_create_and_monitor_budgeted_batch_campaign(self):
+        first = Franchise.objects.create(
+            name="Batch Alpha",
+            slug="batch-alpha",
+            category=self.workspace.franchise.category,
+            short_description="Batch fixture",
+        )
+        second = Franchise.objects.create(
+            name="Batch Beta",
+            slug="batch-beta",
+            category=self.workspace.franchise.category,
+            short_description="Batch fixture",
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("backoffice:research_campaign_create"),
+            {
+                "name": "PL:L1 test batch",
+                "description": "Controlled catalogue saturation",
+                "franchises": [first.pk, second.pk],
+                "profile_id": "PL:L1",
+                "max_cost_usd": "1.25",
+                "max_total_cost_usd": "2.50",
+                "max_concurrent_runs": 1,
+                "initial_task_limit": 5,
+                "max_search_calls": 10,
+                "max_sources": 10,
+                "max_extractor_api_calls": 15,
+                "acknowledge_paid": "on",
+            },
+        )
+        campaign = FranchiseResearchCampaign.objects.get()
+        self.assertRedirects(
+            response,
+            reverse(
+                "backoffice:research_campaign_detail",
+                args=[campaign.campaign_id],
+            ),
+        )
+        self.assertEqual(campaign.launches.count(), 2)
+        self.assertEqual(campaign.reserved_cost_usd, Decimal("2.50"))
+        self.assertEqual(
+            list(campaign.launches.order_by("campaign_position").values_list("franchise", flat=True)),
+            [first.pk, second.pk],
+        )
+        detail = self.client.get(
+            reverse("backoffice:research_campaign_detail", args=[campaign.campaign_id])
+        )
+        self.assertContains(detail, "PL:L1 test batch")
+        self.assertContains(detail, "Batch Alpha")
+        status = self.client.get(
+            reverse("backoffice:research_campaign_status", args=[campaign.campaign_id])
+        ).json()
+        self.assertEqual(status["counts"]["queued"], 2)
+        self.assertEqual(status["estimated_cost_usd"], "0")
+
+    def test_batch_campaign_requires_explicit_override_for_existing_research(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("backoffice:research_campaign_create"),
+            {
+                "name": "Protected batch",
+                "franchises": [self.workspace.franchise_id],
+                "profile_id": "PL:L1",
+                "max_cost_usd": "1.25",
+                "max_total_cost_usd": "1.25",
+                "max_concurrent_runs": 1,
+                "initial_task_limit": 5,
+                "max_search_calls": 10,
+                "max_sources": 10,
+                "max_extractor_api_calls": 15,
+                "acknowledge_paid": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Istniejący research wykryto")
+        self.assertFalse(FranchiseResearchCampaign.objects.exists())
+
+    def test_staff_can_retry_failed_launch_without_clearing_artifacts(self):
+        launch = FranchiseResearchLaunch.objects.create(
+            franchise=self.workspace.franchise,
+            profile_id="PL:L1",
+            status=FranchiseResearchLaunch.STATUS_FAILED,
+            plan_reference="/tmp/plan.json",
+            extractions_reference="/tmp/extractions.json",
+            error_code="ResearchLaunchError",
+            error_message="Koszt nieznany",
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("backoffice:research_launch_retry", args=[launch.launch_id])
+        )
+        self.assertRedirects(
+            response,
+            reverse("backoffice:research_launch_detail", args=[launch.launch_id]),
+        )
+        launch.refresh_from_db()
+        self.assertEqual(launch.status, FranchiseResearchLaunch.STATUS_QUEUED)
+        self.assertEqual(launch.plan_reference, "/tmp/plan.json")
+        self.assertEqual(launch.extractions_reference, "/tmp/extractions.json")
+        self.assertEqual(launch.error_message, "")
+
     def test_one_click_decisions_require_post_and_are_audited(self):
         action = reverse(
             "backoffice:research_workbench_field_action",
@@ -289,7 +438,7 @@ class ResearchWorkbenchViewTests(TestCase):
         )
         self.assertEqual(self.workspace.reviewed_by, self.staff)
 
-    def test_finalization_is_staff_only_post_and_redirects_to_report(self):
+    def test_finalization_is_staff_only_post_and_queues_durable_job(self):
         finalize_url = reverse(
             "backoffice:research_workbench_finalize",
             args=[self.workspace.workspace_id],
@@ -299,19 +448,62 @@ class ResearchWorkbenchViewTests(TestCase):
         self.client.force_login(self.staff)
         self.assertEqual(self.client.get(finalize_url).status_code, 405)
         result = SimpleNamespace(
-            research_import=SimpleNamespace(franchise=self.workspace.franchise)
+            job_id="b5f2766f-be59-58b7-86fa-7820df9cdf0e",
         )
         with patch(
-            "backoffice.views.finalize_research_workspace",
-            return_value=(result, True),
-        ) as finalizer:
+            "backoffice.views.queue_research_job",
+            return_value=result,
+        ) as queue:
             response = self.client.post(finalize_url)
         self.assertRedirects(
             response,
-            reverse("franchises:research_detail", args=[self.workspace.franchise.slug]),
-            fetch_redirect_response=False,
+            reverse(
+                "backoffice:research_workbench_detail",
+                args=[self.workspace.workspace_id],
+            ),
         )
-        self.assertEqual(finalizer.call_args.kwargs["actor"], self.staff)
+        self.assertEqual(queue.call_args.kwargs["requested_by"], self.staff)
+        self.assertEqual(
+            queue.call_args.kwargs["kind"],
+            FranchiseResearchJob.KIND_FINALIZE,
+        )
+
+    def test_finalization_queue_error_returns_to_workbench(self):
+        finalize_url = reverse(
+            "backoffice:research_workbench_finalize",
+            args=[self.workspace.workspace_id],
+        )
+        self.client.force_login(self.staff)
+        with patch(
+            "backoffice.views.queue_research_job",
+            side_effect=ValueError("queue failure"),
+        ):
+            response = self.client.post(finalize_url)
+        self.assertRedirects(
+            response,
+            reverse(
+                "backoffice:research_workbench_detail",
+                args=[self.workspace.workspace_id],
+            ),
+        )
+
+    def test_finalization_post_does_not_wait_for_worker(self):
+        finalize_url = reverse(
+            "backoffice:research_workbench_finalize",
+            args=[self.workspace.workspace_id],
+        )
+        self.client.force_login(self.staff)
+        result = SimpleNamespace(job_id="b5f2766f-be59-58b7-86fa-7820df9cdf0e")
+        with patch(
+            "backoffice.views.queue_research_job",
+            return_value=result,
+        ):
+            response = self.client.post(
+                finalize_url,
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+                HTTP_ACCEPT="application/json",
+            )
+        self.assertEqual(response.status_code, 302)
 
     def test_private_document_upload_and_download_are_staff_only(self):
         upload = reverse(

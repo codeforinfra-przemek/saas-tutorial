@@ -347,6 +347,64 @@ def create_research_workspace(
                 )
             )
     FranchiseResearchReviewField.objects.bulk_create(rows)
+    # Reuse decisions conservatively across releases. Identical AI proposals
+    # retain an earlier human acceptance. A human-entered correction is only
+    # suggested in the new draft and deliberately requires a fresh click.
+    previous_workspace = (
+        FranchiseResearchWorkspace.objects.filter(
+            franchise=franchise,
+            finalization__isnull=False,
+        )
+        .exclude(pk=workspace.pk)
+        .order_by("-finalization__finalized_at", "-id")
+        .first()
+    )
+    carried_accepted = 0
+    carried_suggestions = 0
+    if previous_workspace is not None:
+        previous_by_key = {
+            (item.task_id, item.target_field): item
+            for item in previous_workspace.review_fields.all()
+        }
+        current_fields = list(workspace.review_fields.all())
+        updates = []
+        for field in current_fields:
+            previous = previous_by_key.get((field.task_id, field.target_field))
+            if previous is None:
+                continue
+            if previous.decision == FranchiseResearchReviewField.DECISION_ACCEPTED:
+                if previous.proposed_values == field.proposed_values and field.effective_value:
+                    field.decision = FranchiseResearchReviewField.DECISION_ACCEPTED
+                    field.decided_by = previous.decided_by
+                    field.decided_at = previous.decided_at
+                    field.reviewer_note = previous.reviewer_note
+                    field.inherited_from = previous
+                    carried_accepted += 1
+                    updates.append(field)
+            elif (
+                previous.decision
+                == FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED
+                and previous.reviewer_value.strip()
+            ):
+                field.reviewer_value = previous.reviewer_value
+                field.reviewer_note = (
+                    f"Propozycja z poprzedniej wersji. {previous.reviewer_note}"
+                ).strip()
+                field.inherited_from = previous
+                carried_suggestions += 1
+                updates.append(field)
+        if updates:
+            FranchiseResearchReviewField.objects.bulk_update(
+                updates,
+                [
+                    "decision",
+                    "reviewer_value",
+                    "reviewer_note",
+                    "decided_by",
+                    "decided_at",
+                    "inherited_from",
+                ],
+            )
     FranchiseResearchEvent.objects.create(
         workspace=workspace,
         event_type="workspace_created",
@@ -354,6 +412,8 @@ def create_research_workspace(
         metadata={
             "normalized_reference": str(normalized_path),
             "fields": len(rows),
+            "carried_accepted": carried_accepted,
+            "carried_human_suggestions": carried_suggestions,
         },
         actor=created_by,
     )

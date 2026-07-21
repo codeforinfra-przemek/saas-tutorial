@@ -905,6 +905,75 @@ Normalizer output.
 
 ### Human Research Workbench (recommended editorial flow)
 
+#### Start a new brand entirely from backoffice
+
+Staff can open `/internal/research/` and click **Nowy research**. The wizard
+selects an existing directory franchise, `PL:L1`, `PL:L2` or `PL:L3`, optional
+known legal/official seeds, the first task batch and hard provider limits. An
+explicit paid-API acknowledgement is required.
+
+The submission creates a durable `FranchiseResearchLaunch`; the HTTP request
+does not call OpenAI. The standard worker executes and validates the immutable
+chain:
+
+```text
+Planner → Searcher → Extractor → full Checker → Normalizer → Workbench
+```
+
+The launch page polls progress, cost, tokens, error state and artifact paths.
+Closing or refreshing it does not stop work. Cost is checked between complete
+stages; a stage already sent to a provider can cause a bounded overshoot. An
+unknown provider attempt is shown as an incomplete minimum estimate and reserves
+USD 0.50 against the launch budget; it does not erase the known cost of successful
+calls. A failed launch can be requeued from the same page. The worker revalidates
+and reuses every completed immutable artifact, so retrying after Extractor does
+not pay for Planner, Searcher or Extractor again. Private documents are added later
+in Human Review and are not included in this public-web launch.
+
+The launch worker automatically retries only transient provider failures:
+server errors, timeouts, rate limits and connection errors. The default is two
+retries with short incremental backoff and can be controlled with
+`RESEARCH_TRANSIENT_STAGE_RETRIES` (0–3) and
+`RESEARCH_TRANSIENT_RETRY_DELAY_SECONDS` (0–30). Validation, authentication,
+permission and budget errors are never retried. A request that returned no usage
+metadata is written to the failure ledger and reserves USD 0.50 before another
+paid call is allowed.
+
+#### Batch Campaigns
+
+Staff can open `/internal/research/campaigns/` or choose **Batch Campaigns** from
+Research Operations. A campaign applies one PL:L1/L2/L3 configuration to up to
+100 selected active franchises and creates one durable `FranchiseResearchLaunch`
+per brand. PL:L1 with concurrency `1` is the recommended catalogue-saturation
+default.
+
+The form shows the reserved cost (`per-brand budget × selected brands`) before
+submission and requires a campaign ceiling that covers that reservation. It
+also requires explicit paid-API acknowledgement. By default, brands with an
+existing Workbench/import are rejected to prevent accidental duplicate spend;
+staff must explicitly allow a new edition. Any brand with a queued or running
+launch is always rejected.
+
+The campaign dashboard aggregates progress, statuses, tokens, known/unknown
+cost and links to each launch and resulting Workbench. Concurrency is enforced
+under database row locks, so multiple workers cannot exceed the campaign limit.
+Stopping a campaign cancels only queued launches; a running provider stage is
+allowed to finish and remains auditable. Failed positions can be retried as a
+group and reuse their validated artifacts. Campaign completion never publishes
+data: every successful brand still requires Human Review, Finalizer and the
+Publication Gate.
+
+Run the worker in a separate process before submitting the wizard:
+
+```bash
+.venv/bin/python src/saashome/manage.py process_research_jobs
+```
+
+Use `--once` to process exactly one launch/job during an operational smoke test.
+If the brand does not yet have a directory row, staff can create it first at
+`/franchises/manage/new/`; the research import never silently publishes before
+Human Review and Finalizer approval.
+
 Apply Django migrations and materialize a mutable, staff-only workspace from the
 exact Normalizer lineage:
 
@@ -923,26 +992,56 @@ verified absence, or undo a decision. Every change records its actor and time.
 
 Contracts and other private documents are uploaded to a storage root outside
 public `MEDIA_ROOT` and can only be downloaded through a staff-protected view.
-They remain queued for a later extraction run; uploading a document does not
+They remain human-only until a separately authorized document-analysis stage;
+uploading a document does not
 silently turn it into evidence or publish it. After approval, **Zamroź i
-zaimportuj** runs the Workbench Finalizer. It creates the standard signed review
+zaimportuj** queues the Workbench Finalizer. It creates the standard signed review
 and base import when needed, then attaches a separate immutable editorial
 overlay. AI values, human corrections, rejections and documented gaps therefore
 remain distinguishable.
 
+Finalization is processed by the same durable database worker as paid research
+jobs. Refreshing or closing the browser cannot cancel it. The Workbench shows
+queued, running and completed state and opens the report after success.
+
 Finalization is idempotent and makes that Workbench read-only. Its canonical
 JSON artifact contains every field decision and only document metadata plus
 SHA-256 digests—never document bytes or private storage paths. The public report
-shows human values and hides rejected AI proposals; it only reports the count of
-supporting private documents. Operations can safely retry the same action with:
+shows only accepted or human-edited values and hides pending and rejected AI
+proposals; it only reports the count of supporting private documents.
+
+The base Importer is intentionally internal-only: it stores the complete
+research lineage but never overwrites the compact public franchise profile.
+The Publication Gate runs during Finalization and projects only decisions marked
+`accepted` or `accepted_edited` into explicitly mapped profile fields. It keeps
+an audit row with the previous value, projected value, release and decision,
+preserves existing editorial/vendor values when no approved replacement exists,
+and refuses ambiguous or incompatible typed values. A completed Finalization is
+therefore the publication boundary, not merely the existence of an imported
+Normalizer artifact.
+
+Operations can safely retry the same finalization action with:
 
 ```bash
 .venv/bin/python src/saashome/manage.py finalize_research_workspace \
   --workspace <workspace-uuid>
 ```
 
-Further research must produce a new Normalizer artifact and Workbench rather
-than modifying the finalized release.
+Inspect or rebuild the publication projection of the current release without
+another model call. The first command is a dry-run; `--apply` persists it:
+
+```bash
+.venv/bin/python src/saashome/manage.py rebuild_research_publication \
+  --franchise mcdonalds
+.venv/bin/python src/saashome/manage.py rebuild_research_publication \
+  --franchise mcdonalds --apply
+```
+
+Further research can be started from a finalized Workbench, but it must produce
+a new Normalizer artifact and Workbench rather than modifying the release. An
+identical AI proposal can inherit its prior acceptance. A previous human-edited
+value is carried only as an unapproved suggestion and needs a fresh click. Each
+finalization receives a release number and a link to the version it supersedes.
 
 The command is idempotent by `normalization_id` and exact Normalizer bytes.
 
@@ -959,8 +1058,16 @@ limits and a selected strategy; the worker reconstructs a closed argument list,
 revalidates the exact Checker SHA-256 and plan lineage, and prevents two active
 jobs for the same workspace. While it runs, the UI polls a staff-only status
 endpoint and shows the current Resolver/Executor/Extractor/Checker/Normalizer
+or Finalizer
 stage. Exact usage and cost are attached after completion. A new Normalizer
 artifact creates a new Workbench instead of overwriting the reviewed draft.
+
+Both the Workbench and public report describe every requested dotted field.
+Fields copied into the compact franchise model link directly to the matching
+profile section; research-only fields are explicitly marked as available in the
+full report. The public franchise profile shows the PL research level, field
+coverage, release number and freshness. Provenance labels distinguish pipeline
+proposals, human-approved values and values supported by private documents.
 
 Uploaded private, confidential and deal-room documents remain human-only under
 the research-profile policy. Researchers can attach them to a corrected field as

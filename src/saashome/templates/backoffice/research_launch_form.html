@@ -1,0 +1,32 @@
+{% extends "backoffice/base_internal.html" %}
+
+{% block internal_content %}
+<a href="{% url 'backoffice:research_workbench_list' %}" class="text-sm font-bold text-brand-700 hover:underline">← Research operations</a>
+<div class="mt-4 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <main class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+        <p class="text-xs font-extrabold uppercase tracking-widest text-brand-700">Nowy pierwszy run</p>
+        <h2 class="mt-2 text-3xl font-black tracking-tight">Uruchom research bez terminala</h2>
+        <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-600">Worker wykona Planner, Searcher, Extractor, pełny Checker i Normalizer, a następnie przygotuje Human Research Workbench. Żaden płatny etap nie działa w żądaniu strony.</p>
+        {% if form.non_field_errors %}<div class="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">{{ form.non_field_errors }}</div>{% endif %}
+        <form method="post" class="mt-7 space-y-6">{% csrf_token %}
+            <section class="grid gap-4 sm:grid-cols-2">
+                <div class="sm:col-span-2"><label class="text-sm font-extrabold text-slate-800">{{ form.franchise.label }}</label>{{ form.franchise }}<p class="mt-1 text-xs leading-5 text-slate-500">{{ form.franchise.help_text }} <a href="{% url 'franchises:manage_create' %}" class="font-bold text-brand-700 hover:underline">Utwórz nową franczyzę ↗</a></p>{{ form.franchise.errors }}</div>
+                <div class="sm:col-span-2"><label class="text-sm font-extrabold text-slate-800">{{ form.profile_id.label }}</label>{{ form.profile_id }}{{ form.profile_id.errors }}</div>
+                <div><label class="text-sm font-extrabold text-slate-800">{{ form.known_legal_name.label }}</label>{{ form.known_legal_name }}{{ form.known_legal_name.errors }}</div>
+                <div><label class="text-sm font-extrabold text-slate-800">{{ form.known_official_website.label }}</label>{{ form.known_official_website }}<p class="mt-1 text-xs text-slate-500">{{ form.known_official_website.help_text }}</p>{{ form.known_official_website.errors }}</div>
+            </section>
+            <section class="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                <h3 class="font-black">Budżet i zakres pierwszej partii</h3>
+                <div class="mt-4 grid gap-4 sm:grid-cols-2"><div><label class="text-xs font-extrabold text-slate-700">{{ form.max_cost_usd.label }}</label>{{ form.max_cost_usd }}<p class="mt-1 text-[11px] leading-4 text-slate-500">{{ form.max_cost_usd.help_text }}</p></div><div><label class="text-xs font-extrabold text-slate-700">{{ form.initial_task_limit.label }}</label>{{ form.initial_task_limit }}<p class="mt-1 text-[11px] leading-4 text-slate-500">Po Workbenchu można pogłębić lub przejść do kolejnej partii.</p></div></div>
+                <details class="mt-4"><summary class="cursor-pointer text-xs font-extrabold text-slate-700">Limity zaawansowane</summary><div class="mt-3 grid gap-3 sm:grid-cols-3"><div><label class="text-xs font-bold text-slate-600">{{ form.max_search_calls.label }}</label>{{ form.max_search_calls }}</div><div><label class="text-xs font-bold text-slate-600">{{ form.max_sources.label }}</label>{{ form.max_sources }}</div><div><label class="text-xs font-bold text-slate-600">{{ form.max_extractor_api_calls.label }}</label>{{ form.max_extractor_api_calls }}</div></div></details>
+            </section>
+            <label class="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-950">{{ form.acknowledge_paid }}<span>{{ form.acknowledge_paid.label }}</span></label>{{ form.acknowledge_paid.errors }}
+            <div class="flex flex-wrap items-center gap-3"><button class="rounded-xl bg-brand-600 px-6 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-brand-700">Dodaj płatny run do kolejki</button><span class="text-xs text-slate-500">Po kliknięciu można bezpiecznie zamknąć stronę.</span></div>
+        </form>
+    </main>
+    <aside class="space-y-4">
+        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 class="font-black">Co powstanie?</h3><ol class="mt-4 space-y-3 text-sm text-slate-700"><li><strong>1. Plan</strong><br><span class="text-xs text-slate-500">Zakres zgodny z PL:L1/L2/L3.</span></li><li><strong>2. Źródła i dowody</strong><br><span class="text-xs text-slate-500">Publiczne wyszukiwanie i kontrolowana ekstrakcja.</span></li><li><strong>3. Kontrola jakości</strong><br><span class="text-xs text-slate-500">Pełny Checker, także gdy pozostaną braki.</span></li><li><strong>4. Draft do review</strong><br><span class="text-xs text-slate-500">Normalizer i automatycznie utworzony Workbench.</span></li></ol></section>
+        <section class="rounded-2xl border border-violet-200 bg-violet-50 p-5 text-xs leading-5 text-violet-950"><strong>Dokumenty prywatne nie są częścią tego automatycznego runu.</strong> Dodasz je później w Workbenchu i przypiszesz do ręcznie sprawdzonych pól.</section>
+    </aside>
+</div>
+{% endblock %}

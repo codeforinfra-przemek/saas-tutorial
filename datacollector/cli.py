@@ -1170,8 +1170,6 @@ def _run_search(args: argparse.Namespace) -> int:
                 max_candidate_routes=args.max_candidate_routes,
             )
         except SearcherProviderError as exc:
-            if not exc.usages and not exc.observed_tool_calls:
-                raise
             failure_artifacts: list[AgentFailureArtifact] = []
             for usage in exc.usages:
                 billed_tool_calls = sum(item.calls for item in usage.tool_usage)

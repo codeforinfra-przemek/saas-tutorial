@@ -7,6 +7,11 @@ from franchises.research_jobs import (
     fail_stale_jobs,
     process_research_job,
 )
+from franchises.research_launches import (
+    claim_next_launch,
+    fail_stale_launches,
+    process_research_launch,
+)
 
 
 class Command(BaseCommand):
@@ -31,6 +36,29 @@ class Command(BaseCommand):
         self.stdout.write("Research worker is ready.")
         while True:
             fail_stale_jobs()
+            fail_stale_launches()
+            launch = claim_next_launch()
+            if launch is not None:
+                self.stdout.write(
+                    f"Processing initial launch {launch.launch_id}: "
+                    f"{launch.profile_id} for {launch.franchise.slug}."
+                )
+                process_research_launch(launch)
+                launch.refresh_from_db()
+                if launch.status == launch.STATUS_SUCCEEDED:
+                    self.stdout.write(
+                        self.style.SUCCESS(f"Launch {launch.launch_id} succeeded.")
+                    )
+                else:
+                    self.stderr.write(
+                        self.style.ERROR(
+                            f"Launch {launch.launch_id} failed: "
+                            f"{launch.error_code} {launch.error_message}"
+                        )
+                    )
+                if once:
+                    return
+                continue
             job = claim_next_job()
             if job is None:
                 if once:

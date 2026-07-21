@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand, CommandError
+from django.db import DatabaseError
 
 from franchises.models import FranchiseResearchWorkspace
 from franchises.research_finalizer import (
@@ -25,7 +26,7 @@ class Command(BaseCommand):
             finalization, created = finalize_research_workspace(workspace)
         except FranchiseResearchWorkspace.DoesNotExist as exc:
             raise CommandError("Workbench does not exist.") from exc
-        except (ResearchFinalizationError, OSError, ValueError) as exc:
+        except (ResearchFinalizationError, DatabaseError, OSError, ValueError) as exc:
             raise CommandError(str(exc)) from exc
 
         state = "created" if created else "already finalized"
@@ -33,6 +34,7 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 f"Workbench finalization {state}: "
                 f"id={finalization.finalization_id}, "
+                f"release={finalization.release_number}, "
                 f"import={finalization.research_import_id}, "
                 f"sha256={finalization.artifact_sha256}"
             )

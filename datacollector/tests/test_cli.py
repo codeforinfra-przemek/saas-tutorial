@@ -436,6 +436,30 @@ class MissingTokenUsageSearcher:
         )
 
 
+class FailedRequestWithoutUsageSearcher:
+    model_name = "gpt-5.6-terra"
+
+    def generate(
+        self,
+        plan,
+        tasks,
+        system_prompt,
+        *,
+        iteration,
+        call_index,
+        **kwargs,
+    ):
+        raise SearcherProviderError(
+            "OpenAI Searcher request failed (InternalServerError).",
+            code="provider_server_error",
+            agent="searcher",
+            iteration=iteration,
+            call_index=call_index,
+            scope_task_ids=[task.task_id for task in tasks],
+            requested_model=self.model_name,
+        )
+
+
 class CollectorCliTests(TestCase):
     @staticmethod
     def loop_checker_snapshot(*, required_status, optional_status):
@@ -1125,6 +1149,60 @@ class CollectorCliTests(TestCase):
                 failure["tool_usage"][0]["estimated_cost_usd"],
                 "0.01",
             )
+
+    def test_failed_search_request_without_usage_still_saves_failure_ledger(self):
+        with TemporaryDirectory() as temporary_directory:
+            plan_stdout = StringIO()
+            with redirect_stdout(plan_stdout):
+                self.assertEqual(
+                    main(
+                        [
+                            "plan",
+                            "--brand",
+                            "Example",
+                            "--depth",
+                            "catalog",
+                            "--free",
+                            "--output-dir",
+                            temporary_directory,
+                        ]
+                    ),
+                    0,
+                )
+            plan_path = Path(json.loads(plan_stdout.getvalue())["plan_path"])
+            stderr = StringIO()
+            with (
+                patch.object(
+                    OpenAISettings,
+                    "from_env",
+                    return_value=OpenAISettings(
+                        api_key="test",
+                        model="gpt-5.6-terra",
+                    ),
+                ),
+                patch(
+                    "datacollector.cli.OpenAISearcherClient",
+                    return_value=FailedRequestWithoutUsageSearcher(),
+                ),
+                redirect_stderr(stderr),
+            ):
+                exit_code = main(
+                    [
+                        "search",
+                        "--plan",
+                        str(plan_path),
+                        "--limit-tasks",
+                        "1",
+                    ]
+                )
+
+            failure_path = next((plan_path.parent / "attempts").glob("*.json"))
+            failure = json.loads(failure_path.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(failure["error_code"], "provider_server_error")
+            self.assertTrue(failure["token_usage_unknown"])
+            self.assertEqual(failure["observed_tool_calls"], 0)
+            self.assertIn("Provider usage saved", stderr.getvalue())
 
     def test_free_extract_creates_immutable_artifact_without_openai_usage(self):
         with TemporaryDirectory() as temporary_directory:

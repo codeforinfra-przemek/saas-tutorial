@@ -15,27 +15,41 @@ from django.views.decorators.http import require_POST
 
 from billing.models import OrganizationSubscription, Plan
 from franchises.forms import (
+    ResearchCampaignForm,
     ResearchDocumentUploadForm,
     ResearchJobForm,
+    ResearchLaunchForm,
     ResearchReviewFieldForm,
     ResearchWorkspaceDecisionForm,
 )
 from franchises.models import (
+    FranchiseResearchCampaign,
     FranchiseResearchDocument,
     FranchiseResearchEvent,
     FranchiseResearchFinalization,
     FranchiseResearchJob,
+    FranchiseResearchLaunch,
     FranchiseResearchReviewField,
     FranchiseResearchWorkspace,
 )
-from franchises.research_finalizer import (
-    ResearchFinalizationError,
-    finalize_research_workspace,
+from franchises.research_campaigns import (
+    ResearchCampaignError,
+    campaign_snapshot,
+    cancel_research_campaign,
+    create_research_campaign,
+    retry_failed_campaign_launches,
 )
 from franchises.research_jobs import (
     ResearchJobError,
     cancel_queued_job,
     queue_research_job,
+)
+from franchises.research_fields import field_metadata, profile_info
+from franchises.research_launches import (
+    ResearchLaunchError,
+    cancel_research_launch,
+    queue_research_launch,
+    retry_research_launch,
 )
 
 from .forms import SalesActivityForm, SalesOpportunityStageForm
@@ -179,6 +193,13 @@ def research_workbench_list_view(request):
     valid_statuses = {item[0] for item in FranchiseResearchWorkspace.STATUS_CHOICES}
     if status in valid_statuses:
         workspaces = workspaces.filter(status=status)
+    campaigns = list(
+        FranchiseResearchCampaign.objects.select_related("requested_by").prefetch_related(
+            "launches__franchise"
+        )[:6]
+    )
+    for campaign in campaigns:
+        campaign.snapshot = campaign_snapshot(campaign)
     return render(
         request,
         "backoffice/research_workbench_list.html",
@@ -187,8 +208,293 @@ def research_workbench_list_view(request):
             workspaces=workspaces,
             filters={"q": q, "status": status},
             status_choices=FranchiseResearchWorkspace.STATUS_CHOICES,
+            launches=FranchiseResearchLaunch.objects.select_related(
+                "franchise", "requested_by", "result_workspace"
+            )[:10],
+            campaigns=campaigns,
         ),
     )
+
+
+@staff_member_required
+def research_campaign_list_view(request):
+    campaigns = list(
+        FranchiseResearchCampaign.objects.select_related("requested_by").prefetch_related(
+            "launches__franchise"
+        )
+    )
+    for campaign in campaigns:
+        campaign.snapshot = campaign_snapshot(campaign)
+    return render(
+        request,
+        "backoffice/research_campaign_list.html",
+        internal_context(page_title="Batch Campaigns", campaigns=campaigns),
+    )
+
+
+@staff_member_required
+def research_campaign_create_view(request):
+    form = ResearchCampaignForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        data = form.cleaned_data
+        configuration = {
+            "max_cost_usd": str(data["max_cost_usd"]),
+            "initial_task_limit": data["initial_task_limit"],
+            "max_search_calls": data["max_search_calls"],
+            "max_sources": data["max_sources"],
+            "max_extractor_api_calls": data["max_extractor_api_calls"],
+        }
+        try:
+            campaign = create_research_campaign(
+                name=data["name"],
+                description=data["description"],
+                franchises=data["franchises"],
+                profile_id=data["profile_id"],
+                configuration=configuration,
+                max_total_cost_usd=data["max_total_cost_usd"],
+                max_concurrent_runs=data["max_concurrent_runs"],
+                include_previously_researched=data["include_previously_researched"],
+                requested_by=request.user,
+            )
+        except (ResearchCampaignError, ResearchLaunchError, ValueError) as exc:
+            form.add_error(None, str(exc))
+        else:
+            messages.success(
+                request,
+                f"Kampania została utworzona. Do kolejki dodano {campaign.launches.count()} runów.",
+            )
+            return redirect(
+                "backoffice:research_campaign_detail",
+                campaign_id=campaign.campaign_id,
+            )
+    return render(
+        request,
+        "backoffice/research_campaign_form.html",
+        internal_context(page_title="Nowa kampania", form=form),
+    )
+
+
+def _campaign_or_404(campaign_id):
+    return get_object_or_404(
+        FranchiseResearchCampaign.objects.select_related("requested_by").prefetch_related(
+            "launches__franchise", "launches__result_workspace"
+        ),
+        campaign_id=campaign_id,
+    )
+
+
+@staff_member_required
+def research_campaign_detail_view(request, campaign_id):
+    campaign = _campaign_or_404(campaign_id)
+    return render(
+        request,
+        "backoffice/research_campaign_detail.html",
+        internal_context(
+            page_title=f"Kampania: {campaign.name}",
+            campaign=campaign,
+            snapshot=campaign_snapshot(campaign),
+            profile=profile_info(campaign.profile_id),
+        ),
+    )
+
+
+@staff_member_required
+def research_campaign_status_view(request, campaign_id):
+    campaign = _campaign_or_404(campaign_id)
+    snapshot = campaign_snapshot(campaign)
+    launches = []
+    for launch in snapshot["launches"]:
+        launches.append(
+            {
+                "id": str(launch.launch_id),
+                "franchise": launch.franchise.name,
+                "status": launch.status,
+                "status_label": launch.get_status_display(),
+                "stage": launch.current_stage,
+                "progress": launch.progress_percent,
+                "cost": launch.cost_summary.get("estimated_cost_usd") or "0",
+                "tokens": launch.cost_summary.get("total_tokens") or 0,
+                "error": launch.error_message,
+                "url": reverse(
+                    "backoffice:research_launch_detail", args=[launch.launch_id]
+                ),
+                "workspace_url": reverse(
+                    "backoffice:research_workbench_detail",
+                    args=[launch.result_workspace.workspace_id],
+                ) if launch.result_workspace_id else "",
+            }
+        )
+    return JsonResponse(
+        {
+            "status": campaign.status,
+            "status_label": campaign.get_status_display(),
+            "is_active": campaign.is_active,
+            "cancel_requested": campaign.cancel_requested,
+            "progress": snapshot["progress"],
+            "counts": {
+                key: snapshot[key]
+                for key in ("total", "queued", "running", "succeeded", "failed", "cancelled")
+            },
+            "estimated_cost_usd": str(snapshot["estimated_cost_usd"]),
+            "budgeted_cost_usd": str(snapshot["budgeted_cost_usd"]),
+            "tokens": snapshot["tokens"],
+            "cost_complete": snapshot["cost_complete"],
+            "unknown_cost_attempts": snapshot["unknown_cost_attempts"],
+            "launches": launches,
+        }
+    )
+
+
+@staff_member_required
+@require_POST
+def research_campaign_cancel_view(request, campaign_id):
+    campaign = get_object_or_404(FranchiseResearchCampaign, campaign_id=campaign_id)
+    try:
+        cancelled = cancel_research_campaign(campaign)
+    except ResearchCampaignError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            f"Anulowano {cancelled} oczekujących runów. Uruchomione pozycje zakończą bieżący przebieg.",
+        )
+    return redirect("backoffice:research_campaign_detail", campaign_id=campaign.campaign_id)
+
+
+@staff_member_required
+@require_POST
+def research_campaign_retry_view(request, campaign_id):
+    campaign = get_object_or_404(FranchiseResearchCampaign, campaign_id=campaign_id)
+    try:
+        retried = retry_failed_campaign_launches(campaign)
+    except (ResearchCampaignError, ResearchLaunchError) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            f"Ponownie zakolejkowano {retried} pozycji od ostatniego poprawnego artefaktu.",
+        )
+    return redirect("backoffice:research_campaign_detail", campaign_id=campaign.campaign_id)
+
+
+@staff_member_required
+def research_launch_create_view(request):
+    form = ResearchLaunchForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        data = form.cleaned_data
+        configuration = {
+            "max_cost_usd": str(data["max_cost_usd"]),
+            "initial_task_limit": data["initial_task_limit"],
+            "max_search_calls": data["max_search_calls"],
+            "max_sources": data["max_sources"],
+            "max_extractor_api_calls": data["max_extractor_api_calls"],
+        }
+        try:
+            launch = queue_research_launch(
+                data["franchise"],
+                profile_id=data["profile_id"],
+                known_legal_name=data["known_legal_name"],
+                known_official_website=data["known_official_website"],
+                configuration=configuration,
+                requested_by=request.user,
+            )
+        except (ResearchLaunchError, ValueError) as exc:
+            form.add_error(None, str(exc))
+        else:
+            messages.success(
+                request,
+                "Pierwszy run trafił do trwałej kolejki. Możesz zamknąć stronę.",
+            )
+            return redirect("backoffice:research_launch_detail", launch_id=launch.launch_id)
+    return render(
+        request,
+        "backoffice/research_launch_form.html",
+        internal_context(
+            page_title="Nowy research",
+            form=form,
+        ),
+    )
+
+
+@staff_member_required
+def research_launch_detail_view(request, launch_id):
+    launch = get_object_or_404(
+        FranchiseResearchLaunch.objects.select_related(
+            "franchise", "requested_by", "result_workspace", "campaign"
+        ),
+        launch_id=launch_id,
+    )
+    return render(
+        request,
+        "backoffice/research_launch_detail.html",
+        internal_context(
+            page_title=f"Run: {launch.franchise.name}",
+            launch=launch,
+            profile=profile_info(launch.profile_id),
+        ),
+    )
+
+
+@staff_member_required
+def research_launch_status_view(request, launch_id):
+    launch = get_object_or_404(
+        FranchiseResearchLaunch.objects.select_related("result_workspace"),
+        launch_id=launch_id,
+    )
+    result_url = (
+        reverse(
+            "backoffice:research_workbench_detail",
+            args=[launch.result_workspace.workspace_id],
+        )
+        if launch.result_workspace_id
+        else ""
+    )
+    return JsonResponse(
+        {
+            "status": launch.status,
+            "status_label": launch.get_status_display(),
+            "stage": launch.current_stage,
+            "progress": launch.progress_percent,
+            "cost": launch.cost_summary.get("estimated_cost_usd"),
+            "cost_complete": launch.cost_summary.get("cost_complete", True),
+            "budgeted_cost": launch.cost_summary.get("budgeted_cost_usd"),
+            "unknown_cost_attempts": launch.cost_summary.get("unknown_cost_attempts", 0),
+            "tokens": launch.cost_summary.get("total_tokens", 0),
+            "error": launch.error_message,
+            "log_tail": launch.log[-4000:],
+            "result_url": result_url,
+            "is_active": launch.is_active,
+        }
+    )
+
+
+@staff_member_required
+@require_POST
+def research_launch_cancel_view(request, launch_id):
+    launch = get_object_or_404(FranchiseResearchLaunch, launch_id=launch_id)
+    try:
+        cancel_research_launch(launch)
+    except ResearchLaunchError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "Run został anulowany przed uruchomieniem.")
+    return redirect("backoffice:research_launch_detail", launch_id=launch.launch_id)
+
+
+@staff_member_required
+@require_POST
+def research_launch_retry_view(request, launch_id):
+    launch = get_object_or_404(FranchiseResearchLaunch, launch_id=launch_id)
+    try:
+        retry_research_launch(launch)
+    except ResearchLaunchError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            "Run wznowiono od ostatniego poprawnie zweryfikowanego artefaktu.",
+        )
+    return redirect("backoffice:research_launch_detail", launch_id=launch.launch_id)
 
 
 @staff_member_required
@@ -228,6 +534,10 @@ def research_workbench_detail_view(request, workspace_id):
     current_task_id = None
     current_group = None
     for field in page_obj.object_list:
+        field.catalog_metadata = field_metadata(
+            field.target_field,
+            task_title=field.task_title,
+        )
         if field.task_id != current_task_id:
             current_task_id = field.task_id
             current_group = {
@@ -296,6 +606,7 @@ def research_workbench_detail_view(request, workspace_id):
             jobs=jobs,
             active_job=active_job,
             finalization=finalization,
+            profile=profile_info(workspace.profile_id, workspace.depth),
             documents=workspace.documents.select_related("uploaded_by"),
             events=workspace.events.select_related("actor")[:20],
         ),
@@ -466,7 +777,7 @@ def research_workbench_document_upload_view(request, workspace_id):
 @require_POST
 def research_workbench_job_queue_view(request, workspace_id):
     workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
-    if workspace.is_finalized or workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
+    if not workspace.is_finalized and workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
         messages.error(request, "Najpierw otwórz Workbench ponownie do edycji.")
         return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
     form = ResearchJobForm(request.POST)
@@ -534,6 +845,13 @@ def research_workbench_job_status_view(request, workspace_id, job_id):
             args=[job.result_workspace.workspace_id],
         )
         if job.result_workspace_id
+        else reverse(
+            "franchises:research_detail",
+            args=[job.result_summary["franchise_slug"]],
+        )
+        if job.kind == FranchiseResearchJob.KIND_FINALIZE
+        and job.status == FranchiseResearchJob.STATUS_SUCCEEDED
+        and job.result_summary.get("franchise_slug")
         else ""
     )
     return JsonResponse(
@@ -643,22 +961,24 @@ def research_workbench_decision_view(request, workspace_id, action):
 @require_POST
 def research_workbench_finalize_view(request, workspace_id):
     workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
-    try:
-        finalization, created = finalize_research_workspace(
-            workspace,
-            actor=request.user,
+    if workspace.is_finalized:
+        return redirect(
+            "franchises:research_detail",
+            slug=workspace.franchise.slug,
         )
-    except (ResearchFinalizationError, OSError, ValueError) as exc:
-        messages.error(request, f"Finalizacja nie powiodła się: {exc}")
-        return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)
-    if created:
+    try:
+        job = queue_research_job(
+            workspace,
+            kind=FranchiseResearchJob.KIND_FINALIZE,
+            configuration={},
+            requested_by=request.user,
+        )
+    except (ResearchJobError, OSError, ValueError) as exc:
+        messages.error(request, f"Nie udało się zakolejkować finalizacji: {exc}")
+    else:
         messages.success(
             request,
-            "Workbench zamrożono, zaimportowano i opublikowano jako audytowalną wersję.",
+            f"Finalizacja trafiła do trwałej kolejki ({job.job_id}). "
+            "Możesz bezpiecznie zamknąć albo odświeżyć stronę.",
         )
-    else:
-        messages.info(request, "Ten Workbench był już wcześniej sfinalizowany.")
-    return redirect(
-        "franchises:research_detail",
-        slug=finalization.research_import.franchise.slug,
-    )
+    return redirect("backoffice:research_workbench_detail", workspace_id=workspace_id)

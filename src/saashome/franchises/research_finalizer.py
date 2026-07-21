@@ -42,6 +42,7 @@ from .models import (  # noqa: E402
     FranchiseResearchWorkspace,
 )
 from .research_import import import_franchise_research  # noqa: E402
+from .research_publication import project_approved_research  # noqa: E402
 
 
 class ResearchFinalizationError(ValueError):
@@ -305,23 +306,32 @@ def finalize_research_workspace(
     workspace: FranchiseResearchWorkspace,
     *,
     actor=None,
+    active_job_id=None,
 ) -> tuple[FranchiseResearchFinalization, bool]:
     """Finalize and import once. Repeated calls return the exact same release."""
 
-    workspace = (
-        FranchiseResearchWorkspace.objects.select_for_update()
-        .select_related("franchise", "reviewed_by")
-        .get(pk=workspace.pk)
+    # Lock only the Workbench row. Joining the nullable ``reviewed_by`` relation
+    # here makes PostgreSQL reject FOR UPDATE on the nullable side of the outer
+    # join. Related records are intentionally loaded with ordinary follow-up
+    # queries after the row lock has been acquired.
+    workspace = FranchiseResearchWorkspace.objects.select_for_update().get(
+        pk=workspace.pk
     )
     try:
-        return workspace.finalization, False
+        finalization = workspace.finalization
     except FranchiseResearchFinalization.DoesNotExist:
         pass
+    else:
+        project_approved_research(finalization)
+        return finalization, False
 
     decision = _review_decision(workspace)
     if workspace.reviewed_by is None or workspace.reviewed_at is None:
         raise ResearchFinalizationError("The final Workbench decision is not signed.")
-    if workspace.jobs.filter(status__in=["queued", "running"]).exists():
+    active_jobs = workspace.jobs.filter(status__in=["queued", "running"])
+    if active_job_id is not None:
+        active_jobs = active_jobs.exclude(job_id=active_job_id)
+    if active_jobs.exists():
         raise ResearchFinalizationError(
             "Wait for the active research job before finalizing."
         )
@@ -351,6 +361,20 @@ def finalize_research_workspace(
         )
     lineage = _load_lineage(workspace)
     research_import = _ensure_base_import(workspace, lineage, decision)
+    if not research_import.profile_id and workspace.profile_id:
+        research_import.profile_id = workspace.profile_id
+        research_import.save(update_fields=["profile_id"])
+    previous_finalization = (
+        FranchiseResearchFinalization.objects.filter(
+            research_import__franchise_id=workspace.franchise_id,
+        )
+        .exclude(workspace=workspace)
+        .order_by("-release_number", "-finalized_at")
+        .first()
+    )
+    release_number = (
+        previous_finalization.release_number + 1 if previous_finalization else 1
+    )
     document_snapshots = [_document_snapshot(document) for document in documents]
     state = {
         "workspace_id": str(workspace.workspace_id),
@@ -381,6 +405,12 @@ def finalize_research_workspace(
     artifact = {
         "schema_version": "1.0.0",
         "artifact_type": "workbench_finalization",
+        "release_number": release_number,
+        "supersedes_finalization_id": (
+            str(previous_finalization.finalization_id)
+            if previous_finalization
+            else None
+        ),
         "finalization_id": str(finalization_id),
         "created_at": workspace.reviewed_at.isoformat(),
         "franchise": {
@@ -415,6 +445,8 @@ def finalize_research_workspace(
         finalization_id=finalization_id,
         workspace=workspace,
         research_import=research_import,
+        release_number=release_number,
+        supersedes=previous_finalization,
         decision=decision.value,
         reviewer=workspace.reviewed_by,
         reviewer_name=_user_label(workspace.reviewed_by),
@@ -486,6 +518,7 @@ def finalize_research_workspace(
         sha256=artifact_sha256,
         payload=artifact,
     )
+    publication_actions = project_approved_research(finalization)
     FranchiseResearchEvent.objects.create(
         workspace=workspace,
         event_type="workspace_finalized",
@@ -494,6 +527,9 @@ def finalize_research_workspace(
             "finalization_id": str(finalization_id),
             "research_import_id": research_import.pk,
             "artifact_sha256": artifact_sha256,
+            "published_profile_fields": sum(
+                item["status"] == "projected" for item in publication_actions
+            ),
         },
         actor=actor,
     )

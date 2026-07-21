@@ -473,7 +473,11 @@ class ResearchJobForm(forms.Form):
     )
 
     kind = forms.ChoiceField(
-        choices=FranchiseResearchJob.KIND_CHOICES,
+        choices=tuple(
+            choice
+            for choice in FranchiseResearchJob.KIND_CHOICES
+            if choice[0] != FranchiseResearchJob.KIND_FINALIZE
+        ),
         label="Co uruchomić?",
         initial=FranchiseResearchJob.KIND_LOOP,
     )
@@ -497,6 +501,7 @@ class ResearchJobForm(forms.Form):
     )
     normalize_incomplete = forms.BooleanField(
         required=False,
+        initial=True,
         label="Po runie przygotuj draft również wtedy, gdy pozostaną braki",
     )
     max_search_calls = forms.IntegerField(
@@ -521,3 +526,194 @@ class ResearchJobForm(forms.Form):
                 )
             else:
                 field.widget.attrs["class"] = FIELD_CLASSES
+
+
+class ResearchLaunchForm(forms.Form):
+    franchise = forms.ModelChoiceField(
+        queryset=Franchise.objects.none(),
+        label="Franczyza",
+        help_text="Wybierz istniejący wpis katalogowy. Dane profilu zostaną uzupełnione dopiero po Human Review.",
+    )
+    profile_id = forms.ChoiceField(
+        choices=(
+            ("PL:L1", "PL:L1 — podstawowy profil katalogowy"),
+            ("PL:L2", "PL:L2 — rozszerzony research publiczny"),
+            ("PL:L3", "PL:L3 — due diligence i dokumenty human-only"),
+        ),
+        label="Poziom researchu",
+        initial="PL:L1",
+    )
+    known_legal_name = forms.CharField(
+        required=False,
+        max_length=300,
+        label="Znana nazwa prawna operatora",
+    )
+    known_official_website = forms.URLField(
+        required=False,
+        max_length=500,
+        label="Znana oficjalna strona",
+        help_text="Opcjonalny seed. Nadal zostanie zweryfikowany przez pipeline.",
+    )
+    max_cost_usd = forms.DecimalField(
+        min_value=0.10,
+        max_value=20,
+        decimal_places=2,
+        initial=1.25,
+        label="Budżet pierwszego przebiegu (USD)",
+        help_text="Kontrolowany między etapami; rozpoczęte wywołanie może przekroczyć limit.",
+    )
+    initial_task_limit = forms.IntegerField(
+        min_value=1,
+        max_value=15,
+        initial=5,
+        label="Zadania w pierwszej partii",
+    )
+    max_search_calls = forms.IntegerField(
+        min_value=1,
+        max_value=30,
+        initial=10,
+        label="Limit wywołań wyszukiwarki",
+    )
+    max_sources = forms.IntegerField(
+        min_value=1,
+        max_value=30,
+        initial=10,
+        label="Maksymalna liczba źródeł dla Extractora",
+    )
+    max_extractor_api_calls = forms.IntegerField(
+        min_value=1,
+        max_value=50,
+        initial=15,
+        label="Limit wywołań Extractora",
+    )
+    acknowledge_paid = forms.BooleanField(
+        label="Rozumiem, że uruchomienie użyje płatnego API OpenAI.",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["franchise"].queryset = Franchise.objects.filter(
+            is_active=True
+        ).order_by("name")
+        for field in self.fields.values():
+            if isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs["class"] = (
+                    "h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                )
+            else:
+                field.widget.attrs["class"] = FIELD_CLASSES
+
+
+class ResearchCampaignForm(forms.Form):
+    name = forms.CharField(
+        max_length=200,
+        label="Nazwa kampanii",
+        widget=forms.TextInput(attrs={"placeholder": "Np. Gastronomia PL — profil podstawowy"}),
+    )
+    description = forms.CharField(
+        required=False,
+        label="Notatka dla zespołu",
+        widget=forms.Textarea(attrs={"rows": 2}),
+    )
+    franchises = forms.ModelMultipleChoiceField(
+        queryset=Franchise.objects.none(),
+        label="Franczyzy w kampanii",
+        widget=forms.CheckboxSelectMultiple,
+    )
+    profile_id = forms.ChoiceField(
+        choices=(
+            ("PL:L1", "PL:L1 — podstawowy profil katalogowy"),
+            ("PL:L2", "PL:L2 — rozszerzony research publiczny"),
+            ("PL:L3", "PL:L3 — due diligence i dokumenty human-only"),
+        ),
+        label="Poziom researchu",
+        initial="PL:L1",
+    )
+    max_cost_usd = forms.DecimalField(
+        min_value=0.10,
+        max_value=20,
+        decimal_places=2,
+        initial=1.25,
+        label="Budżet jednej franczyzy (USD)",
+    )
+    max_total_cost_usd = forms.DecimalField(
+        min_value=0.10,
+        max_value=2000,
+        decimal_places=2,
+        initial=12.50,
+        label="Maksymalny budżet kampanii (USD)",
+        help_text="Musi pokrywać budżet jednej franczyzy × liczbę zaznaczonych pozycji.",
+    )
+    max_concurrent_runs = forms.IntegerField(
+        min_value=1,
+        max_value=5,
+        initial=1,
+        label="Maksymalnie równoległych runów",
+        help_text="Jeden jest najbezpieczniejszy dla limitów API i najłatwiejszy do monitorowania.",
+    )
+    initial_task_limit = forms.IntegerField(
+        min_value=1,
+        max_value=15,
+        initial=5,
+        label="Zadania w pierwszej partii",
+    )
+    max_search_calls = forms.IntegerField(
+        min_value=1,
+        max_value=30,
+        initial=10,
+        label="Limit Searchera na franczyzę",
+    )
+    max_sources = forms.IntegerField(
+        min_value=1,
+        max_value=30,
+        initial=10,
+        label="Limit źródeł na franczyzę",
+    )
+    max_extractor_api_calls = forms.IntegerField(
+        min_value=1,
+        max_value=50,
+        initial=15,
+        label="Limit Extractora na franczyzę",
+    )
+    include_previously_researched = forms.BooleanField(
+        required=False,
+        label="Świadomie utwórz nowe wydanie także dla franczyz, które mają już Workbench lub import",
+    )
+    acknowledge_paid = forms.BooleanField(
+        label="Rozumiem łączny budżet i potwierdzam użycie płatnego API OpenAI.",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["franchises"].queryset = Franchise.objects.filter(
+            is_active=True
+        ).select_related("category").order_by("name")
+        for name, field in self.fields.items():
+            if isinstance(field.widget, forms.CheckboxSelectMultiple):
+                field.widget.attrs["class"] = "research-campaign-franchises"
+            elif isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs["class"] = (
+                    "h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                )
+            else:
+                field.widget.attrs["class"] = FIELD_CLASSES
+
+    def clean_franchises(self):
+        franchises = self.cleaned_data["franchises"]
+        if franchises.count() > 100:
+            raise forms.ValidationError("Jedna kampania może zawierać maksymalnie 100 franczyz.")
+        return franchises
+
+    def clean(self):
+        cleaned = super().clean()
+        franchises = cleaned.get("franchises")
+        per_run = cleaned.get("max_cost_usd")
+        total = cleaned.get("max_total_cost_usd")
+        if franchises is not None and per_run is not None and total is not None:
+            reserved = per_run * franchises.count()
+            if total < reserved:
+                self.add_error(
+                    "max_total_cost_usd",
+                    f"Dla tego wyboru ustaw co najmniej ${reserved:.2f}.",
+                )
+        return cleaned

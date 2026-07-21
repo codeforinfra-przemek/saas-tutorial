@@ -58,6 +58,17 @@ SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
+DEFAULT_EXCEPTION_REPORTER_FILTER = (
+    "saashome.exception_filters.CredentialSafeExceptionReporterFilter"
+)
+RESEARCH_TRANSIENT_STAGE_RETRIES = min(
+    max(int(os.environ.get("RESEARCH_TRANSIENT_STAGE_RETRIES", "2")), 0),
+    3,
+)
+RESEARCH_TRANSIENT_RETRY_DELAY_SECONDS = min(
+    max(float(os.environ.get("RESEARCH_TRANSIENT_RETRY_DELAY_SECONDS", "2")), 0),
+    30,
+)
 
 ALLOWED_HOSTS = [
     "localhost",

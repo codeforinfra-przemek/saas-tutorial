@@ -186,62 +186,6 @@ def _get_or_create_franchise(
     ), True
 
 
-def _apply_safe_profile_values(franchise: Franchise, research_import) -> None:
-    values_by_field: dict[str, list[FranchiseResearchValue]] = {}
-    for value in research_import.values.select_related("field"):
-        if value.field.status != "normalized":
-            continue
-        values_by_field.setdefault(value.field.target_field, []).append(value)
-
-    updates: set[str] = set()
-
-    def one(field_name: str):
-        values = values_by_field.get(field_name, [])
-        return values[0] if len(values) == 1 else None
-
-    brand = one("brand.name")
-    if brand and brand.canonical_text.strip():
-        franchise.name = brand.canonical_text.strip()[:180]
-        updates.add("name")
-    website = one("websites.official") or one("websites.franchise_offer")
-    if website and website.canonical_text.startswith(("http://", "https://")):
-        franchise.website_url = website.canonical_text[:200]
-        updates.add("website_url")
-    mapping = {
-        "investment.total_low": "min_investment",
-        "investment.total_high": "max_investment",
-        "fees.initial": "initial_fee",
-    }
-    for target_field, model_field in mapping.items():
-        value = one(target_field)
-        if value and value.number_min_text:
-            setattr(franchise, model_field, value.number_min_text)
-            updates.add(model_field)
-    for target_field, model_field in (
-        ("fees.royalty", "royalty_fee_text"),
-        ("fees.marketing", "marketing_fee_text"),
-    ):
-        value = one(target_field)
-        if value:
-            setattr(franchise, model_field, value.canonical_text[:160])
-            updates.add(model_field)
-    financing = one("financing.available")
-    if financing and financing.boolean_value is not None:
-        franchise.financing_available = financing.boolean_value
-        updates.add("financing_available")
-
-    if research_import.decision == FranchiseResearchImport.DECISION_APPROVED:
-        franchise.data_status = Franchise.DATA_STATUS_RESEARCH_REVIEWED
-        franchise.is_verified = bool(
-            research_import.checker_passed and research_import.scope_complete
-        )
-    else:
-        franchise.data_status = Franchise.DATA_STATUS_RESEARCH_WITH_GAPS
-        franchise.is_verified = False
-    updates.update({"data_status", "is_verified"})
-    franchise.save(update_fields=sorted(updates | {"updated_at"}))
-
-
 @transaction.atomic
 def import_franchise_research(
     review_path: str | Path,
@@ -286,6 +230,11 @@ def import_franchise_research(
         check_id=normalized.check_id,
         target_country=review.target_country,
         depth=review.depth.value,
+        profile_id=(
+            getattr(getattr(lineage["plan"], "profile_snapshot", None), "profile_id", "")
+            or getattr(lineage["plan"].planner_input, "profile_id", "")
+            or ""
+        ),
         decision=review.decision.value,
         reviewer=review.reviewer or "",
         reviewer_notes=review.reviewer_notes,
@@ -489,5 +438,7 @@ def import_franchise_research(
                 claim=claim_by_id[claim_id],
             )
 
-    _apply_safe_profile_values(franchise, research_import)
+    # The base import is an internal, lossless evidence store. Public directory
+    # fields are projected later by the Workbench Finalizer and only from
+    # accepted/accepted_edited field decisions.
     return research_import, True

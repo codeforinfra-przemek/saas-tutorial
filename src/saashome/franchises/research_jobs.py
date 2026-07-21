@@ -36,6 +36,7 @@ from .models import (  # noqa: E402
     FranchiseResearchWorkspace,
 )
 from .research_workbench import create_research_workspace  # noqa: E402
+from .research_finalizer import finalize_research_workspace  # noqa: E402
 
 
 class ResearchJobError(ValueError):
@@ -100,10 +101,21 @@ def queue_research_job(
         ]
     ).exists():
         raise ResearchJobError("This Workbench already has an active job.")
-    input_path, input_sha256 = _current_check(workspace)
-    checker, _ = load_checker_results(input_path)
+    if kind == FranchiseResearchJob.KIND_FINALIZE:
+        input_path = Path(workspace.normalized_reference).resolve()
+        input_sha256 = workspace.normalized_sha256
+        if workspace.status not in {
+            FranchiseResearchWorkspace.STATUS_APPROVED,
+            FranchiseResearchWorkspace.STATUS_APPROVED_WITH_GAPS,
+        }:
+            raise ResearchJobError("First approve the Workbench before finalization.")
+        checker = None
+    else:
+        input_path, input_sha256 = _current_check(workspace)
+        checker, _ = load_checker_results(input_path)
     if (
         kind == FranchiseResearchJob.KIND_NORMALIZE
+        and checker is not None
         and not checker.passed
         and not configuration.get("normalize_incomplete")
     ):
@@ -480,11 +492,60 @@ def process_research_job(
     if job.status != FranchiseResearchJob.STATUS_RUNNING:
         raise ResearchJobError("The job must be claimed before execution.")
     try:
+        if job.kind == FranchiseResearchJob.KIND_FINALIZE:
+            job.current_stage = "Finalizer / walidacja i zamrożenie wersji"
+            job.progress_percent = 20
+            job.heartbeat_at = timezone.now()
+            job.save(
+                update_fields=["current_stage", "progress_percent", "heartbeat_at"]
+            )
+            finalization, created = finalize_research_workspace(
+                job.workspace,
+                actor=job.requested_by,
+                active_job_id=job.job_id,
+            )
+            job.status = FranchiseResearchJob.STATUS_SUCCEEDED
+            job.current_stage = "Opublikowano wersję"
+            job.progress_percent = 100
+            job.result_summary = {
+                "finalization_id": str(finalization.finalization_id),
+                "release_number": finalization.release_number,
+                "research_import_id": finalization.research_import_id,
+                "franchise_slug": finalization.research_import.franchise.slug,
+                "artifact_sha256": finalization.artifact_sha256,
+                "created": created,
+            }
+            job.cost_summary = {
+                "api_attempts_recorded": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "total_tokens": 0,
+                "tool_calls": 0,
+                "tool_cost_usd": "0",
+                "estimated_cost_usd": "0",
+            }
+            job.completed_at = timezone.now()
+            job.heartbeat_at = job.completed_at
+            job.save()
+            FranchiseResearchEvent.objects.create(
+                workspace=job.workspace,
+                event_type="job_succeeded",
+                message=f"Opublikowano wersję {finalization.release_number} researchu.",
+                metadata={
+                    "job_id": str(job.job_id),
+                    "finalization_id": str(finalization.finalization_id),
+                    "release_number": finalization.release_number,
+                },
+                actor=job.requested_by,
+            )
+            return job
         command = build_research_command(job)
         job.current_stage = {
             FranchiseResearchJob.KIND_LOOP: "Resolver / przygotowanie następnego kroku",
             FranchiseResearchJob.KIND_CHECK: "Checker / kontrola jakości",
             FranchiseResearchJob.KIND_NORMALIZE: "Normalizer / przygotowanie draftu",
+            FranchiseResearchJob.KIND_FINALIZE: "Finalizer / publikacja",
         }[job.kind]
         job.progress_percent = 10
         job.save(update_fields=["current_stage", "progress_percent"])

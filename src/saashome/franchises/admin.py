@@ -8,6 +8,7 @@ from .models import (
     FranchiseResearchArtifact,
     FranchiseResearchCitation,
     FranchiseResearchClaim,
+    FranchiseResearchCampaign,
     FranchiseResearchField,
     FranchiseResearchImport,
     FranchiseResearchDocument,
@@ -16,6 +17,8 @@ from .models import (
     FranchiseResearchEditorialDecision,
     FranchiseResearchEditorialDocument,
     FranchiseResearchJob,
+    FranchiseResearchLaunch,
+    FranchiseResearchPublishedField,
     FranchiseResearchReviewField,
     FranchiseResearchSource,
     FranchiseResearchTask,
@@ -215,6 +218,7 @@ class FranchiseUpdateRequestAdmin(admin.ModelAdmin):
 class FranchiseResearchImportAdmin(admin.ModelAdmin):
     list_display = (
         "franchise",
+        "profile_id",
         "decision",
         "quality_score",
         "scope_complete",
@@ -273,10 +277,46 @@ class FranchiseResearchJobAdmin(admin.ModelAdmin):
     readonly_fields = tuple(field.name for field in FranchiseResearchJob._meta.fields)
 
 
+@admin.register(FranchiseResearchLaunch)
+class FranchiseResearchLaunchAdmin(admin.ModelAdmin):
+    list_display = (
+        "franchise",
+        "profile_id",
+        "status",
+        "current_stage",
+        "progress_percent",
+        "queued_at",
+    )
+    list_filter = ("profile_id", "status")
+    search_fields = ("franchise__name", "launch_id", "error_code")
+    readonly_fields = tuple(
+        field.name for field in FranchiseResearchLaunch._meta.fields
+    )
+
+
+@admin.register(FranchiseResearchCampaign)
+class FranchiseResearchCampaignAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "profile_id",
+        "status",
+        "reserved_cost_usd",
+        "max_total_cost_usd",
+        "max_concurrent_runs",
+        "queued_at",
+    )
+    list_filter = ("profile_id", "status", "target_country")
+    search_fields = ("name", "campaign_id", "description")
+    readonly_fields = tuple(
+        field.name for field in FranchiseResearchCampaign._meta.fields
+    )
+
+
 @admin.register(FranchiseResearchFinalization)
 class FranchiseResearchFinalizationAdmin(admin.ModelAdmin):
     list_display = (
         "workspace",
+        "release_number",
         "decision",
         "reviewer_name",
         "field_count",
@@ -304,6 +344,29 @@ class FranchiseResearchEditorialDecisionAdmin(admin.ModelAdmin):
     readonly_fields = tuple(
         field.name for field in FranchiseResearchEditorialDecision._meta.fields
     ) + ("supporting_documents",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(FranchiseResearchPublishedField)
+class FranchiseResearchPublishedFieldAdmin(admin.ModelAdmin):
+    list_display = (
+        "franchise",
+        "target_field",
+        "franchise_attribute",
+        "status",
+        "is_current",
+        "published_at",
+    )
+    list_filter = ("status", "is_current", "value_origin")
+    search_fields = ("franchise__name", "target_field", "franchise_attribute")
+    readonly_fields = tuple(
+        field.name for field in FranchiseResearchPublishedField._meta.fields
+    )
 
     def has_add_permission(self, request):
         return False

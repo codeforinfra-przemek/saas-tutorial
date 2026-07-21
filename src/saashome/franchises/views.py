@@ -5,6 +5,7 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import Count, Prefetch, Q
 from django.forms.utils import ErrorList
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.text import slugify
@@ -34,11 +35,13 @@ from .models import (
     FranchiseResearchClaimCitation,
     FranchiseResearchEditorialDecision,
     FranchiseResearchField,
+    FranchiseResearchReviewField,
     FranchiseResearchTask,
     FranchiseResearchValue,
     FranchiseResearchValueClaim,
 )
 from .presentation import category_visual, decorate_categories
+from .research_fields import field_metadata, profile_info
 
 def management_context(**kwargs):
     context = {
@@ -313,6 +316,11 @@ def franchise_detail_view(request, slug, data_only=False):
 
     plan = get_franchise_plan(franchise)
     latest_research = franchise.research_imports.filter(is_current=True).first()
+    latest_finalization = (
+        latest_research.workbench_finalizations.order_by("-finalized_at").first()
+        if latest_research
+        else None
+    )
     approved_assets = franchise.assets.filter(status=FranchiseAsset.STATUS_APPROVED)
     similar_franchises = apply_promotion_flags(
         Franchise.objects.filter(is_active=True, category=franchise.category)
@@ -348,6 +356,20 @@ def franchise_detail_view(request, slug, data_only=False):
         "is_saved": is_franchise_saved_by_user(request.user, franchise),
         "similar_franchises": similar_franchises,
         "latest_research": latest_research,
+        "latest_finalization": latest_finalization,
+        "published_research_fields": (
+            latest_finalization.published_fields.filter(
+                status="projected",
+                is_current=True,
+            ).count()
+            if latest_finalization
+            else 0
+        ),
+        "research_profile": (
+            profile_info(latest_research.profile_id, latest_research.depth)
+            if latest_research
+            else None
+        ),
         "breadcrumbs": breadcrumbs,
         "json_ld": json.dumps(
             [get_franchise_schema(franchise, request), get_breadcrumb_schema(breadcrumbs)], ensure_ascii=False
@@ -393,6 +415,8 @@ def franchise_research_detail_view(request, slug):
     finalization = research_import.workbench_finalizations.order_by(
         "-finalized_at"
     ).first()
+    if finalization is None:
+        raise Http404("Research nie został jeszcze zatwierdzony do publikacji.")
     editorial_decisions = []
     editorial_unmapped = []
     if finalization is not None:
@@ -410,9 +434,23 @@ def franchise_research_detail_view(request, slug):
                 key = (task.task_id, field.target_field)
                 field.editorial_decision = editorial_by_key.get(key)
                 field.presentation_values = list(field.values.all())
+                field.presentation_is_unreviewed = False
+                field.catalog_metadata = field_metadata(
+                    field.target_field,
+                    task_title=task.title,
+                )
                 if field.editorial_decision is not None:
                     mapped_keys.add(key)
                     if (
+                        field.editorial_decision.decision
+                        == FranchiseResearchReviewField.DECISION_PENDING
+                    ):
+                        # Pending AI proposals belong only in the staff
+                        # Workbench. Public reports expose the field and its
+                        # review status, never the proposed value or evidence.
+                        field.presentation_is_unreviewed = True
+                        field.presentation_values = []
+                    elif (
                         field.editorial_decision.value_origin != "ai"
                         or not field.editorial_decision.is_public
                     ):
@@ -422,11 +460,21 @@ def franchise_research_detail_view(request, slug):
             for item in editorial_decisions
             if (item.task_id, item.target_field) not in mapped_keys
         ]
+        for item in editorial_unmapped:
+            item.catalog_metadata = field_metadata(
+                item.target_field,
+                task_title=item.task_title,
+            )
     else:
         for task in research_import.tasks.all():
             for field in task.fields.all():
                 field.editorial_decision = None
                 field.presentation_values = list(field.values.all())
+                field.presentation_is_unreviewed = False
+                field.catalog_metadata = field_metadata(
+                    field.target_field,
+                    task_title=task.title,
+                )
     normalization_artifact = research_import.artifacts.filter(
         artifact_type="normalization"
     ).first()
@@ -440,6 +488,10 @@ def franchise_research_detail_view(request, slug):
         "research_tasks": research_import.tasks.all(),
         "research_sources": research_import.sources.all(),
         "finalization": finalization,
+        "research_profile": profile_info(
+            research_import.profile_id,
+            research_import.depth,
+        ),
         "editorial_unmapped": editorial_unmapped,
         "research_warnings": normalized_payload.get("warnings", []),
         "critical_missing_fields": normalized_payload.get(

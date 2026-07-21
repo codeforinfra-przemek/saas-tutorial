@@ -12,19 +12,19 @@
             <div class="mt-2 flex flex-wrap items-center justify-between gap-4">
                 <div>
                     <h1 class="text-3xl font-black tracking-tight sm:text-4xl">{{ franchise.name }}</h1>
-                    <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Wszystkie zdobyte wartości, braki, statusy Checkera, cytaty i źródła z aktualnie zatwierdzonego importu.</p>
+                    <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Zatwierdzone wartości, udokumentowane braki i publiczne źródła z aktualnej wersji redakcyjnej. Propozycje oczekujące na Human Review pozostają wewnętrzne.</p>
                 </div>
                 <a href="{{ franchise.get_absolute_url }}" class="rounded-lg border border-slate-600 px-4 py-2 text-sm font-extrabold text-white hover:border-white">← Profil franczyzy</a>
             </div>
         </div>
 
         <div class="grid gap-px bg-slate-200 sm:grid-cols-2 lg:grid-cols-6">
-            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Decyzja</p><p class="mt-1 font-black {% if research_import.decision == 'approved' %}text-emerald-700{% else %}text-amber-700{% endif %}">{{ research_import.get_decision_display }}</p></div>
+            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Profil badania</p><p class="mt-1 font-black text-brand-800">{{ research_profile.title }}</p></div>
             <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Jakość</p><p class="mt-1 text-2xl font-black">{{ research_import.quality_score }}/{{ research_import.quality_threshold }}</p></div>
             <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Zadania</p><p class="mt-1 text-2xl font-black">{{ research_import.evaluated_tasks }}/{{ research_import.planned_tasks }}</p></div>
             <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Pola ocenione</p><p class="mt-1 text-2xl font-black">{{ research_import.evaluated_fields }}/{{ research_import.planned_fields }}</p></div>
             <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Wartości</p><p class="mt-1 text-2xl font-black">{{ research_import.normalized_values_count }}</p></div>
-            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Źródła</p><p class="mt-1 text-2xl font-black">{{ research_import.source_count }}</p></div>
+            <div class="bg-white p-5"><p class="text-xs font-bold uppercase text-slate-400">Wersja / źródła</p><p class="mt-1 text-2xl font-black">{% if finalization %}v{{ finalization.release_number }} · {% endif %}{{ research_import.source_count }}</p></div>
         </div>
     </header>
 
@@ -40,7 +40,7 @@
             <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                 <div><dt class="font-bold text-slate-500">Reviewer</dt><dd class="mt-1 text-slate-950">{{ research_import.reviewer }}</dd></div>
                 <div><dt class="font-bold text-slate-500">Data importu</dt><dd class="mt-1 text-slate-950">{{ research_import.imported_at|date:"Y-m-d H:i" }}</dd></div>
-                <div><dt class="font-bold text-slate-500">Kraj / głębokość</dt><dd class="mt-1 text-slate-950">{{ research_import.target_country }} / {{ research_import.depth }}</dd></div>
+                <div><dt class="font-bold text-slate-500">Kraj / profil</dt><dd class="mt-1 text-slate-950">{{ research_import.target_country }} / {{ research_profile.id }}</dd></div>
                 <div><dt class="font-bold text-slate-500">Pokrycie pól</dt><dd class="mt-1 text-slate-950">{{ research_import.field_coverage_percent }}%</dd></div>
                 {% if finalization %}<div><dt class="font-bold text-slate-500">Finalizacja redakcyjna</dt><dd class="mt-1 text-slate-950">{{ finalization.finalized_at|date:"Y-m-d H:i" }} · {{ finalization.reviewer_name }}</dd></div><div><dt class="font-bold text-slate-500">Decyzje</dt><dd class="mt-1 text-slate-950">{{ finalization.accepted_count }} zaakceptowanych · {{ finalization.edited_count }} ręcznych · {{ finalization.gap_count }} braków</dd></div>{% endif %}
             </dl>
@@ -55,6 +55,11 @@
                 {% if finalization %}<div><dt class="font-bold">Workbench finalization</dt><dd class="mt-1 break-all font-mono">{{ finalization.finalization_id }}</dd></div><div><dt class="font-bold">Skrót artefaktu</dt><dd class="mt-1 break-all font-mono">{{ finalization.artifact_sha256 }}</dd></div>{% endif %}
             </dl>
         </div>
+    </section>
+
+    <section class="mt-6 rounded-xl border border-slate-200 bg-white p-5">
+        <h2 class="text-lg font-black text-slate-950">Jak czytać pochodzenie danych</h2>
+        <div class="mt-4 grid gap-3 text-sm sm:grid-cols-3"><div class="rounded-lg border border-violet-200 bg-violet-50 p-3"><strong class="text-violet-900">Znalezione przez pipeline</strong><p class="mt-1 text-xs leading-5 text-violet-800">Propozycja pozyskana automatycznie; sama nie jest akceptacją redakcji.</p></div><div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3"><strong class="text-emerald-900">Zaakceptowane przez człowieka</strong><p class="mt-1 text-xs leading-5 text-emerald-800">Researcher sprawdził wartość i zatwierdził ją lub ręcznie poprawił.</p></div><div class="rounded-lg border border-blue-200 bg-blue-50 p-3"><strong class="text-blue-900">Potwierdzone dokumentem</strong><p class="mt-1 text-xs leading-5 text-blue-800">Decyzja ma przypisany dokument wewnętrzny; plik pozostaje niepubliczny.</p></div></div>
     </section>
 
     {% if research_warnings or critical_missing_fields or unevaluated_critical_fields %}
@@ -86,13 +91,17 @@
                     {% for field in task.fields.all %}
                         <article class="rounded-xl border {% if field.status == 'missing' or field.status == 'unevaluated' or field.status == 'conflicting' %}border-red-200 bg-red-50/30{% else %}border-slate-200 bg-slate-50/50{% endif %} p-4">
                             <div class="flex flex-wrap items-center gap-2">
-                                <h3 class="mr-auto break-all font-mono text-sm font-black text-slate-950">{{ field.target_field }}</h3>
+                                <h3 class="mr-auto text-sm font-black text-slate-950">{{ field.catalog_metadata.label }}</h3>
                                 <span class="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-700">{{ field.status }}</span>
                                 <span class="rounded-full bg-white px-2.5 py-1 text-xs text-slate-500">checker: {{ field.checker_status }}</span>
                             </div>
-                            {% if field.editorial_decision %}<div class="mt-3 rounded-lg border {% if field.editorial_decision.is_public %}border-emerald-200 bg-emerald-50{% elif field.editorial_decision.decision == 'rejected' %}border-red-200 bg-red-50{% else %}border-amber-200 bg-amber-50{% endif %} p-3"><div class="flex flex-wrap gap-2"><strong class="text-xs uppercase tracking-wide">Decyzja redakcyjna: {{ field.editorial_decision.get_decision_display }}</strong>{% if field.editorial_decision.value_origin == 'human' %}<span class="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">wartość człowieka</span>{% elif field.editorial_decision.value_origin == 'ai' %}<span class="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800">AI + akceptacja człowieka</span>{% endif %}</div>{% if field.editorial_decision.value_origin == 'human' %}<p class="mt-2 whitespace-pre-line text-base font-black text-blue-950">{{ field.editorial_decision.effective_value }}</p>{% elif not field.editorial_decision.is_public %}<p class="mt-2 text-sm text-slate-700">Propozycja nie jest wartością opublikowaną.</p>{% endif %}{% if field.editorial_decision.reviewer_note %}<p class="mt-2 text-xs text-slate-700">{{ field.editorial_decision.reviewer_note }}</p>{% endif %}{% with document_count=field.editorial_decision.supporting_documents.count %}{% if document_count %}<p class="mt-2 text-xs font-bold text-slate-600">Potwierdzono {{ document_count }} dokumentem/dokumentami wewnętrznymi. Pliki nie są publiczne.</p>{% endif %}{% endwith %}</div>{% endif %}
+                            <p class="mt-2 text-xs leading-5 text-slate-600">{{ field.catalog_metadata.description }}</p>
+                            {% if field.catalog_metadata.appears_on_profile %}<a href="{{ franchise.get_absolute_url }}#{{ field.catalog_metadata.profile_anchor }}" class="mt-1 inline-flex text-xs font-extrabold text-brand-700 hover:underline">Gdzie występuje na profilu: {{ field.catalog_metadata.profile_label }} →</a>{% else %}<p class="mt-1 text-xs font-bold text-slate-400">To pole występuje wyłącznie w pełnym raporcie researchu.</p>{% endif %}
+                            <details class="mt-1 text-[11px] text-slate-400"><summary class="cursor-pointer">Identyfikator techniczny</summary><code>{{ field.target_field }}</code></details>
+                            {% if field.editorial_decision %}<div class="mt-3 rounded-lg border {% if field.editorial_decision.is_public %}border-emerald-200 bg-emerald-50{% elif field.editorial_decision.decision == 'rejected' %}border-red-200 bg-red-50{% else %}border-amber-200 bg-amber-50{% endif %} p-3"><div class="flex flex-wrap gap-2"><strong class="text-xs uppercase tracking-wide">Decyzja redakcyjna: {{ field.editorial_decision.get_decision_display }}</strong>{% if field.editorial_decision.value_origin == 'human' %}<span class="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">wartość człowieka</span>{% elif field.editorial_decision.value_origin == 'ai' %}<span class="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800">AI + akceptacja człowieka</span>{% endif %}</div>{% if field.editorial_decision.value_origin == 'human' %}<p class="mt-2 whitespace-pre-line text-base font-black text-blue-950">{{ field.editorial_decision.effective_value }}</p>{% elif not field.editorial_decision.is_public %}<p class="mt-2 text-sm text-slate-700">Pole nie ma jeszcze wartości zaakceptowanej redakcyjnie.</p>{% endif %}{% if field.editorial_decision.reviewer_note %}<p class="mt-2 text-xs text-slate-700">{{ field.editorial_decision.reviewer_note }}</p>{% endif %}{% with document_count=field.editorial_decision.supporting_documents.count %}{% if document_count %}<p class="mt-2 text-xs font-bold text-slate-600">Potwierdzono {{ document_count }} dokumentem/dokumentami wewnętrznymi. Pliki nie są publiczne.</p>{% endif %}{% endwith %}</div>{% endif %}
                             {% if field.notes %}<ul class="mt-3 list-disc pl-5 text-xs leading-5 text-slate-600">{% for note in field.notes %}<li>{{ note }}</li>{% endfor %}</ul>{% endif %}
                             <div class="mt-3 space-y-3">
+                            {% if field.presentation_is_unreviewed %}<p class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">Wartość pozostaje w wewnętrznym Workbenchu i oczekuje na decyzję researchera. Nie jest publicznie ujawniana.</p>{% endif %}
                             {% for value in field.presentation_values %}
                                 <div class="rounded-lg border border-slate-200 bg-white p-4">
                                     <div class="flex flex-wrap items-center gap-2">
@@ -132,7 +141,7 @@
         </div>
     </section>
 
-    {% if editorial_unmapped %}<section class="mt-8 rounded-xl border border-blue-200 bg-blue-50 p-5"><h2 class="text-xl font-black text-blue-950">Dodatkowe pola redakcyjne</h2><p class="mt-2 text-sm text-blue-900">Pola z rozszerzonego profilu, które nie występowały w starszym schemacie importu.</p><div class="mt-4 space-y-3">{% for item in editorial_unmapped %}<article class="rounded-lg bg-white p-4"><div class="flex flex-wrap items-center gap-2"><code class="mr-auto text-xs font-black">{{ item.target_field }}</code><span class="text-xs font-bold">{{ item.get_decision_display }}</span></div>{% if item.is_public %}<p class="mt-2 whitespace-pre-line font-bold">{{ item.effective_value }}</p>{% else %}<p class="mt-2 text-sm text-slate-600">Brak opublikowanej wartości.</p>{% endif %}{% if item.reviewer_note %}<p class="mt-2 text-xs text-slate-600">{{ item.reviewer_note }}</p>{% endif %}</article>{% endfor %}</div></section>{% endif %}
+    {% if editorial_unmapped %}<section class="mt-8 rounded-xl border border-blue-200 bg-blue-50 p-5"><h2 class="text-xl font-black text-blue-950">Dodatkowe pola redakcyjne</h2><p class="mt-2 text-sm text-blue-900">Pola z rozszerzonego profilu, które nie występowały w starszym schemacie importu.</p><div class="mt-4 space-y-3">{% for item in editorial_unmapped %}<article class="rounded-lg bg-white p-4"><div class="flex flex-wrap items-center gap-2"><strong class="mr-auto text-sm">{{ item.catalog_metadata.label }}</strong><span class="text-xs font-bold">{{ item.get_decision_display }}</span></div><p class="mt-1 text-xs text-slate-600">{{ item.catalog_metadata.description }}</p>{% if item.catalog_metadata.appears_on_profile %}<a href="{{ franchise.get_absolute_url }}#{{ item.catalog_metadata.profile_anchor }}" class="mt-1 inline-flex text-xs font-bold text-brand-700">{{ item.catalog_metadata.profile_label }} →</a>{% endif %}{% if item.is_public %}<p class="mt-2 whitespace-pre-line font-bold">{{ item.effective_value }}</p>{% else %}<p class="mt-2 text-sm text-slate-600">Brak opublikowanej wartości.</p>{% endif %}{% if item.reviewer_note %}<p class="mt-2 text-xs text-slate-600">{{ item.reviewer_note }}</p>{% endif %}</article>{% endfor %}</div></section>{% endif %}
 
     <section class="mt-8 rounded-xl border border-slate-200 bg-white p-5">
         <h2 class="text-xl font-black text-slate-950">Rejestr źródeł</h2>
