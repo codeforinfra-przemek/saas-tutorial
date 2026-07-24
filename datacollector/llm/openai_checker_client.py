@@ -8,6 +8,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from ..benchmark import BenchmarkFieldPolicy, field_policy_map
 from ..config import OpenAISettings
 from ..schemas import (
     CheckerDraft,
@@ -25,8 +26,11 @@ from .openai_usage import build_agent_usage
 from .protocol import CheckerGeneration, CheckerProviderError
 
 
-def _task_payload(task: ResearchTask) -> dict[str, Any]:
-    return {
+def _task_payload(
+    task: ResearchTask,
+    policies: dict[str, BenchmarkFieldPolicy] | None = None,
+) -> dict[str, Any]:
+    payload = {
         "task_id": task.task_id,
         "catalog_question_id": task.catalog_question_id,
         "title": task.title,
@@ -47,6 +51,13 @@ def _task_payload(task: ResearchTask) -> dict[str, Any]:
         "max_age_days": task.max_age_days,
         "sensitivity": task.sensitivity.value,
     }
+    policies = policies or {}
+    payload["field_policies"] = [
+        policies[target_field].model_dump(mode="json")
+        for target_field in task.target_fields
+        if target_field in policies
+    ]
+    return payload
 
 
 def _source_payload(source: SearchSource, document: Any | None) -> dict[str, Any]:
@@ -213,6 +224,12 @@ class OpenAICheckerClient:
             document.source_id: document
             for document in getattr(extraction_results, "documents", [])
         }
+        profile_id = (
+            plan.profile_snapshot.profile_id
+            if plan.profile_snapshot is not None
+            else None
+        )
+        policies = field_policy_map(profile_id)
         payload = {
             "checker_context": {
                 "current_date": datetime.now(timezone.utc).date().isoformat(),
@@ -223,8 +240,14 @@ class OpenAICheckerClient:
                 "search_id": search_results.search_id,
                 "extraction_id": extraction_results.extraction_id,
                 "extraction_created_at": extraction_results.created_at.isoformat(),
+                "profile_id": profile_id,
+                "field_policy_precedence": (
+                    "field_policies override broad task freshness/source defaults"
+                    if policies
+                    else "task policy only"
+                ),
             },
-            "tasks": [_task_payload(task) for task in tasks],
+            "tasks": [_task_payload(task, policies) for task in tasks],
             "sources": [
                 _source_payload(source, document_by_source.get(source.source_id))
                 for source in sources

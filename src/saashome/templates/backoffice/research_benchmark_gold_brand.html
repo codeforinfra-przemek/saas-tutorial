@@ -1,0 +1,29 @@
+{% extends "backoffice/base_internal.html" %}
+
+{% block internal_content %}
+<header>
+  <a href="{% url 'backoffice:research_benchmark_gold' %}" class="text-sm font-bold text-brand-700 hover:underline">← Zaślepiony Gold Set</a>
+  <p class="mt-4 text-xs font-extrabold uppercase tracking-widest text-amber-700">{{ spec.profile_id }} · tylko dane referencyjne</p>
+  <h2 class="mt-2 text-3xl font-black tracking-tight">{{ definition.name }}</h2>
+  <p class="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{{ definition.rationale }}</p>
+  <div class="mt-5 flex flex-wrap items-center gap-3">
+    <a href="{% url 'backoffice:research_benchmark_gold_promote' definition.slug %}" class="rounded-xl bg-brand-700 px-5 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-brand-800">Przenieś Gold do Workbencha</a>
+    <span class="max-w-2xl text-xs leading-5 text-slate-500">Tworzy wyłącznie oczekujące propozycje z pełną proweniencją. Nie zatwierdza i nie publikuje danych.</span>
+  </div>
+</header>
+
+<section class="mt-7 space-y-4">
+{% for row in field_rows %}
+<details id="field-{{ forloop.counter }}" class="group rounded-2xl border border-slate-200 bg-white shadow-sm">
+  <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4"><div><span class="text-xs font-extrabold uppercase tracking-wider text-slate-500">{{ row.policy.target_field }}</span><h3 class="mt-1 font-black">{{ row.policy.label }}</h3></div><div class="flex items-center gap-2"><span class="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-800">{{ row.gold.status }}</span><span class="text-lg text-slate-400 group-open:rotate-180">⌄</span></div></summary>
+  <form method="post" action="{% url 'backoffice:research_benchmark_field_update' definition.slug 'gold' %}" class="space-y-3 border-t border-slate-200 bg-amber-50 p-5">{% csrf_token %}<input type="hidden" name="return_to" value="gold"><input type="hidden" name="target_field" value="{{ row.policy.target_field }}">
+    <div class="grid gap-3 lg:grid-cols-3"><label class="text-xs font-bold">Status<select name="status" class="mt-1 w-full rounded-lg border-amber-200"><option value="pending" {% if row.gold.status == 'pending' %}selected{% endif %}>Do zbadania</option><option value="found" {% if row.gold.status == 'found' %}selected{% endif %}>Znaleziono</option><option value="not_public" {% if row.gold.status == 'not_public' %}selected{% endif %}>Brak publiczny</option><option value="not_applicable" {% if row.gold.status == 'not_applicable' %}selected{% endif %}>Nie dotyczy</option></select></label><label class="text-xs font-bold lg:col-span-2">Wartość<textarea name="canonical_value" rows="2" class="mt-1 w-full rounded-lg border-amber-200">{{ row.gold.canonical_value }}</textarea></label></div>
+    <div class="grid gap-3 lg:grid-cols-2"><label class="text-xs font-bold">Bezpośredni URL źródła<input name="source_url" type="url" value="{{ row.gold.source_url }}" class="mt-1 w-full rounded-lg border-amber-200"></label><label class="text-xs font-bold">Typ źródła<input name="source_type" value="{{ row.gold.source_type }}" list="gold-source-types" class="mt-1 w-full rounded-lg border-amber-200"></label></div>
+    <div class="grid gap-3 lg:grid-cols-3"><label class="text-xs font-bold">Pobrano<input name="observed_at" type="date" value="{{ row.gold.observed_at|date:'Y-m-d' }}" class="mt-1 w-full rounded-lg border-amber-200"></label><label class="text-xs font-bold">Ważne na dzień<input name="valid_as_of" type="date" value="{{ row.gold.valid_as_of|date:'Y-m-d' }}" class="mt-1 w-full rounded-lg border-amber-200"></label><label class="text-xs font-bold">Notatka<textarea name="notes" rows="2" class="mt-1 w-full rounded-lg border-amber-200">{{ row.gold.notes }}</textarea></label></div>
+    <div class="flex items-center justify-between gap-3"><p class="text-[11px] text-amber-900">Akceptowane źródła: {{ row.policy.accepted_source_types|join:", " }} · świeżość: {{ row.policy.freshness_mode }}</p><button class="rounded-lg bg-amber-700 px-4 py-2 text-xs font-extrabold text-white">Zapisz Gold</button></div>
+  </form>
+</details>
+{% endfor %}
+</section>
+<datalist id="gold-source-types"><option value="official"><option value="government"><option value="registry"><option value="legal_document"><option value="audited_financial"><option value="reputable_media"><option value="industry"><option value="marketplace"><option value="unknown"></datalist>
+{% endblock %}

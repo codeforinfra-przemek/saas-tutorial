@@ -10,6 +10,6 @@
     </div>
     <p class="mt-3 text-sm leading-6 text-slate-600">{{ franchise.short_description }}</p>
     <p class="mt-3 text-xs font-bold text-slate-500">
-        {% if franchise.min_investment %}od {{ franchise.min_investment|floatformat:0 }} zł{% else %}inwestycja: b/d{% endif %}
+        {% if franchise.has_public_financial_data and franchise.min_investment %}od {{ franchise.min_investment|floatformat:0 }} zł{% else %}inwestycja: b/d{% endif %}
     </p>
 </a>

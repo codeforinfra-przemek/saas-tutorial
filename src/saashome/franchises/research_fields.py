@@ -40,11 +40,66 @@ FIELD_LABELS = {
     "fees.royalty": "Opłata bieżąca (royalty)",
     "fees.marketing": "Opłata marketingowa",
     "financing.available": "Dostępne finansowanie",
+    "brand.category": "Kategoria",
+    "brand.public_summary": "Krótki model oferty",
+    "contact.generic_business_route": "Ogólny kontakt biznesowy",
+    "offer.unit_formats": "Format współpracy",
+    "candidate.capital_requirement": "Kapitał wymagany od kandydata",
+    "candidate.premises_requirements": "Wymagania lokalu",
+    "investment.currency": "Waluta inwestycji",
+    "investment.own_contribution": "Wkład własny",
+    "investment.as_of": "Data aktualności inwestycji",
+    "support.training_program": "Szkolenie startowe",
+    "outlets.current_total": "Placówki w Polsce",
+    "outlets.as_of": "Data i zakres liczby placówek",
 }
+
+# Public L1 is a stable product contract, not merely the subset for which the
+# legacy ``Franchise`` table happens to have a dedicated column.
+L1_PUBLIC_FIELD_ORDER = (
+    "brand.name",
+    "brand.category",
+    "brand.public_summary",
+    "websites.official",
+    "websites.franchise_offer",
+    "contact.generic_business_route",
+    "offer.unit_formats",
+    "candidate.capital_requirement",
+    "candidate.premises_requirements",
+    "fees.joining_fee",
+    "fees.royalty",
+    "fees.marketing",
+    "investment.total_low",
+    "investment.total_high",
+    "investment.currency",
+    "investment.own_contribution",
+    "investment.as_of",
+    "support.training_program",
+    "outlets.current_total",
+    "outlets.as_of",
+)
+
+# Conservative v1 auto-review policy. Numeric, financial, scale and dated
+# commercial claims deliberately remain human-review items.
+L1_AUTO_REVIEW_SAFE_FIELDS = frozenset(
+    {
+        "brand.name",
+        "brand.category",
+        "brand.public_summary",
+        "websites.official",
+        "websites.franchise_offer",
+        "contact.generic_business_route",
+        "offer.unit_formats",
+        "candidate.premises_requirements",
+        "support.training_program",
+    }
+)
+L1_AUTO_REVIEW_POLICY_VERSION = "pl-l1-safe-public-v1"
 
 # dotted field -> (plain-language purpose, profile section, anchor, model field)
 FIELD_PROFILE_MAP = {
     "brand.name": ("Nazwa, pod którą oferta jest prezentowana.", "Nagłówek profilu", "profile-overview", "name"),
+    "brand.public_summary": ("Zwięzły opis publicznego modelu franczyzy.", "Nagłówek profilu", "profile-overview", "short_description"),
     "websites.official": ("Oficjalny serwis marki lub operatora.", "Nagłówek profilu", "profile-overview", "website_url"),
     "websites.franchise_offer": ("Oficjalna strona kierowana do kandydatów na franczyzobiorców.", "Nagłówek profilu", "profile-overview", "website_url"),
     "investment.total_low": ("Najniższy deklarowany łączny koszt uruchomienia placówki.", "Najważniejsze parametry inwestycji", "investor-snapshot", "min_investment"),
@@ -58,6 +113,8 @@ FIELD_PROFILE_MAP = {
     "network.poland_units": ("Liczba działających jednostek w Polsce.", "Skala i ruch sieci", "network-movement", "poland_units"),
     "network.franchised_units": ("Liczba jednostek prowadzonych przez franczyzobiorców.", "Skala i ruch sieci", "network-movement", "franchised_units"),
     "network.company_owned_units": ("Liczba jednostek własnych operatora sieci.", "Skala i ruch sieci", "network-movement", "company_owned_units"),
+    "outlets.current_total": ("Aktualna liczba placówek działających w Polsce.", "Skala i ruch sieci", "network-movement", "poland_units"),
+    "candidate.premises_requirements": ("Publicznie deklarowane wymagania wobec lokalu.", "Model współpracy i umowa", "model-and-agreement", "required_premises"),
     "requirements.liquid_capital": ("Minimalny wymagany kapitał płynny kandydata.", "Najważniejsze parametry inwestycji", "investor-snapshot", "liquid_capital_required"),
     "requirements.net_worth": ("Minimalny wymagany majątek netto kandydata.", "Najważniejsze parametry inwestycji", "investor-snapshot", "net_worth_required"),
     "agreement.initial_term_years": ("Podstawowy okres obowiązywania umowy.", "Model współpracy i umowa", "model-and-agreement", "franchise_term_years"),
@@ -65,6 +122,18 @@ FIELD_PROFILE_MAP = {
     "unit.typical_size_min_sqm": ("Dolna granica typowej powierzchni placówki.", "Model współpracy i umowa", "model-and-agreement", "typical_unit_size_min_sqm"),
     "unit.typical_size_max_sqm": ("Górna granica typowej powierzchni placówki.", "Model współpracy i umowa", "model-and-agreement", "typical_unit_size_max_sqm"),
     "unit.typical_staff_count": ("Typowa liczba osób potrzebnych do prowadzenia placówki.", "Model współpracy i umowa", "model-and-agreement", "typical_staff_count"),
+    # L1 values without a compact legacy column are still first-class public
+    # profile data. The empty model attribute means "audited virtual field".
+    "brand.category": ("Kategoria, w której użytkownik porównuje model.", "Dane L1", "research-l1", ""),
+    "contact.generic_business_route": ("Ogólny, publiczny kanał kontaktu biznesowego.", "Dane L1", "research-l1", ""),
+    "offer.unit_formats": ("Dostępne formaty współpracy i typy jednostek.", "Dane L1", "research-l1", ""),
+    "candidate.capital_requirement": ("Kapitał wymagany od kandydata, odrębny od pełnej inwestycji.", "Dane L1", "research-l1", ""),
+    "investment.currency": ("Waluta podanego zakresu inwestycji.", "Dane L1", "research-l1", ""),
+    "investment.own_contribution": ("Deklarowany wkład własny kandydata.", "Dane L1", "research-l1", ""),
+    "investment.as_of": ("Data aktualności danych inwestycyjnych.", "Dane L1", "research-l1", ""),
+    "support.training_program": ("Publicznie deklarowany program szkolenia startowego.", "Dane L1", "research-l1", ""),
+    "outlets.current_total": ("Aktualna publiczna liczba placówek w Polsce.", "Dane L1", "research-l1", "poland_units"),
+    "outlets.as_of": ("Data i zakres geograficzny liczby placówek.", "Dane L1", "research-l1", ""),
 }
 
 PREFIX_DESCRIPTIONS = {

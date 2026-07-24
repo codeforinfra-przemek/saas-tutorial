@@ -1,0 +1,3522 @@
+{
+  "artifact_type": "pl_l1_ai_assisted_experiment",
+  "version": "1.0.0",
+  "started_at": "2026-07-23T13:54:12.988550+00:00",
+  "model": "gpt-5.6-terra",
+  "methodology": {
+    "gold": "AI-generated independent-of-submissions proxy; not an independent human Gold Set.",
+    "direct": "One Responses API web-search prompt per brand for all 20 PL:L1 fields.",
+    "review": "Separate model call against frozen Gold; elapsed API wall-clock time, not human labor time.",
+    "pipeline": "Existing multi-agent campaign export; only benchmark review is repeated here."
+  },
+  "calls": [
+    {
+      "role": "gold",
+      "brand": "zabka",
+      "elapsed_seconds": 57.6779,
+      "web_actions": 5,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 1,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_04f247fb43528308016a621d062ef481a3ba9c3602e5bcc7b5",
+        "request_id": "req_90222b664dff4c8d89f4329f72683e48",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 50035,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6306,
+          "output_tokens": 4844,
+          "reasoning_tokens": 2632,
+          "total_tokens": 54879
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 2,
+            "action_counts": {
+              "search": 2
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.02",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.10932250",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01970625",
+          "output_cost_usd": "0.07266000",
+          "tool_cost_usd": "0.02000000",
+          "total_estimated_cost_usd": "0.22168875",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "zabka",
+      "elapsed_seconds": 37.7662,
+      "web_actions": 4,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 1,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_014f4ef25d6ad618016a621d3f5d40819c9727b14ee1ce573c",
+        "request_id": "req_08d0581081e144518265ffc9a96fac0b",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 38372,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6298,
+          "output_tokens": 3582,
+          "reasoning_tokens": 1030,
+          "total_tokens": 41954
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 1,
+            "action_counts": {
+              "search": 1
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.01",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.08018500",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01968125",
+          "output_cost_usd": "0.05373000",
+          "tool_cost_usd": "0.01000000",
+          "total_estimated_cost_usd": "0.16359625",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "zabka",
+      "elapsed_seconds": 30.2961,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 1,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_08f9be8f637c5b89016a621d6523dc81a2925942fc7de740b3",
+        "request_id": "req_8ee5c178afc848898604f66133f21e35",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 10346,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 10343,
+          "output_tokens": 3140,
+          "reasoning_tokens": 887,
+          "total_tokens": 13486
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.03232188",
+          "output_cost_usd": "0.04710000",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.07942938",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    },
+    {
+      "role": "gold",
+      "brand": "mcdonalds",
+      "elapsed_seconds": 42.2409,
+      "web_actions": 5,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 2,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0d0f34f1c20368a8016a621d836c5881a0b75ec81b159dfefe",
+        "request_id": "req_9735eb2c46264dd09eea41cc9f4836c2",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 43397,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6307,
+          "output_tokens": 3726,
+          "reasoning_tokens": 1378,
+          "total_tokens": 47123
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 2,
+            "action_counts": {
+              "search": 2
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.02",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.09272500",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01970938",
+          "output_cost_usd": "0.05589000",
+          "tool_cost_usd": "0.02000000",
+          "total_estimated_cost_usd": "0.18832438",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "mcdonalds",
+      "elapsed_seconds": 44.7661,
+      "web_actions": 3,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 2,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0e7b382002d4d518016a621dadb2d881a2b069fc9f4dcbd2da",
+        "request_id": "req_fa25f2b358a046d58b75f7455208058a",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 30665,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6299,
+          "output_tokens": 4266,
+          "reasoning_tokens": 1432,
+          "total_tokens": 34931
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 1,
+            "action_counts": {
+              "search": 1
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.01",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.06091500",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01968438",
+          "output_cost_usd": "0.06399000",
+          "tool_cost_usd": "0.01000000",
+          "total_estimated_cost_usd": "0.15458938",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "mcdonalds",
+      "elapsed_seconds": 26.6412,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 2,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0a29cf7a090d5d65016a621dda7f348192963b045b32462aab",
+        "request_id": "req_5ef0f0834dd64e359a9c6204c2be07a2",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 10271,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 10268,
+          "output_tokens": 2884,
+          "reasoning_tokens": 893,
+          "total_tokens": 13155
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.03208750",
+          "output_cost_usd": "0.04326000",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.07535500",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    },
+    {
+      "role": "gold",
+      "brand": "bafra-kebab",
+      "elapsed_seconds": 28.3583,
+      "web_actions": 2,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 3,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0c0b16fb4da6a2c9016a621df516c4819dbdab9a8761d89b58",
+        "request_id": "req_4d6bdd930f374804837e713bc202c391",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 23739,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6311,
+          "output_tokens": 2812,
+          "reasoning_tokens": 881,
+          "total_tokens": 26551
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 1,
+            "action_counts": {
+              "search": 1
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.01",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.04357000",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01972188",
+          "output_cost_usd": "0.04218000",
+          "tool_cost_usd": "0.01000000",
+          "total_estimated_cost_usd": "0.11547188",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "bafra-kebab",
+      "elapsed_seconds": 43.3655,
+      "web_actions": 4,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 3,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0fb780fc1722c907016a621e116ff88191b3b8b6a476c4c754",
+        "request_id": "req_c613877c35c84ffbb1a7ca56f3d38894",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 38468,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6303,
+          "output_tokens": 4081,
+          "reasoning_tokens": 1566,
+          "total_tokens": 42549
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 2,
+            "action_counts": {
+              "search": 2
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.02",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.08041250",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01969688",
+          "output_cost_usd": "0.06121500",
+          "tool_cost_usd": "0.02000000",
+          "total_estimated_cost_usd": "0.18132438",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "bafra-kebab",
+      "elapsed_seconds": 18.0785,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 3,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0de8170606555461016a621e3cd00081919ceb01a60ae84ebc",
+        "request_id": "req_fbe355575f574bbab16c69230e74dd6b",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 8569,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 8566,
+          "output_tokens": 2200,
+          "reasoning_tokens": 516,
+          "total_tokens": 10769
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.02676875",
+          "output_cost_usd": "0.03300000",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.05977625",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    },
+    {
+      "role": "gold",
+      "brand": "bobby-burger",
+      "elapsed_seconds": 46.5121,
+      "web_actions": 3,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 4,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_083f4e5058efc514016a621e4ee484819f9670ca2da1c394e1",
+        "request_id": "req_47476eb15ba34a62a5d5d2537bb5f57e",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 31640,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6308,
+          "output_tokens": 4194,
+          "reasoning_tokens": 1596,
+          "total_tokens": 35834
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 3,
+            "action_counts": {
+              "search": 3
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.03",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.06333000",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01971250",
+          "output_cost_usd": "0.06291000",
+          "tool_cost_usd": "0.03000000",
+          "total_estimated_cost_usd": "0.17595250",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "bobby-burger",
+      "elapsed_seconds": 39.5439,
+      "web_actions": 4,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 4,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_047c17c19a88e961016a621e7d6b94819f90331bbabf40cedb",
+        "request_id": "req_641e2fe945824bcc9e670e9875851800",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 32944,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6300,
+          "output_tokens": 3815,
+          "reasoning_tokens": 1177,
+          "total_tokens": 36759
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 3,
+            "action_counts": {
+              "search": 3
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.03",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.06661000",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01968750",
+          "output_cost_usd": "0.05722500",
+          "tool_cost_usd": "0.03000000",
+          "total_estimated_cost_usd": "0.17352250",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "bobby-burger",
+      "elapsed_seconds": 16.1892,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 4,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_015441a7277a268e016a621ea4f8c481a3b4822371a5119687",
+        "request_id": "req_d41d2fd38e5840b8a62761845ba5b01c",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 9030,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 9027,
+          "output_tokens": 2041,
+          "reasoning_tokens": 357,
+          "total_tokens": 11071
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.02820938",
+          "output_cost_usd": "0.03061500",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.05883188",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    },
+    {
+      "role": "gold",
+      "brand": "carrefour-express",
+      "elapsed_seconds": 60.4565,
+      "web_actions": 6,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 5,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_01a3f29afd35d6f2016a621eb53fbc81a395dd137e062fe6e3",
+        "request_id": "req_95899bcb92c447c1ba1da73f8e270b09",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 61487,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6308,
+          "output_tokens": 4345,
+          "reasoning_tokens": 1783,
+          "total_tokens": 65832
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 2,
+            "action_counts": {
+              "search": 2
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.02",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.13794750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01971250",
+          "output_cost_usd": "0.06517500",
+          "tool_cost_usd": "0.02000000",
+          "total_estimated_cost_usd": "0.24283500",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "carrefour-express",
+      "elapsed_seconds": 56.9842,
+      "web_actions": 6,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 5,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0975511d4274785e016a621ef19cf0819faef09b6cb6cc9c5d",
+        "request_id": "req_0e5ae02a83ac42a48f01373e00f31ded",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 56578,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6300,
+          "output_tokens": 4096,
+          "reasoning_tokens": 1388,
+          "total_tokens": 60674
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 2,
+            "action_counts": {
+              "search": 2
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.02",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.12569500",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01968750",
+          "output_cost_usd": "0.06144000",
+          "tool_cost_usd": "0.02000000",
+          "total_estimated_cost_usd": "0.22682250",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "carrefour-express",
+      "elapsed_seconds": 19.5407,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 5,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_06d11ad8708c6dc0016a621f2a990c819f8cee4d09f2222ef6",
+        "request_id": "req_e7c928cddc2f481486911d4146ca65a0",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 8810,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 8807,
+          "output_tokens": 2215,
+          "reasoning_tokens": 488,
+          "total_tokens": 11025
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.02752188",
+          "output_cost_usd": "0.03322500",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.06075438",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    },
+    {
+      "role": "gold",
+      "brand": "chorten",
+      "elapsed_seconds": 36.2356,
+      "web_actions": 2,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 6,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_00f0b5f4453c4daa016a621f3e23c081a39a470da3359c85c7",
+        "request_id": "req_ee2d821b861f412481c7ce57b2dc88d5",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 23964,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6305,
+          "output_tokens": 3572,
+          "reasoning_tokens": 1206,
+          "total_tokens": 27536
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 1,
+            "action_counts": {
+              "search": 1
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.01",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.04414750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01970312",
+          "output_cost_usd": "0.05358000",
+          "tool_cost_usd": "0.01000000",
+          "total_estimated_cost_usd": "0.12743062",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "chorten",
+      "elapsed_seconds": 31.1917,
+      "web_actions": 2,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 6,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_07c2dbb8cade202b016a621f6260c0819c9f6581aeb343bcf4",
+        "request_id": "req_eb708c826f564154b4c57f97fd804eae",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 23787,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6297,
+          "output_tokens": 3255,
+          "reasoning_tokens": 751,
+          "total_tokens": 27042
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 1,
+            "action_counts": {
+              "search": 1
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.01",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.04372500",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01967812",
+          "output_cost_usd": "0.04882500",
+          "tool_cost_usd": "0.01000000",
+          "total_estimated_cost_usd": "0.12222812",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "chorten",
+      "elapsed_seconds": 24.8009,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 6,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_00f0655971e6bc8b016a621f8193dc81a1b0c27f56430f53f1",
+        "request_id": "req_3f94542bf328447a98a8e15ea5cefcba",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 8956,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 8953,
+          "output_tokens": 2540,
+          "reasoning_tokens": 679,
+          "total_tokens": 11496
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.02797812",
+          "output_cost_usd": "0.03810000",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.06608562",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    },
+    {
+      "role": "gold",
+      "brand": "da-grasso",
+      "elapsed_seconds": 40.5451,
+      "web_actions": 4,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 7,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_08ce942891621648016a621f9a61e081a2ab2a3d546b67d7a2",
+        "request_id": "req_aa9803f668a54d45adff60f0d55ddccf",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 33428,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6307,
+          "output_tokens": 3601,
+          "reasoning_tokens": 1308,
+          "total_tokens": 37029
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 2,
+            "action_counts": {
+              "search": 2
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.02",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.06780250",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01970938",
+          "output_cost_usd": "0.05401500",
+          "tool_cost_usd": "0.02000000",
+          "total_estimated_cost_usd": "0.16152688",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "da-grasso",
+      "elapsed_seconds": 48.0318,
+      "web_actions": 3,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 7,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0b74fb2e1b934634016a621fc30734819da2ee3604fcc00506",
+        "request_id": "req_df43d1b5e7e74ae0b9616003bdd6d785",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 32704,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6299,
+          "output_tokens": 3453,
+          "reasoning_tokens": 831,
+          "total_tokens": 36157
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 1,
+            "action_counts": {
+              "search": 1
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.01",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.06601250",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01968438",
+          "output_cost_usd": "0.05179500",
+          "tool_cost_usd": "0.01000000",
+          "total_estimated_cost_usd": "0.14749188",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "da-grasso",
+      "elapsed_seconds": 19.7348,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 7,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0b2cc7fa9f1ee27f016a621ff2f49c819c834f20d45e7781f7",
+        "request_id": "req_14fbe431d83f4b2d8aeb84713c2dc6d4",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 10178,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 10175,
+          "output_tokens": 2448,
+          "reasoning_tokens": 516,
+          "total_tokens": 12626
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.03179688",
+          "output_cost_usd": "0.03672000",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.06852438",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    },
+    {
+      "role": "gold",
+      "brand": "xtreme-fitness-gyms",
+      "elapsed_seconds": 42.9652,
+      "web_actions": 3,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 8,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_013dd60c39c66b91016a622006ca24819c8149b55468718b08",
+        "request_id": "req_28c5f5fdc67e4d4aa9a8dbd81b2a295a",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 31994,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6311,
+          "output_tokens": 4163,
+          "reasoning_tokens": 1868,
+          "total_tokens": 36157
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 2,
+            "action_counts": {
+              "search": 2
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.02",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.06420750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01972188",
+          "output_cost_usd": "0.06244500",
+          "tool_cost_usd": "0.02000000",
+          "total_estimated_cost_usd": "0.16637438",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "xtreme-fitness-gyms",
+      "elapsed_seconds": 41.4019,
+      "web_actions": 3,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 8,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0cd7902522984330016a622033699081a2851840b45d04c0c1",
+        "request_id": "req_299f74a643034551afea062aa864bc45",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 30455,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6303,
+          "output_tokens": 3438,
+          "reasoning_tokens": 1063,
+          "total_tokens": 33893
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 1,
+            "action_counts": {
+              "search": 1
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.01",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.06038000",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01969688",
+          "output_cost_usd": "0.05157000",
+          "tool_cost_usd": "0.01000000",
+          "total_estimated_cost_usd": "0.14164688",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "xtreme-fitness-gyms",
+      "elapsed_seconds": 25.4196,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 8,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_071b26713aceec0d016a62205b170c81a2a8c60c58c85ce48f",
+        "request_id": "req_0fe9a1cf686444cfad2acf96b94bc5b4",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 10278,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 10275,
+          "output_tokens": 2947,
+          "reasoning_tokens": 1019,
+          "total_tokens": 13225
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.03210938",
+          "output_cost_usd": "0.04420500",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.07632188",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    },
+    {
+      "role": "gold",
+      "brand": "subway",
+      "elapsed_seconds": 33.4428,
+      "web_actions": 4,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 9,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0af39c27c3c5ba64016a6220747ef881a3ab34e3da21662e63",
+        "request_id": "req_c339d5e711514c97bd5a96d0f2632fd2",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 33556,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6304,
+          "output_tokens": 2754,
+          "reasoning_tokens": 973,
+          "total_tokens": 36310
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 2,
+            "action_counts": {
+              "search": 2
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.02",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.06813000",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01970000",
+          "output_cost_usd": "0.04131000",
+          "tool_cost_usd": "0.02000000",
+          "total_estimated_cost_usd": "0.14914000",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "subway",
+      "elapsed_seconds": 61.8128,
+      "web_actions": 5,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 9,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_00a8cfdfa0673251016a622095f02c819db5621aff702d1f3f",
+        "request_id": "req_72ff147bfcc948e3a953c811a617fbb7",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 49359,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6296,
+          "output_tokens": 4829,
+          "reasoning_tokens": 2490,
+          "total_tokens": 54188
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 4,
+            "action_counts": {
+              "search": 4
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.04",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.10765750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01967500",
+          "output_cost_usd": "0.07243500",
+          "tool_cost_usd": "0.04000000",
+          "total_estimated_cost_usd": "0.23976750",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "subway",
+      "elapsed_seconds": 15.2184,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 9,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_00bbfc32d88cf13e016a6220d3e0a081a1a80646d1c6529846",
+        "request_id": "req_ade762b88a3c4cbe8b65ea52ab3373e6",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 8783,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 8780,
+          "output_tokens": 1900,
+          "reasoning_tokens": 352,
+          "total_tokens": 10683
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.02743750",
+          "output_cost_usd": "0.02850000",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.05594500",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    },
+    {
+      "role": "gold",
+      "brand": "north-fish",
+      "elapsed_seconds": 42.5558,
+      "web_actions": 3,
+      "usage": {
+        "agent": "benchmark_gold",
+        "iteration": 1,
+        "call_index": 10,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_009389900e2974a0016a6220e2fc0081a2b5b3a5e7f87222bd",
+        "request_id": "req_33476b69829c4dfda5f2f2893d91c5aa",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 31549,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6305,
+          "output_tokens": 3353,
+          "reasoning_tokens": 1275,
+          "total_tokens": 34902
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 3,
+            "action_counts": {
+              "search": 3
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.03",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.06311000",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01970312",
+          "output_cost_usd": "0.05029500",
+          "tool_cost_usd": "0.03000000",
+          "total_estimated_cost_usd": "0.16310812",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "direct",
+      "brand": "north-fish",
+      "elapsed_seconds": 53.6911,
+      "web_actions": 4,
+      "usage": {
+        "agent": "benchmark_direct",
+        "iteration": 1,
+        "call_index": 10,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_0bfa231dfe26be4f016a62210d99888191b5b83e74a700c604",
+        "request_id": "req_1768d869b6684efab0dd3c0c12a20649",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 40513,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 6297,
+          "output_tokens": 4607,
+          "reasoning_tokens": 2155,
+          "total_tokens": 45120
+        },
+        "tool_usage": [
+          {
+            "tool": "web_search",
+            "calls": 2,
+            "action_counts": {
+              "search": 2
+            },
+            "unit_cost_usd": "0.01",
+            "estimated_cost_usd": "0.02",
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "pricing_as_of": "2026-07-17"
+          }
+        ],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.08554000",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.01967812",
+          "output_cost_usd": "0.06910500",
+          "tool_cost_usd": "0.02000000",
+          "total_estimated_cost_usd": "0.19432312",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "Separately billed tool calls are included from observed response output items."
+          ]
+        }
+      }
+    },
+    {
+      "role": "review",
+      "brand": "north-fish",
+      "elapsed_seconds": 17.8277,
+      "web_actions": 0,
+      "usage": {
+        "agent": "benchmark_reviewer",
+        "iteration": 1,
+        "call_index": 10,
+        "scope_task_ids": [
+          "brand.name",
+          "brand.category",
+          "brand.public_summary",
+          "websites.official",
+          "websites.franchise_offer",
+          "contact.generic_business_route",
+          "offer.unit_formats",
+          "candidate.capital_requirement",
+          "candidate.premises_requirements",
+          "fees.joining_fee",
+          "fees.royalty",
+          "fees.marketing",
+          "investment.total_low",
+          "investment.total_high",
+          "investment.currency",
+          "investment.own_contribution",
+          "investment.as_of",
+          "support.training_program",
+          "outlets.current_total",
+          "outlets.as_of"
+        ],
+        "scope_source_ids": [],
+        "provider": "openai",
+        "requested_model": "gpt-5.6-terra",
+        "resolved_model": "gpt-5.6-terra",
+        "response_id": "resp_08d3d37b8ba93af2016a622143527081a29b77021ba0cc015d",
+        "request_id": "38a600ad-fe6f-4dd1-a4b1-4f0959d0ba82",
+        "service_tier": "default",
+        "tokens": {
+          "input_tokens": 8718,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 8715,
+          "output_tokens": 2005,
+          "reasoning_tokens": 451,
+          "total_tokens": 10723
+        },
+        "tool_usage": [],
+        "cost_estimate": {
+          "currency": "USD",
+          "rate_card_id": "openai-standard-2026-07-17",
+          "pricing_source": "https://developers.openai.com/api/docs/pricing",
+          "pricing_as_of": "2026-07-17",
+          "input_usd_per_million": "2.5",
+          "cached_input_usd_per_million": "0.25",
+          "cache_write_usd_per_million": "3.125",
+          "output_usd_per_million": "15",
+          "uncached_input_cost_usd": "0.00000750",
+          "cached_input_cost_usd": "0E-8",
+          "cache_write_input_cost_usd": "0.02723438",
+          "output_cost_usd": "0.03007500",
+          "tool_cost_usd": "0E-8",
+          "total_estimated_cost_usd": "0.05731688",
+          "assumptions": [
+            "Standard direct-API token pricing; no Batch, Flex, or Priority tier.",
+            "No regional-processing uplift.",
+            "Any provider-reported cache-write tokens are priced separately.",
+            "Reasoning tokens are included in output_tokens and are not charged twice.",
+            "No separately billed tool calls were recorded."
+          ]
+        }
+      }
+    }
+  ],
+  "brands": {
+    "zabka": {
+      "gold": {
+        "completed": true,
+        "notes": [
+          "Punkt odniesienia dotyczy rynku polskiego i marki Żabka; wykluczono wskaźnik 13 063 sklepów, gdyż źródło wprost wskazuje, że obejmuje on sklepy Nano oraz Rumunię.",
+          "Nie przypisano wartości 0 zł dla royalty ani opłaty marketingowej: brak publicznej stawki nie dowodzi braku opłaty.",
+          "Kwota 5 000 zł jest komunikowana jako wartość około/łączny koszt wejścia; opłata za przystąpienie 1 000 zł netto jest wyszczególniona osobno."
+        ],
+        "elapsed_seconds": 57.6779
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Profil przygotowano dla rynku polskiego na podstawie aktualnej oficjalnej strony Żabki oraz oficjalnej strony Grupy Żabka.",
+          "Kwoty 5 000 zł są przez markę komunikowane jako przybliżone koszty startowe; nie są publicznie przedstawione jako gwarantowany przedział pełnej inwestycji.",
+          "Opłaty cykliczne (royalty i marketingowa) nie zostały uzupełnione, ponieważ aktualna publiczna oferta oficjalna nie publikuje ich stawek."
+        ],
+        "elapsed_seconds": 37.7662
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Ocena opiera się wyłącznie na zamrożonym punkcie odniesienia oraz regułach decyzyjnych.",
+          "Luki metod rozróżniono od statusów „not_public”: brak propozycji metody nie stanowi sam w sobie dowodu braku danych publicznych.",
+          "Nie uznano dat obserwacji źródła za datę obowiązywania warunków inwestycyjnych."
+        ],
+        "elapsed_seconds": 30.2961,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    },
+    "mcdonalds": {
+      "gold": {
+        "completed": true,
+        "notes": [],
+        "elapsed_seconds": 42.2409
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Profil oparto na aktywnych, oficjalnych polskich stronach McDonald’s oraz pomocniczo zweryfikowano katalog branżowy; w polach liczbowych preferowano dane oficjalne.",
+          "Nie przenoszono globalnych parametrów franczyzowych McDonald’s do Polski. Publicznie nie są podane polskie stawki royalty i marketingowe ani dolna/górna całkowita inwestycja.",
+          "Daty „observed_at” oznaczają datę badania (23 lipca 2026 r.); „valid_as_of” podano wyłącznie tam, gdzie źródło pozwala przypisać konkretną datę lub bieżącą aktywność oficjalnej strony."
+        ],
+        "elapsed_seconds": 44.7661
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Ocena została wykonana względem zamrożonej referencji; nie uznawano luk pipeline za dowód niepubliczności danych.",
+          "Dla pól inwestycji bez opublikowanego pełnego zakresu utrzymano luki, bez wyprowadzania wartości ze składowych kosztów.",
+          "Wartość „ponad 600” jest użyteczna jako opis zakresu i daty komunikatu, ale nie jest akceptowalną wartością dla pola o typie integer."
+        ],
+        "elapsed_seconds": 26.6412,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    },
+    "bafra-kebab": {
+      "gold": {
+        "completed": true,
+        "notes": [
+          "Priorytetowo zastosowano aktualne oficjalne strony Bafra Kebab dla polskiego rynku.",
+          "Nie użyto rozbieżnych danych finansowych z katalogów branżowych jako wartości referencyjnych, ponieważ nie były potwierdzone w aktualnej oficjalnej ofercie i część z nich koliduje z aktualnie deklarowanym progiem wkładu własnego.",
+          "Kwota 35 000 zł została zachowana jako minimalny wkład własny, nie jako pełna inwestycja ani opłata wejściowa."
+        ],
+        "elapsed_seconds": 28.3583
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Profil dotyczy wyłącznie Polski i opiera się przede wszystkim na aktualnie dostępnej oficjalnej stronie Bafra Kebab oraz pomocniczo na katalogu Franchising.pl.",
+          "Nie uznano starszych publikacji branżowych dotyczących stawek opłat za wystarczające dla pól o maksymalnym wieku 365 dni; aktualne kwoty opłat wymagają potwierdzenia bezpośrednio u franczyzodawcy.",
+          "W źródłach występuje rozbieżność prezentacji sieci: oficjalna oferta podaje 371 punktów franczyzowych oraz osobno 60 punktów własnych, natomiast główna strona konsumencka mówi o ponad 371 punktach w Polsce."
+        ],
+        "elapsed_seconds": 43.3655
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Ocena opiera się wyłącznie na zamrożonej referencji i jej rozróżnieniu między wkładem własnym a całkowitą inwestycją.",
+          "Braki pozostawiono jako gap, gdy referencja wskazuje brak publicznie dostępnej wartości lub daty."
+        ],
+        "elapsed_seconds": 18.0785,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    },
+    "bobby-burger": {
+      "gold": {
+        "completed": true,
+        "notes": [
+          "Badanie wykonano dla rynku polskiego; nie wykorzystano danych o amerykańskich markach o podobnych nazwach „Bobby’s Burgers” lub „Cheeseburger Bobby’s”.",
+          "Oficjalna domena Bobby Burger była aktywna 23 lipca 2026 r., lecz publicznie dostępna część serwisu ma charakter systemu zamówień online i nie publikuje kompletnej oferty franczyzowej.",
+          "Dane finansowe i formaty współpracy pochodzą wyłącznie z aktywnych źródeł branżowych bez jednoznacznej daty obowiązywania; dlatego nie potwierdzono pól wymagających wyraźnej daty aktualności inwestycji lub liczby placówek."
+        ],
+        "elapsed_seconds": 46.5121
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Profil przygotowano dla rynku polskiego na dzień 23 lipca 2026 r.; odrzucono historyczne parametry franczyzowe jako niespełniające wymaganej świeżości 365 dni.",
+          "Istnieje aktywny oficjalny serwis zamówień Bobby Burger, ale nie udało się potwierdzić aktywnej publicznej oferty franczyzowej ani aktualnych warunków ekonomicznych.",
+          "Weryfikacja rejestrowa wskazuje, że BOBBY BURGER sp. z o.o. została wykreślona z rejestru przedsiębiorców 29 lipca 2025 r., ze skutkiem prawomocnym 30 sierpnia 2025 r.; wymaga to bezpośredniego potwierdzenia podmiotu oferującego ewentualną współpracę."
+        ],
+        "elapsed_seconds": 39.5439
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Ocena opiera się wyłącznie na zamrożonej referencji i dostarczonych propozycjach.",
+          "Braki pozostają oznaczone jako gap także tam, gdzie referencja zawiera wartość, ponieważ metoda nie przedstawiła propozycji.",
+          "Nie uznano historycznych lub niedatowanych danych inwestycyjnych za aktualne wartości inwestycji."
+        ],
+        "elapsed_seconds": 16.1892,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    },
+    "carrefour-express": {
+      "gold": {
+        "completed": true,
+        "notes": [
+          "Priorytetowo wykorzystano aktualne oficjalne strony Carrefour Polska; nie znaleziono na nich publicznego cennika opłat ani inwestycji dla franczyzy Carrefour Express.",
+          "Wartości finansowe z nieoznaczonych datą katalogów branżowych nie zostały przyjęte jako aktualne dla progów ważności do 365 dni.",
+          "Liczba placówek została przyjęta z artykułu branżowego z wyraźnym stanem na 31 grudnia 2025 r.; oficjalna strona Carrefour publikuje tylko agregat sklepów osiedlowych i specjalistycznych, a nie bieżącą liczbę samych Carrefour Express."
+        ],
+        "elapsed_seconds": 60.4565
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Profil dotyczy wyłącznie polskiej oferty Carrefour Express; wartości i opłaty z innych krajów Carrefour zostały odrzucone.",
+          "Aktualna oferta publiczna rozróżnia klasyczną franczyzę Carrefour Express oraz model ajencyjny, w którym Carrefour jest głównym inwestorem.",
+          "Nie znaleziono publicznego, aktualnego cennika opłat, royalty, składki marketingowej ani widełek inwestycji dla Polski."
+        ],
+        "elapsed_seconds": 56.9842
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Pipeline nie zawierał propozycji dla żadnego pola, dlatego wszystkie jego decyzje to gap.",
+          "Brak publicznej ceny lub stawki nie uzasadnia przypisania wartości; pola bez propozycji pozostają gap.",
+          "Dla liczby placówek różne wartości odnoszą się do różnych, jasno oznaczonych dat i nie powinny być traktowane jako automatyczna sprzeczność."
+        ],
+        "elapsed_seconds": 19.5407,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    },
+    "chorten": {
+      "gold": {
+        "completed": true,
+        "notes": [
+          "Punkt odniesienia PL:L1 zbudowano konserwatywnie z aktualnie dostępnych oficjalnych stron Chorten, obserwowanych 2026-07-23.",
+          "Nie przypisano opłat administracyjnych, royalty, opłaty marketingowej ani kwot inwestycji, ponieważ źródło nie publikuje ich wartości.",
+          "Rozróżniono licznik 2445 placówek widoczny dla marki Chorten od komunikowanej przez Grupę Chorten liczby ponad 3500 placówek handlowych po przejęciu EURO Polska Sieć Handlowa, opublikowanej 26.02.2026."
+        ],
+        "elapsed_seconds": 36.2356
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Profil dotyczy Polski. Chorten komunikuje relację przede wszystkim jako model partnerski dla niezależnych detalistów, mimo że strona oferty działa pod adresem „franczyza”.",
+          "Kwoty opłat administracyjnych nie są publiczne i są deklarowane jako zróżnicowane regionalnie; nie utożsamiono ich z opłatą wejściową, royalty ani marketingową.",
+          "Liczba ponad 3 500 dotyczy całej Grupy Chorten, w tym placówek spożywczych i alkoholowych oraz konceptów innych niż sam szyld Chorten."
+        ],
+        "elapsed_seconds": 31.1917
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Ocena opiera się wyłącznie na zamrożonej referencji: nie traktowano braku inwestycji lub opłat franczyzowych jako automatycznego, liczbowego parametru innych pól.",
+          "Liczby dla całej Grupy Chorten nie są zamienne z liczbą placówek widocznych pod marką Chorten."
+        ],
+        "elapsed_seconds": 24.8009,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    },
+    "da-grasso": {
+      "gold": {
+        "completed": true,
+        "notes": [
+          "Punkt odniesienia zbudowano konserwatywnie z aktualnych oficjalnych stron Da Grasso dla Polski, obserwowanych 23 lipca 2026.",
+          "Nie zastosowano starszych ani rozbieżnych kwot z materiałów branżowych, ponieważ oficjalna oferta franczyzowa publikuje obecnie warunki wejścia i opłaty.",
+          "Brak publicznej maksymalnej inwestycji oraz wyraźnej daty obowiązywania wartości inwestycyjnych oznaczono jako not_public."
+        ],
+        "elapsed_seconds": 40.5451
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Dla opłat i inwestycji przyjęto aktualniejszą ofertę oficjalną obserwowaną 23 lipca 2026 r. Starsze materiały mogły podawać inne poziomy (np. 12 000 zł licencji lub 2 000 zł marketingu), dlatego nie zostały użyte jako wartości bieżące.",
+          "Liczba placówek została wyliczona jako suma oficjalnych liczników regionalnych z mapy dla Q1 2026; nie zastępuje to deklaracji o dokładnej liczbie, ale jest weryfikowalnym zakresem oficjalnego źródła."
+        ],
+        "elapsed_seconds": 48.0318
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Ocena opiera się wyłącznie na zamrożonym punkcie odniesienia i dostarczonych propozycjach.",
+          "Luki pipeline'u oznaczają brak propozycji w tym przebiegu, a nie brak danych publicznych.",
+          "Dla pola investment.as_of data obserwacji aktywnej strony nie może zastępować wymaganej jawnej daty aktualności inwestycji."
+        ],
+        "elapsed_seconds": 19.7348,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    },
+    "xtreme-fitness-gyms": {
+      "gold": {
+        "completed": true,
+        "notes": [
+          "Za nadrzędne dla liczby placówek przyjęto oficjalny, datowany komunikat z 10 lipca 2026 r., wskazujący stan 184 klubów fitness po otwarciach 25 czerwca 2026 r. Nowszy wizualnie licznik na stronie konsumenckiej nie podaje daty stanu, więc nie został użyty jako wartość referencyjna.",
+          "Wartości inwestycji i opłat pochodzą z aktualnej oficjalnej strony franczyzowej obserwowanej 23 lipca 2026 r.; marka nie publikuje na niej daty obowiązywania tabeli inwestycyjnej, dlatego pole investment.as_of oznaczono not_public."
+        ],
+        "elapsed_seconds": 42.9652
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Zweryfikowano wyłącznie dane właściwe dla Polski. Nie użyto globalnych wartości inwestycyjnych ani liczby placówek.",
+          "Kwoty inwestycji mają charakter orientacyjny („około”); źródła oficjalne nie podają daty wejścia w życie ani pełnego dokumentu opłat."
+        ],
+        "elapsed_seconds": 41.4019
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Ocena opiera się wyłącznie na zamrożonym punkcie odniesienia i kontrakcie pól.",
+          "Luki pipeline'u pozostawiono jako gap, niezależnie od publicznej dostępności danych w punkcie odniesienia.",
+          "Dla pól inwestycyjnych wymagających explicit_as_of data obserwacji aktywnej strony nie zastępuje publicznie wskazanej daty obowiązywania wartości."
+        ],
+        "elapsed_seconds": 25.4196,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    },
+    "subway": {
+      "gold": {
+        "completed": true,
+        "notes": [
+          "Badanie wykonano dla rynku polskiego, z datą obserwacji 2026-07-23.",
+          "Pierwszeństwo miały aktywne strony oficjalne Subway dla Polski. Nie zastosowano wartości globalnych ani danych historycznych niespełniających limitów świeżości.",
+          "Źródło branżowe L’Express Franchise jest aktywnym profilem partnerskim, lecz nie podaje jawnej daty danych inwestycyjnych i zawiera rozbieżność dotyczącą opłaty wstępnej; dlatego nie użyto go do ustalenia opłaty wejściowej ani pól wymagających explicit_as_of."
+        ],
+        "elapsed_seconds": 33.4428
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Zweryfikowano polskie źródła oficjalne marki i operatora AMIC Energy oraz aktualną oficjalną stronę franczyzową Subway. Nie przenoszono do profilu PL kwot, opłat ani formatów z amerykańskiej oferty franczyzowej.",
+          "Dostępne polskie publikacje branżowe podawały historycznie m.in. inwestycję około 700 tys. zł i opłatę wstępną 15 tys. EUR, ale nie spełniają wskazanego wymogu aktualności do 365 dni na 2026-07-23, dlatego pola finansowe pozostawiono jako not_public."
+        ],
+        "elapsed_seconds": 61.8128
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Ocena opiera się wyłącznie na zamrożonej referencji i zasadach decyzji.",
+          "Braki pozostają oznaczone jako gap także wtedy, gdy referencja zawiera wartość, której metoda nie zaproponowała."
+        ],
+        "elapsed_seconds": 15.2184,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    },
+    "north-fish": {
+      "gold": {
+        "completed": true,
+        "notes": [
+          "Badanie wykonano dla rynku polskiego, z priorytetem dla oficjalnych stron North Fish i North Food Polska S.A.",
+          "Nie użyto historycznych wartości inwestycji, opłat ani liczby lokali jako aktualnych danych franczyzowych.",
+          "Wyniki dotyczące liczby około 40 lokali lub 39 restauracji odnosiły się do danych historycznych albo do łącznej działalności operatora obejmującej North Fish i John Burg; zostały odrzucone dla pola liczby placówek North Fish."
+        ],
+        "elapsed_seconds": 42.5558
+      },
+      "direct": {
+        "completed": true,
+        "notes": [
+          "Profil ma charakter negatywnie zweryfikowanej oferty franczyzowej: nie znaleziono aktualnej, publicznej propozycji franczyzy North Fish dla Polski ani jej parametrów finansowych.",
+          "Stan domeny jest istotnym sygnałem ryzyka: 23 lipca 2026 r. adres główny northfish.pl przekierowywał do oferty sprzedaży domen, a branżowe publikacje z lutego 2026 r. informowały o złożeniu przez North Food wniosku o upadłość. ([northfish.pl](https://www.northfish.pl/))"
+        ],
+        "elapsed_seconds": 53.6911
+      },
+      "review": {
+        "completed": true,
+        "notes": [
+          "Ocena opiera się wyłącznie na zamrożonej referencji oraz przedłożonych propozycjach.",
+          "Braki pipeline dla pól, dla których referencja ma dane, pozostają oznaczone jako gap zgodnie z regułą dla braku propozycji.",
+          "Nie zaakceptowano liczby pozycji katalogowych jako liczby czynnych placówek marki."
+        ],
+        "elapsed_seconds": 17.8277,
+        "measurement": "ai_assisted_wall_clock",
+        "not_human": true
+      }
+    }
+  },
+  "completed_at": "2026-07-23T14:12:36.381146+00:00",
+  "known_experiment_cost_usd": "4.11550567",
+  "gold_evaluation_status": "complete",
+  "direct_evaluation": {
+    "benchmark_version": "1.0.0",
+    "profile_id": "PL:L1:v2",
+    "method": "researcher_chatgpt",
+    "evaluation_status": "ready",
+    "readiness_issue_counts": {},
+    "next_actions": [
+      "Review the measured pilot gates and compare both methods."
+    ],
+    "readiness": {
+      "ready": true,
+      "brands_ready": 10,
+      "brands_total": 10,
+      "brands": [
+        {
+          "slug": "zabka",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "mcdonalds",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "bafra-kebab",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "bobby-burger",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "carrefour-express",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "chorten",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "da-grasso",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "xtreme-fitness-gyms",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "subway",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "north-fish",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        }
+      ]
+    },
+    "brands": [
+      {
+        "slug": "zabka",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 18,
+          "accepted_fields": 16,
+          "accepted_unchanged_rate": 0.6667,
+          "review_minutes": 0.5,
+          "accepted_fields_per_usd": 78.6972,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.4375,
+          "gold_comparable_fields": 16
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": true,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": true
+      },
+      {
+        "slug": "mcdonalds",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 14,
+          "accepted_fields": 12,
+          "accepted_unchanged_rate": 0.5,
+          "review_minutes": 0.44,
+          "accepted_fields_per_usd": 62.4132,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.3077,
+          "gold_comparable_fields": 13
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "bafra-kebab",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 14,
+          "accepted_fields": 12,
+          "accepted_unchanged_rate": 0.5714,
+          "review_minutes": 0.3,
+          "accepted_fields_per_usd": 56.8148,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.25,
+          "gold_comparable_fields": 12
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "bobby-burger",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 4,
+          "accepted_fields": 4,
+          "accepted_unchanged_rate": 0.5,
+          "review_minutes": 0.27,
+          "accepted_fields_per_usd": 19.7104,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.5,
+          "gold_comparable_fields": 4
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "carrefour-express",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 11,
+          "accepted_fields": 11,
+          "accepted_unchanged_rate": 0.7273,
+          "review_minutes": 0.33,
+          "accepted_fields_per_usd": 42.7683,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.2727,
+          "gold_comparable_fields": 11
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": true,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": true
+      },
+      {
+        "slug": "chorten",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 18,
+          "accepted_fields": 10,
+          "accepted_unchanged_rate": 0.2222,
+          "review_minutes": 0.41,
+          "accepted_fields_per_usd": 64.4036,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.1818,
+          "gold_comparable_fields": 11
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "da-grasso",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 19,
+          "accepted_fields": 18,
+          "accepted_unchanged_rate": 0.5263,
+          "review_minutes": 0.33,
+          "accepted_fields_per_usd": 99.0349,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.1111,
+          "gold_comparable_fields": 18
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "xtreme-fitness-gyms",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 20,
+          "accepted_fields": 17,
+          "accepted_unchanged_rate": 0.55,
+          "review_minutes": 0.42,
+          "accepted_fields_per_usd": 94.5454,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.3158,
+          "gold_comparable_fields": 19
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "subway",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 8,
+          "accepted_fields": 4,
+          "accepted_unchanged_rate": 0.25,
+          "review_minutes": 0.25,
+          "accepted_fields_per_usd": 14.9399,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.5,
+          "gold_comparable_fields": 4
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "north-fish",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 6,
+          "accepted_fields": 4,
+          "accepted_unchanged_rate": 0.5,
+          "review_minutes": 0.3,
+          "accepted_fields_per_usd": 17.9387,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.25,
+          "gold_comparable_fields": 4
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      }
+    ],
+    "aggregate": {
+      "brands_passed": 2,
+      "brands_total": 10,
+      "proposed_fields": 132,
+      "accepted_fields": 108,
+      "accepted_unchanged_rate": 0.5076,
+      "review_minutes": 3.55,
+      "known_cost_usd": "2.074482835",
+      "accepted_fields_per_usd": 52.0612,
+      "unmarked_demo_values": 0,
+      "public_numeric_metadata_rate": 1.0,
+      "gold_exact_rate": 0.2857,
+      "gold_comparable_fields": 112,
+      "research_measurement_methods": [
+        "ai_assisted_wall_clock"
+      ],
+      "review_measurement_methods": [
+        "ai_assisted_wall_clock"
+      ]
+    },
+    "passed": false,
+    "note": "Pilot gates are empirical targets. Recalibrate them after comparing both methods; do not turn them into publication claims."
+  },
+  "pipeline_evaluation": {
+    "benchmark_version": "1.0.0",
+    "profile_id": "PL:L1:v2",
+    "method": "pipeline",
+    "evaluation_status": "ready",
+    "readiness_issue_counts": {},
+    "next_actions": [
+      "Review the measured pilot gates and compare both methods."
+    ],
+    "readiness": {
+      "ready": true,
+      "brands_ready": 10,
+      "brands_total": 10,
+      "brands": [
+        {
+          "slug": "zabka",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "mcdonalds",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "bafra-kebab",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "bobby-burger",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "carrefour-express",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "chorten",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "da-grasso",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "xtreme-fitness-gyms",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "subway",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        },
+        {
+          "slug": "north-fish",
+          "ready": true,
+          "issues": [],
+          "assessed_fields": 20,
+          "total_fields": 20
+        }
+      ]
+    },
+    "brands": [
+      {
+        "slug": "zabka",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 12,
+          "accepted_fields": 11,
+          "accepted_unchanged_rate": 0.3333,
+          "review_minutes": 0.5,
+          "accepted_fields_per_usd": 17.6433,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.25,
+          "gold_comparable_fields": 12
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "mcdonalds",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 7,
+          "accepted_fields": 7,
+          "accepted_unchanged_rate": 0.2857,
+          "review_minutes": 0.44,
+          "accepted_fields_per_usd": 11.4423,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.0,
+          "gold_comparable_fields": 7
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "bafra-kebab",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 4,
+          "accepted_fields": 4,
+          "accepted_unchanged_rate": 0.5,
+          "review_minutes": 0.3,
+          "accepted_fields_per_usd": 4.3671,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.25,
+          "gold_comparable_fields": 4
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": false,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "bobby-burger",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 1,
+          "accepted_fields": 1,
+          "accepted_unchanged_rate": 0.0,
+          "review_minutes": 0.27,
+          "accepted_fields_per_usd": 1.4957,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.0,
+          "gold_comparable_fields": 1
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": false,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "carrefour-express",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 0,
+          "accepted_fields": 0,
+          "accepted_unchanged_rate": 0.0,
+          "review_minutes": 0.33,
+          "accepted_fields_per_usd": 0.0,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": null,
+          "gold_comparable_fields": 0
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": false,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "chorten",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 5,
+          "accepted_fields": 3,
+          "accepted_unchanged_rate": 0.4,
+          "review_minutes": 0.41,
+          "accepted_fields_per_usd": 3.7042,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.25,
+          "gold_comparable_fields": 4
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": false,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "da-grasso",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 4,
+          "accepted_fields": 4,
+          "accepted_unchanged_rate": 1.0,
+          "review_minutes": 0.33,
+          "accepted_fields_per_usd": 9.6915,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.25,
+          "gold_comparable_fields": 4
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": true,
+          "review_minutes": true,
+          "accepted_fields_per_usd": false,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "xtreme-fitness-gyms",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 9,
+          "accepted_fields": 8,
+          "accepted_unchanged_rate": 0.6667,
+          "review_minutes": 0.42,
+          "accepted_fields_per_usd": 16.0148,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.1111,
+          "gold_comparable_fields": 9
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": true,
+          "accepted_unchanged_rate": true,
+          "review_minutes": true,
+          "accepted_fields_per_usd": true,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": true
+      },
+      {
+        "slug": "subway",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 3,
+          "accepted_fields": 3,
+          "accepted_unchanged_rate": 0.0,
+          "review_minutes": 0.25,
+          "accepted_fields_per_usd": 6.4471,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": 0.0,
+          "gold_comparable_fields": 3
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": false,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      },
+      {
+        "slug": "north-fish",
+        "ready": true,
+        "readiness_issues": [],
+        "metrics": {
+          "all_tasks_attempted": true,
+          "proposed_fields": 2,
+          "accepted_fields": 0,
+          "accepted_unchanged_rate": 0.0,
+          "review_minutes": 0.3,
+          "accepted_fields_per_usd": 0.0,
+          "unmarked_demo_values": 0,
+          "public_numeric_metadata_rate": 1.0,
+          "gold_exact_rate": null,
+          "gold_comparable_fields": 0
+        },
+        "gates": {
+          "all_tasks_attempted": true,
+          "proposed_fields_min": false,
+          "accepted_unchanged_rate": false,
+          "review_minutes": true,
+          "accepted_fields_per_usd": false,
+          "unmarked_demo_values": true,
+          "public_numeric_metadata_rate": true
+        },
+        "passed": false
+      }
+    ],
+    "aggregate": {
+      "brands_passed": 1,
+      "brands_total": 10,
+      "proposed_fields": 47,
+      "accepted_fields": 41,
+      "accepted_unchanged_rate": 0.4255,
+      "review_minutes": 3.55,
+      "known_cost_usd": "5.827727825",
+      "accepted_fields_per_usd": 7.0353,
+      "unmarked_demo_values": 0,
+      "public_numeric_metadata_rate": 1.0,
+      "gold_exact_rate": 0.1591,
+      "gold_comparable_fields": 44,
+      "research_measurement_methods": [
+        "imported"
+      ],
+      "review_measurement_methods": [
+        "ai_assisted_wall_clock"
+      ]
+    },
+    "passed": false,
+    "note": "Pilot gates are empirical targets. Recalibrate them after comparing both methods; do not turn them into publication claims."
+  },
+  "comparison": {
+    "direct": {
+      "brands_passed": 2,
+      "brands_total": 10,
+      "proposed_fields": 132,
+      "accepted_fields": 108,
+      "accepted_unchanged_rate": 0.5076,
+      "review_minutes": 3.55,
+      "known_cost_usd": "2.074482835",
+      "accepted_fields_per_usd": 52.0612,
+      "unmarked_demo_values": 0,
+      "public_numeric_metadata_rate": 1.0,
+      "gold_exact_rate": 0.2857,
+      "gold_comparable_fields": 112,
+      "research_measurement_methods": [
+        "ai_assisted_wall_clock"
+      ],
+      "review_measurement_methods": [
+        "ai_assisted_wall_clock"
+      ]
+    },
+    "pipeline": {
+      "brands_passed": 1,
+      "brands_total": 10,
+      "proposed_fields": 47,
+      "accepted_fields": 41,
+      "accepted_unchanged_rate": 0.4255,
+      "review_minutes": 3.55,
+      "known_cost_usd": "5.827727825",
+      "accepted_fields_per_usd": 7.0353,
+      "unmarked_demo_values": 0,
+      "public_numeric_metadata_rate": 1.0,
+      "gold_exact_rate": 0.1591,
+      "gold_comparable_fields": 44,
+      "research_measurement_methods": [
+        "imported"
+      ],
+      "review_measurement_methods": [
+        "ai_assisted_wall_clock"
+      ]
+    },
+    "interpretation_rule": "Compare cost, elapsed research/review, proposal coverage, acceptance and exactness together; no single metric determines the winner."
+  }
+}

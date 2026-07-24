@@ -1,13 +1,16 @@
 import json
 from datetime import datetime, timezone
 from io import BytesIO
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from datacollector.documents import (
+    DiskCachedDocumentFetcher,
     DocumentFetcher,
     FetchPolicy,
     FetchStatus,
+    FetchedDocument,
     ParsedContent,
     TransportNetworkError,
     TransportResponse,
@@ -18,6 +21,42 @@ from datacollector.documents import (
     extract_pdf,
     validate_public_url,
 )
+
+
+class CountingFetcher:
+    def __init__(self):
+        self.calls = 0
+
+    def fetch(self, url, *, source_id=""):
+        self.calls += 1
+        content = b"same content"
+        return FetchedDocument(
+            source_id=source_id,
+            requested_url=url,
+            final_url=url,
+            status=FetchStatus.FETCHED,
+            fetched_at=NOW,
+            http_status=200,
+            media_type="text/html",
+            text="same content",
+            byte_count=len(content),
+            content_sha256="a" * 64,
+            text_sha256="b" * 64,
+        )
+
+
+class DiskCachedDocumentFetcherTests(TestCase):
+    def test_reuses_parsed_content_and_rebinds_source_id(self):
+        base = CountingFetcher()
+        with TemporaryDirectory() as directory:
+            cached = DiskCachedDocumentFetcher(base, directory, clock=lambda: NOW)
+            first = cached.fetch("https://example.com/", source_id="source-one")
+            second = cached.fetch("https://example.com/", source_id="source-two")
+
+        self.assertEqual(base.calls, 1)
+        self.assertEqual(first.source_id, "source-one")
+        self.assertEqual(second.source_id, "source-two")
+        self.assertIn("document_cache_hit", second.warnings)
 
 
 PUBLIC_IP = "93.184.216.34"

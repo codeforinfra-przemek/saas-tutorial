@@ -343,7 +343,7 @@ class FranchisePromotion(models.Model):
     PROMOTION_TYPE_CHOICES = (
         (TYPE_FEATURED, "Featured"),
         (TYPE_SEARCH_BOOST, "Search boost"),
-        (TYPE_VERIFIED_BADGE, "Verified badge"),
+        (TYPE_VERIFIED_BADGE, "Legacy sponsored visibility"),
         (TYPE_CATEGORY_TOP, "Category top"),
         (TYPE_HOMEPAGE_FEATURED, "Homepage featured"),
     )

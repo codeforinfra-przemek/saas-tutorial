@@ -18,24 +18,27 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /code
 WORKDIR /code
 
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install -r /tmp/requirements.txt
+COPY requirements.txt /tmp/app-requirements.txt
+COPY datacollector/requirements.txt /tmp/datacollector-requirements.txt
+RUN pip install \
+    -r /tmp/app-requirements.txt \
+    -r /tmp/datacollector-requirements.txt
 
-COPY ./src/saashome /code
+COPY ./datacollector /code/datacollector
+COPY ./src/saashome /code/src/saashome
 
-ARG PROJ_NAME="saashome"
+WORKDIR /code/src/saashome
 
-RUN printf "#!/bin/bash\n" > ./railway_runner.sh && \
-    printf "set -e\n\n" >> ./railway_runner.sh && \
-    printf "RUN_PORT=\"\${PORT:-8000}\"\n\n" >> ./railway_runner.sh && \
-    printf "python manage.py migrate --no-input\n" >> ./railway_runner.sh && \
-    printf "gunicorn ${PROJ_NAME}.wsgi:application --bind \"[::]:\$RUN_PORT\"\n" >> ./railway_runner.sh
+COPY ./railway_runner.sh /usr/local/bin/railway_runner.sh
 
-RUN chmod +x ./railway_runner.sh
+RUN chmod +x /usr/local/bin/railway_runner.sh
+
+# Fail the image build when Django cannot import the deployed application.
+RUN DJANGO_SECRET_KEY=build-only-not-used-at-runtime python manage.py check
 
 RUN apt-get remove --purge -y gcc \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-CMD ./railway_runner.sh
+CMD ["/usr/local/bin/railway_runner.sh"]

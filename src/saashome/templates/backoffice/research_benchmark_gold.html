@@ -1,0 +1,29 @@
+{% extends "backoffice/base_internal.html" %}
+
+{% block internal_content %}
+<header class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+  <div>
+    <a href="{% url 'backoffice:research_benchmark' %}" class="text-sm font-bold text-brand-700 hover:underline">← Benchmark Workbench</a>
+    <p class="mt-4 text-xs font-extrabold uppercase tracking-widest text-amber-700">Tryb zaślepiony</p>
+    <h2 class="mt-2 text-3xl font-black tracking-tight">Niezależny Gold Set PL:L1</h2>
+    <p class="mt-2 max-w-4xl text-sm leading-6 text-slate-600">Ten ekran celowo nie ładuje ani nie pokazuje propozycji metody „researcher + ChatGPT” i pipeline’u. Uzupełniaj źródła oraz wartości referencyjne przed otwarciem porównania.</p>
+  </div>
+  {% if dashboard %}<a href="{% url 'backoffice:research_benchmark_download' 'gold' %}" class="rounded-xl border border-amber-300 bg-white px-4 py-3 text-xs font-extrabold text-amber-900">Pobierz Gold JSON</a>{% endif %}
+</header>
+
+{% if dashboard %}
+<section class="mt-7 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div><p class="text-xs font-extrabold uppercase tracking-widest text-amber-800">Postęp</p><strong class="mt-1 block text-3xl">{{ dashboard.progress.brands_ready }}/{{ dashboard.progress.brands_total }}</strong><span class="text-xs text-amber-900">marek kompletnych</span></div>
+    <div class="max-w-2xl text-xs leading-5 text-amber-950"><strong>Metoda:</strong> {{ dashboard.gold.get_methodology_display|default:dashboard.gold.methodology }}<br><strong>Niezależność:</strong> {{ dashboard.gold.independence_statement|default:"Nie udokumentowano jeszcze metody." }}</div>
+  </div>
+</section>
+
+<section class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+  <div class="border-b border-slate-200 px-5 py-4"><h3 class="text-lg font-black">10 marek × 20 pól referencyjnych</h3><p class="mt-1 text-xs text-slate-500">Nie otwieraj równolegle porównania — ten widok ma chronić przed kopiowaniem odpowiedzi.</p></div>
+  <div class="overflow-x-auto"><table class="min-w-full divide-y divide-slate-200 text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-5 py-3">Marka</th><th class="px-5 py-3">Kategoria</th><th class="px-5 py-3">Gold</th><th class="px-5 py-3"></th></tr></thead><tbody class="divide-y divide-slate-100">{% for row in dashboard.brands %}<tr><td class="px-5 py-4 font-black">{{ row.definition.name }}</td><td class="px-5 py-4 text-slate-600">{{ row.definition.category }}</td><td class="px-5 py-4"><strong>{{ row.gold.completed_fields }}/{{ row.gold.total_fields }}</strong><span class="ml-2 text-xs {% if row.gold.ready %}text-emerald-700{% else %}text-amber-700{% endif %}">{% if row.gold.ready %}gotowe{% else %}w toku{% endif %}</span></td><td class="px-5 py-4 text-right"><a href="{% url 'backoffice:research_benchmark_gold_brand' row.definition.slug %}" class="rounded-lg bg-amber-700 px-3 py-2 text-xs font-extrabold text-white">Badaj →</a></td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% else %}
+<section class="mt-7 rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-900">Gold Set nie może zostać odczytany.</section>
+{% endif %}
+{% endblock %}

@@ -100,6 +100,36 @@ class FranchiseCategory(models.Model):
 
 
 class Franchise(models.Model):
+    MARKET_STATUS_LISTED = "listed"
+    MARKET_STATUS_ACTIVE = "active"
+    MARKET_STATUS_INACTIVE = "inactive"
+    MARKET_STATUS_UNCERTAIN = "uncertain"
+    MARKET_STATUS_CHOICES = (
+        (MARKET_STATUS_LISTED, "Wpis w aktualnym katalogu — do walidacji"),
+        (MARKET_STATUS_ACTIVE, "Aktywna — potwierdzone"),
+        (MARKET_STATUS_INACTIVE, "Nieaktywna / zamknięta"),
+        (MARKET_STATUS_UNCERTAIN, "Status niepewny"),
+    )
+    RECRUITMENT_LISTED = "listed_offer"
+    RECRUITMENT_OPEN = "confirmed_open"
+    RECRUITMENT_CLOSED = "not_recruiting"
+    RECRUITMENT_UNKNOWN = "unknown"
+    RECRUITMENT_STATUS_CHOICES = (
+        (RECRUITMENT_LISTED, "Oferta widoczna w katalogu — do walidacji"),
+        (RECRUITMENT_OPEN, "Nabór potwierdzony"),
+        (RECRUITMENT_CLOSED, "Brak naboru"),
+        (RECRUITMENT_UNKNOWN, "Nieustalony"),
+    )
+    WEBSITE_MISSING = "missing"
+    WEBSITE_UNVERIFIED = "unverified_seed"
+    WEBSITE_VALIDATED = "validated_official"
+    WEBSITE_REJECTED = "rejected"
+    WEBSITE_STATUS_CHOICES = (
+        (WEBSITE_MISSING, "Brak"),
+        (WEBSITE_UNVERIFIED, "Niezweryfikowany seed"),
+        (WEBSITE_VALIDATED, "Zweryfikowana strona oficjalna"),
+        (WEBSITE_REJECTED, "Odrzucona"),
+    )
     BUSINESS_TYPE_STATIONARY = "stationary"
     BUSINESS_TYPE_MOBILE = "mobile"
     BUSINESS_TYPE_ONLINE = "online"
@@ -151,6 +181,24 @@ class Franchise(models.Model):
     description = models.TextField(blank=True)
     logo = models.FileField(upload_to="franchise_logos/", blank=True)
     website_url = models.URLField(blank=True)
+    website_url_status = models.CharField(
+        max_length=24,
+        choices=WEBSITE_STATUS_CHOICES,
+        default=WEBSITE_MISSING,
+    )
+    market_status = models.CharField(
+        max_length=20,
+        choices=MARKET_STATUS_CHOICES,
+        default=MARKET_STATUS_UNCERTAIN,
+    )
+    recruitment_status = models.CharField(
+        max_length=24,
+        choices=RECRUITMENT_STATUS_CHOICES,
+        default=RECRUITMENT_UNKNOWN,
+    )
+    market_status_checked_at = models.DateField(null=True, blank=True)
+    catalog_sources = models.JSONField(default=list, blank=True)
+    catalog_imported_at = models.DateTimeField(null=True, blank=True)
     min_investment = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     max_investment = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     initial_fee = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
@@ -205,12 +253,29 @@ class Franchise(models.Model):
 
     class Meta:
         ordering = ["-is_promoted", "-rank_score", "name"]
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(data_status="demo")
+                | models.Q(is_verified=False),
+                name="demo_franchise_cannot_be_verified",
+            )
+        ]
 
     def __str__(self):
         return self.name
 
     def get_absolute_url(self):
         return reverse("franchises:detail", kwargs={"slug": self.slug})
+
+    @property
+    def has_public_financial_data(self):
+        """Whether numeric commercial fields may be shown in public UI.
+
+        Demo values remain useful for local layout development, but must never
+        participate in public cards, filters, comparisons or rankings.
+        """
+
+        return self.data_status != self.DATA_STATUS_DEMO
 
 
 class FranchiseLocation(models.Model):
@@ -840,6 +905,9 @@ class FranchiseResearchWorkspace(models.Model):
     cost_summary = models.JSONField(default=dict)
     warnings = models.JSONField(default=list)
     reviewer_notes = models.TextField(blank=True)
+    auto_reviewed = models.BooleanField(default=False)
+    review_policy_version = models.CharField(max_length=80, blank=True)
+    auto_review_summary = models.JSONField(default=dict)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -887,12 +955,14 @@ class FranchiseResearchReviewField(models.Model):
     DECISION_PENDING = "pending"
     DECISION_ACCEPTED = "accepted"
     DECISION_ACCEPTED_EDITED = "accepted_edited"
+    DECISION_POLICY_ACCEPTED = "policy_accepted"
     DECISION_REJECTED = "rejected"
     DECISION_DOCUMENTED_GAP = "documented_gap"
     DECISION_CHOICES = (
         (DECISION_PENDING, "Do sprawdzenia"),
         (DECISION_ACCEPTED, "Zaakceptowane"),
         (DECISION_ACCEPTED_EDITED, "Poprawione i zaakceptowane"),
+        (DECISION_POLICY_ACCEPTED, "Zaakceptowane przez regułę L1"),
         (DECISION_REJECTED, "Odrzucone"),
         (DECISION_DOCUMENTED_GAP, "Sprawdzono — brak danych"),
     )
@@ -1174,8 +1244,8 @@ class FranchiseResearchCampaign(models.Model):
     STATUS_CHOICES = (
         (STATUS_QUEUED, "W kolejce"),
         (STATUS_RUNNING, "W trakcie"),
-        (STATUS_COMPLETED, "Zakończona"),
-        (STATUS_COMPLETED_WITH_ERRORS, "Zakończona z błędami"),
+        (STATUS_COMPLETED, "Drafty gotowe do Human Review"),
+        (STATUS_COMPLETED_WITH_ERRORS, "Drafty częściowo gotowe — są błędy"),
         (STATUS_CANCELLED, "Anulowana"),
     )
 
@@ -1235,12 +1305,18 @@ class FranchiseResearchLaunch(models.Model):
     STATUS_QUEUED = "queued"
     STATUS_RUNNING = "running"
     STATUS_SUCCEEDED = "succeeded"
+    STATUS_COMPLETE = "complete"
+    STATUS_PARTIAL = "partial"
+    STATUS_INSUFFICIENT = "insufficient"
     STATUS_FAILED = "failed"
     STATUS_CANCELLED = "cancelled"
     STATUS_CHOICES = (
         (STATUS_QUEUED, "W kolejce"),
         (STATUS_RUNNING, "W trakcie"),
-        (STATUS_SUCCEEDED, "Zakończone"),
+        (STATUS_SUCCEEDED, "Draft do Human Review (status historyczny)"),
+        (STATUS_COMPLETE, "Pełny L1 — Draft do Human Review"),
+        (STATUS_PARTIAL, "Częściowy — Draft do Human Review"),
+        (STATUS_INSUFFICIENT, "Niewystarczający — wymaga uzupełnienia"),
         (STATUS_FAILED, "Błąd"),
         (STATUS_CANCELLED, "Anulowane"),
     )
@@ -1285,6 +1361,11 @@ class FranchiseResearchLaunch(models.Model):
     check_sha256 = models.CharField(max_length=64, blank=True)
     normalized_reference = models.TextField(blank=True)
     normalized_sha256 = models.CharField(max_length=64, blank=True)
+    seed_sources_reference = models.TextField(blank=True)
+    seed_extractions_reference = models.TextField(blank=True)
+    seed_check_reference = models.TextField(blank=True)
+    resolution_reference = models.TextField(blank=True)
+    execution_reference = models.TextField(blank=True)
     result_workspace = models.ForeignKey(
         FranchiseResearchWorkspace,
         on_delete=models.SET_NULL,
@@ -1369,6 +1450,7 @@ class FranchiseResearchFinalization(models.Model):
     field_count = models.PositiveIntegerField(default=0)
     accepted_count = models.PositiveIntegerField(default=0)
     edited_count = models.PositiveIntegerField(default=0)
+    policy_accepted_count = models.PositiveIntegerField(default=0)
     rejected_count = models.PositiveIntegerField(default=0)
     gap_count = models.PositiveIntegerField(default=0)
     pending_count = models.PositiveIntegerField(default=0)
@@ -1423,10 +1505,12 @@ class FranchiseResearchEditorialDecision(models.Model):
     ORIGIN_AI = "ai"
     ORIGIN_HUMAN = "human"
     ORIGIN_NONE = "none"
+    ORIGIN_POLICY = "policy"
     ORIGIN_CHOICES = (
         (ORIGIN_AI, "AI proposal approved by a human"),
         (ORIGIN_HUMAN, "Human supplied or corrected"),
         (ORIGIN_NONE, "No publishable value"),
+        (ORIGIN_POLICY, "Accepted by a versioned publication policy"),
     )
 
     finalization = models.ForeignKey(
@@ -1484,6 +1568,7 @@ class FranchiseResearchEditorialDecision(models.Model):
         return self.decision in {
             FranchiseResearchReviewField.DECISION_ACCEPTED,
             FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED,
+            FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED,
         }
 
 

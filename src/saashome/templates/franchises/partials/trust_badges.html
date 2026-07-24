@@ -1,0 +1,4 @@
+{% if franchise.display_data_verified %}{% include "components/badge.html" with variant="verified" label="Dane zweryfikowane" only %}{% endif %}
+{% if franchise.display_research_reviewed %}{% include "components/badge.html" with variant="verified" label="Research redakcyjny" only %}{% elif franchise.display_research_with_gaps %}{% include "components/badge.html" with variant="claimed" label="Research z brakami" only %}{% elif franchise.display_vendor_data %}{% include "components/badge.html" with variant="claimed" label="Dane marki" only %}{% endif %}
+{% if franchise.organization_id %}{% include "components/badge.html" with variant="claimed" label="Profil zarządzany" only %}{% endif %}
+{% if franchise.display_promoted %}{% include "components/badge.html" with variant="promoted" label="Promowane" only %}{% endif %}

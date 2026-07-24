@@ -1,0 +1,207 @@
+version: "1.0.0"
+profile_id: "PL:L1:v2"
+title: "PL:L1 pilot — researcher + ChatGPT versus auditable pipeline"
+
+pilot_gates:
+  all_tasks_attempted: true
+  proposed_fields_min: 8
+  proposed_fields_target: 12
+  accepted_unchanged_rate_min: 0.60
+  review_minutes_max: 15
+  accepted_fields_per_usd_min: 10
+  unmarked_demo_values_max: 0
+  public_numeric_metadata_rate_min: 1.0
+
+brands:
+  - {slug: zabka, name: "Żabka", category: "convenience retail", source_availability: high, rationale: "Duża sieć i wiele źródeł, ale złożony model operatorski."}
+  - {slug: mcdonalds, name: "McDonald's", category: "QSR", source_availability: high, rationale: "Rozpoznawalna marka i wysoki próg inwestycji."}
+  - {slug: bafra-kebab, name: "Bafra Kebab", category: "gastronomy", source_availability: medium, rationale: "Oferta obecna w źródłach oficjalnych i katalogowych."}
+  - {slug: bobby-burger, name: "Bobby Burger", category: "gastronomy", source_availability: low, rationale: "Przypadek kalibracyjny dla aktywnych, lecz niedatowanych stron."}
+  - {slug: carrefour-express, name: "Carrefour Express", category: "grocery retail", source_availability: medium, rationale: "Duża marka, kilka formatów i trudniejsze pobieranie części stron."}
+  - {slug: chorten, name: "Chorten", category: "grocery retail", source_availability: medium, rationale: "Rozproszona sieć i niejednorodne dane o ofercie."}
+  - {slug: da-grasso, name: "Da Grasso", category: "gastronomy", source_availability: medium, rationale: "Oferta gastronomiczna z publicznymi parametrami wejścia."}
+  - {slug: xtreme-fitness-gyms, name: "Xtreme Fitness Gyms", category: "fitness", source_availability: medium, rationale: "Inna kategoria, format lokalu i ekonomika niż retail/QSR."}
+  - {slug: subway, name: "Subway", category: "QSR", source_availability: medium, rationale: "Marka globalna wymagająca rozdzielenia danych PL od globalnych."}
+  - {slug: north-fish, name: "North Fish", category: "QSR", source_availability: low, rationale: "Kontrola zachowania pipeline'u przy ograniczonej publicznej ofercie."}
+
+fields:
+  - target_field: brand.name
+    label: "Nazwa marki"
+    value_type: text
+    priority: critical
+    freshness_mode: active_source
+    max_age_days: null
+    accepted_source_types: [official, registry, industry]
+    minimum_sources: 1
+    numeric: false
+  - target_field: brand.category
+    label: "Kategoria"
+    value_type: text
+    priority: high
+    freshness_mode: stable
+    max_age_days: null
+    accepted_source_types: [official, industry, marketplace]
+    minimum_sources: 1
+    numeric: false
+  - target_field: brand.public_summary
+    label: "Krótki model oferty"
+    value_type: text
+    priority: medium
+    freshness_mode: active_source
+    max_age_days: null
+    accepted_source_types: [official, industry]
+    minimum_sources: 1
+    numeric: false
+  - target_field: websites.official
+    label: "Oficjalna strona"
+    value_type: url
+    priority: critical
+    freshness_mode: active_source
+    max_age_days: null
+    accepted_source_types: [official]
+    minimum_sources: 1
+    numeric: false
+  - target_field: websites.franchise_offer
+    label: "Strona oferty franczyzowej"
+    value_type: url
+    priority: critical
+    freshness_mode: active_source
+    max_age_days: null
+    accepted_source_types: [official]
+    minimum_sources: 1
+    numeric: false
+  - target_field: contact.generic_business_route
+    label: "Ogólny kontakt biznesowy"
+    value_type: text
+    priority: high
+    freshness_mode: active_source
+    max_age_days: null
+    accepted_source_types: [official]
+    minimum_sources: 1
+    numeric: false
+  - target_field: offer.unit_formats
+    label: "Format współpracy (single/multi/master/transfer/resale)"
+    value_type: text
+    priority: high
+    freshness_mode: max_age
+    max_age_days: 365
+    accepted_source_types: [official, industry, marketplace]
+    minimum_sources: 1
+    numeric: false
+  - target_field: candidate.capital_requirement
+    label: "Kapitał wymagany od kandydata"
+    value_type: money_or_text
+    priority: critical
+    freshness_mode: max_age
+    max_age_days: 365
+    accepted_source_types: [official, legal_document, industry]
+    minimum_sources: 1
+    numeric: true
+  - target_field: candidate.premises_requirements
+    label: "Wymagania lokalu"
+    value_type: text
+    priority: high
+    freshness_mode: max_age
+    max_age_days: 365
+    accepted_source_types: [official, industry]
+    minimum_sources: 1
+    numeric: false
+  - target_field: fees.joining_fee
+    label: "Opłata wejściowa"
+    value_type: money
+    priority: critical
+    freshness_mode: max_age
+    max_age_days: 365
+    accepted_source_types: [official, legal_document, industry]
+    minimum_sources: 1
+    numeric: true
+  - target_field: fees.royalty
+    label: "Royalty"
+    value_type: money_or_percentage_or_text
+    priority: high
+    freshness_mode: max_age
+    max_age_days: 365
+    accepted_source_types: [official, legal_document, industry]
+    minimum_sources: 1
+    numeric: true
+  - target_field: fees.marketing
+    label: "Opłata marketingowa"
+    value_type: money_or_percentage_or_text
+    priority: medium
+    freshness_mode: max_age
+    max_age_days: 365
+    accepted_source_types: [official, legal_document, industry]
+    minimum_sources: 1
+    numeric: true
+  - target_field: investment.total_low
+    label: "Minimalna inwestycja"
+    value_type: money
+    priority: critical
+    freshness_mode: explicit_as_of
+    max_age_days: 365
+    accepted_source_types: [official, legal_document, industry]
+    minimum_sources: 1
+    numeric: true
+  - target_field: investment.total_high
+    label: "Maksymalna inwestycja"
+    value_type: money
+    priority: critical
+    freshness_mode: explicit_as_of
+    max_age_days: 365
+    accepted_source_types: [official, legal_document, industry]
+    minimum_sources: 1
+    numeric: true
+  - target_field: investment.currency
+    label: "Waluta inwestycji"
+    value_type: text
+    priority: critical
+    freshness_mode: follows_value
+    max_age_days: 365
+    accepted_source_types: [official, legal_document, industry]
+    minimum_sources: 1
+    numeric: false
+  - target_field: investment.own_contribution
+    label: "Wkład własny"
+    value_type: money_or_text
+    priority: high
+    freshness_mode: explicit_as_of
+    max_age_days: 365
+    accepted_source_types: [official, legal_document, industry]
+    minimum_sources: 1
+    numeric: true
+  - target_field: investment.as_of
+    label: "Data aktualności inwestycji"
+    value_type: date
+    priority: critical
+    freshness_mode: explicit_as_of
+    max_age_days: 365
+    accepted_source_types: [official, legal_document, industry]
+    minimum_sources: 1
+    numeric: false
+  - target_field: support.training_program
+    label: "Szkolenie startowe"
+    value_type: text
+    priority: medium
+    freshness_mode: max_age
+    max_age_days: 730
+    accepted_source_types: [official, industry]
+    minimum_sources: 1
+    numeric: false
+  - target_field: outlets.current_total
+    label: "Placówki w Polsce"
+    value_type: integer
+    priority: critical
+    freshness_mode: explicit_as_of
+    max_age_days: 365
+    accepted_source_types: [official, registry, industry]
+    minimum_sources: 1
+    numeric: true
+  - target_field: outlets.as_of
+    label: "Data i zakres liczby placówek"
+    value_type: date_or_text
+    priority: critical
+    freshness_mode: explicit_as_of
+    max_age_days: 365
+    accepted_source_types: [official, registry, industry]
+    minimum_sources: 1
+    numeric: false

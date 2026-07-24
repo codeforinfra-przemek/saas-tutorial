@@ -4,9 +4,11 @@
     "dockerfilePath": "./Dockerfile",
     "watchPatterns": [
       "requirements.txt",
+      "datacollector/**",
       "src/**",
       "railway.json",
-      "Dockerfile"
+      "Dockerfile",
+      "railway_runner.sh"
     ]
   }
 }

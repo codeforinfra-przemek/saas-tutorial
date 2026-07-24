@@ -477,7 +477,13 @@ def apply_promotion_flags(franchises):
     franchise_list = list(franchises)
     promotion_map = get_active_promotion_map(franchise_list)
     plan_map = get_franchise_plan_map(franchise_list)
-    promoted_types = {FranchisePromotion.TYPE_FEATURED, FranchisePromotion.TYPE_SEARCH_BOOST}
+    promoted_types = {
+        FranchisePromotion.TYPE_FEATURED,
+        FranchisePromotion.TYPE_SEARCH_BOOST,
+        # Historical paid "verified" products are promotion only. They must
+        # never imply independent data verification.
+        FranchisePromotion.TYPE_VERIFIED_BADGE,
+    }
 
     for franchise in franchise_list:
         promotions = promotion_map.get(franchise.id, [])
@@ -489,11 +495,26 @@ def apply_promotion_flags(franchises):
         franchise.has_premium_promotion = bool(promoted_types & promotion_types) or bool(
             plan and plan.can_be_promoted
         )
-        franchise.has_verified_badge = (
+        franchise.has_legacy_verified_promotion = (
             FranchisePromotion.TYPE_VERIFIED_BADGE in promotion_types
         )
         franchise.display_promoted = franchise.is_promoted or franchise.is_featured or franchise.has_premium_promotion
-        franchise.display_verified = franchise.is_verified or franchise.has_verified_badge
+        franchise.display_data_verified = bool(
+            franchise.is_verified
+            and franchise.data_status != Franchise.DATA_STATUS_DEMO
+        )
+        # Compatibility for older templates and integrations. Paid promotion
+        # is intentionally excluded from this value.
+        franchise.display_verified = franchise.display_data_verified
+        franchise.display_research_reviewed = (
+            franchise.data_status == Franchise.DATA_STATUS_RESEARCH_REVIEWED
+        )
+        franchise.display_research_with_gaps = (
+            franchise.data_status == Franchise.DATA_STATUS_RESEARCH_WITH_GAPS
+        )
+        franchise.display_vendor_data = (
+            franchise.data_status == Franchise.DATA_STATUS_VENDOR
+        )
         franchise.display_featured = franchise.is_featured or bool(
             plan and (plan.can_feature_in_category or plan.can_feature_on_homepage)
         )
@@ -507,7 +528,11 @@ def apply_promotion_flags(franchises):
         key=lambda franchise: (
             not franchise.display_promoted,
             -franchise.promotion_priority,
-            -float(franchise.rank_score or 0),
+            -float(
+                franchise.rank_score
+                if franchise.data_status != Franchise.DATA_STATUS_DEMO
+                else 0
+            ),
             franchise.name.lower(),
         ),
     )

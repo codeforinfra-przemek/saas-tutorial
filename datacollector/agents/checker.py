@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from ..benchmark import field_policy_map as benchmark_field_policy_map
 from ..llm.protocol import CheckerLLM, CheckerProviderError
 from ..schemas import (
     AgentIterationUsage,
@@ -77,9 +78,10 @@ def _paid_postprocessing_error(
 ) -> CheckerProviderError:
     """Retain billed Checker usage when deterministic assembly fails."""
 
+    detail = " ".join(str(exc).split())[:1000]
     return CheckerProviderError(
         "Paid Checker post-processing failed "
-        f"({type(exc).__name__}); provider usage must be retained.",
+        f"({type(exc).__name__}: {detail}); provider usage must be retained.",
         code="postprocessing_error",
         usages=list(usages),
         failed_attempts=list(failed_attempts),
@@ -285,6 +287,17 @@ _UNIT_FORMAT_PATTERNS = tuple(
     )
 )
 
+_QUANTITATIVE_VALUE_FIELDS = {
+    "candidate.capital_requirement",
+    "fees.joining_fee",
+    "fees.marketing",
+    "fees.royalty",
+    "investment.own_contribution",
+    "investment.total_high",
+    "investment.total_low",
+    "outlets.current_total",
+}
+
 
 def _passes_local_field_semantics(claim: RawExtractionClaim) -> bool:
     """Enforce narrow catalog meanings that cannot safely rely on model labels."""
@@ -423,6 +436,7 @@ class CheckerAgent:
         prior_extraction_sha256: str | None = None,
         prior_search_results: SearchResults | None = None,
         prior_search_sha256: str | None = None,
+        risk_based: bool = False,
     ) -> CheckerResults:
         self._validate_inputs(
             plan,
@@ -590,6 +604,47 @@ class CheckerAgent:
                 and set(item.source_ids).issubset(clean_source_ids)
             ]
 
+        if risk_based and not incremental:
+            high_risk_prefixes = (
+                "candidate.capital_requirement",
+                "fees.",
+                "investment.",
+                "outlets.",
+                "websites.",
+            )
+            semantic_task_ids = {
+                task.task_id
+                for task in selected_tasks
+                if any(
+                    target_field == "candidate.capital_requirement"
+                    or target_field.startswith(high_risk_prefixes[1:])
+                    for target_field in task.target_fields
+                )
+            }
+            structurally_reviewed_claims = [
+                claim
+                for claim in selected_claims
+                if claim.task_id not in semantic_task_ids
+            ]
+            inherited_decision_by_id.update(
+                {
+                    decision.claim_id: decision
+                    for decision in _not_reviewed_decisions(
+                        structurally_reviewed_claims,
+                        citation_source_by_id,
+                        failed=False,
+                    )
+                }
+            )
+            inherited_claim_ids.extend(
+                claim.claim_id for claim in structurally_reviewed_claims
+            )
+            reviewed_task_ids = [
+                task_id
+                for task_id in extraction_results.selected_task_ids
+                if task_id in semantic_task_ids
+            ]
+
         reviewed_task_id_set = set(reviewed_task_ids)
         reviewed_tasks = [
             task for task in selected_tasks if task.task_id in reviewed_task_id_set
@@ -633,6 +688,12 @@ class CheckerAgent:
                 f"{len(inherited_claim_ids)} unchanged claim judgment(s) and sent "
                 f"{len(reviewed_claim_ids)} claim(s) from "
                 f"{len(reviewed_task_ids)} changed task(s) for semantic review."
+            )
+        elif risk_based:
+            warnings.append(
+                "Risk-based Checker sent only financial, website-identity and "
+                "network-scale task scopes to semantic review; other grounded "
+                "claims remain explicitly not_reviewed for Human Review."
             )
 
         if self.llm is None:
@@ -985,7 +1046,11 @@ class CheckerAgent:
                 ),
                 provider_executed=bool(agent_usage or failed_attempts),
                 checker_mode=(
-                    CheckerMode.INCREMENTAL if incremental else CheckerMode.FULL
+                    CheckerMode.INCREMENTAL
+                    if incremental
+                    else CheckerMode.RISK_BASED
+                    if risk_based
+                    else CheckerMode.FULL
                 ),
                 prior_check_id=(
                     prior_checker_results.check_id
@@ -1198,10 +1263,13 @@ class CheckerAgent:
         ):
             raise CheckerValidationError("Extractor tasks exceed Searcher scope.")
         source_ids = [source.source_id for source in search_results.sources]
-        if (
+        extraction_source_ids = (
             extraction_results.selected_source_ids
             + extraction_results.unselected_source_ids
-            != source_ids
+        )
+        if (
+            len(extraction_source_ids) != len(source_ids)
+            or set(extraction_source_ids) != set(source_ids)
         ):
             raise CheckerValidationError(
                 "Extractor selected/unselected sources do not exactly cover Searcher sources."
@@ -1343,6 +1411,24 @@ class CheckerAgent:
             source_support = item.source_support.value
             issue_codes = list(item.issue_codes)
             rationale = item.rationale
+            if (
+                verdict == CheckerVerdict.ACCEPTED
+                and claim.target_field in _QUANTITATIVE_VALUE_FIELDS
+                and not re.search(r"\d", claim.value_text)
+            ):
+                verdict = CheckerVerdict.NEEDS_REVIEW
+                semantic_fit = CheckerSemanticFit.PARTIAL
+                issue_codes = _deduplicate(
+                    [
+                        *(code.value for code in issue_codes),
+                        CheckerIssueCode.INSUFFICIENT_CONTEXT.value,
+                    ]
+                )
+                rationale = (
+                    "Local field-contract guard retained the fee or quantity "
+                    "mention for review but did not accept it as a publishable "
+                    "numeric value because no amount, rate, count, or range was supplied."
+                )
             if verdict == CheckerVerdict.ACCEPTED and not _passes_local_field_semantics(
                 claim
             ):
@@ -1509,8 +1595,9 @@ class CheckerAgent:
                 "locally from coverage, verification, source quality and deductions."
             ),
             "quality.freshness_rules": (
-                "Every plan task carries a bounded max_age_days policy that Checker "
-                "applies through source and semantic issue codes."
+                "Checker applies the frozen profile freshness contract, including "
+                "field-specific stable, active-source, bounded-age and explicit "
+                "as-of modes where the profile defines them."
             ),
             "quality.stop_conditions": (
                 f"Plan stop conditions require quality >= "
@@ -1571,6 +1658,11 @@ class CheckerAgent:
         }
         task_results: list[CheckerTaskResult] = []
         follow_ups: list[CheckerFollowUpTask] = []
+        calibrated_policies = benchmark_field_policy_map(
+            plan.profile_snapshot.profile_id
+            if plan.profile_snapshot is not None
+            else None
+        )
         for task in tasks:
             if task.section_id == "data_quality" and paid_success:
                 field_results = [
@@ -1645,6 +1737,20 @@ class CheckerAgent:
             field_results: list[CheckerFieldResult] = []
             task_follow_up_ids: list[str] = []
             for target_field in task.target_fields:
+                calibrated_policy = calibrated_policies.get(target_field)
+                field_min_sources = (
+                    calibrated_policy.minimum_sources
+                    if calibrated_policy is not None
+                    else task.min_sources
+                )
+                field_source_types = (
+                    [
+                        SourceType(value)
+                        for value in calibrated_policy.accepted_source_types
+                    ]
+                    if calibrated_policy is not None
+                    else task.preferred_source_types
+                )
                 availability, required_for_completion, reuse_scope = (
                     field_policy_by_name[target_field]
                 )
@@ -1704,8 +1810,7 @@ class CheckerAgent:
                     for source_id in accepted_source_ids
                 )
                 preferred_met = any(
-                    source_by_id[source_id].source_type
-                    in task.preferred_source_types
+                    source_by_id[source_id].source_type in field_source_types
                     for source_id in accepted_source_ids
                 )
                 partial_semantics = any(
@@ -1724,7 +1829,7 @@ class CheckerAgent:
                     issues = _deduplicate(
                         [*issues, CheckerIssueCode.SELF_DECLARATION_ONLY.value]
                     )
-                if accepted and publisher_count < task.min_sources:
+                if accepted and publisher_count < field_min_sources:
                     issues = _deduplicate(
                         [*issues, CheckerIssueCode.INSUFFICIENT_SOURCES.value]
                     )
@@ -1763,7 +1868,7 @@ class CheckerAgent:
                         status = CheckerFieldStatus.PARTIAL
                     elif (
                         needs_corroboration
-                        or publisher_count < task.min_sources
+                        or publisher_count < field_min_sources
                         or (
                             task.requires_independent_corroboration
                             and not independent_met
@@ -1845,7 +1950,7 @@ class CheckerAgent:
                         or item.semantic_fit != CheckerSemanticFit.DIRECT
                         or item.source_support != CheckerSourceSupport.SUFFICIENT
                     ]
-                    source_deficit = max(0, task.min_sources - publisher_count)
+                    source_deficit = max(0, field_min_sources - publisher_count)
                     if status in {
                         CheckerFieldStatus.NOT_REVIEWED,
                         CheckerFieldStatus.NEEDS_REVIEW,
@@ -1961,7 +2066,7 @@ class CheckerAgent:
                                 f"Resolve field {target_field!r} for the research "
                                 f"question: {task.question}"
                             ),
-                            required_source_types=task.preferred_source_types,
+                            required_source_types=field_source_types,
                             related_claim_ids=unresolved_claim_ids,
                             supporting_claim_ids=accepted,
                             route=route,

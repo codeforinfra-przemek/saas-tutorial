@@ -33,8 +33,24 @@ from .agents.reviewer import (
 from .agents.resolver import ResolverAgent, ResolverValidationError
 from .agents.searcher import SearcherAgent, SearcherValidationError
 from .catalog import CatalogError, load_question_catalog, select_questions
+from .benchmark import (
+    DEFAULT_BENCHMARK_SPEC_PATH,
+    BenchmarkValidationError,
+    create_gold_set,
+    create_submission,
+    evaluate_submission,
+    load_benchmark_spec,
+    load_gold_set,
+    load_submission,
+    save_gold_set,
+    save_submission,
+)
+from .benchmark_experiment import (
+    BenchmarkExperimentError,
+    run_ai_assisted_benchmark,
+)
 from .config import ConfigurationError, OpenAISettings
-from .documents import DocumentFetcher, FetchPolicy
+from .documents import DiskCachedDocumentFetcher, DocumentFetcher, FetchPolicy
 from .llm.openai_client import OpenAIPlannerClient, PlannerProviderError
 from .llm.openai_checker_client import OpenAICheckerClient
 from .llm.openai_extractor_client import OpenAIExtractorClient
@@ -246,6 +262,92 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile", help="Show one profile by canonical ID or alias."
     )
 
+    benchmark_parser = subparsers.add_parser(
+        "benchmark",
+        help="Prepare or evaluate the independent PL:L1 empirical benchmark.",
+    )
+    benchmark_parser.add_argument(
+        "--spec",
+        type=Path,
+        default=DEFAULT_BENCHMARK_SPEC_PATH,
+        help="Benchmark policy YAML (default: bundled PL:L1 pilot).",
+    )
+    benchmark_action = benchmark_parser.add_mutually_exclusive_group(required=True)
+    benchmark_action.add_argument(
+        "--show-spec",
+        action="store_true",
+        help="Print the calibrated brands, fields and pilot gates.",
+    )
+    benchmark_action.add_argument(
+        "--init-gold-set",
+        type=Path,
+        metavar="PATH",
+        help="Create a blank manual gold-set JSON for independent research.",
+    )
+    benchmark_action.add_argument(
+        "--init-submission",
+        type=Path,
+        metavar="PATH",
+        help="Create a blank result/review submission JSON.",
+    )
+    benchmark_action.add_argument(
+        "--evaluate",
+        type=Path,
+        metavar="SUBMISSION",
+        help="Evaluate a completed submission against the pilot gates.",
+    )
+    benchmark_action.add_argument(
+        "--run-ai-experiment",
+        type=Path,
+        metavar="REPORT",
+        help=(
+            "Run/resume the blind AI-assisted Gold, direct ChatGPT and review "
+            "experiment; write its detailed checkpoint/report here."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--method",
+        choices=("researcher_chatgpt", "pipeline"),
+        help="Required with --init-submission.",
+    )
+    benchmark_parser.add_argument(
+        "--operator",
+        default="",
+        help="Researcher/operator recorded in a new template.",
+    )
+    benchmark_parser.add_argument(
+        "--gold-set",
+        type=Path,
+        help="Optional completed independent gold set used during evaluation.",
+    )
+    benchmark_parser.add_argument(
+        "--direct-submission",
+        type=Path,
+        help="Researcher + ChatGPT submission updated by --run-ai-experiment.",
+    )
+    benchmark_parser.add_argument(
+        "--pipeline-submission",
+        type=Path,
+        help="Fully attempted pipeline submission reviewed by --run-ai-experiment.",
+    )
+    benchmark_parser.add_argument(
+        "--max-cost-usd",
+        type=Decimal,
+        default=Decimal("8.00"),
+        help="Known-cost ceiling checked between complete experiment calls.",
+    )
+    benchmark_parser.add_argument(
+        "--max-search-calls",
+        type=int,
+        default=8,
+        help="Maximum web-search actions for each Gold/direct brand call.",
+    )
+    benchmark_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Explicitly replace an existing initialization target.",
+    )
+
     search_parser = subparsers.add_parser(
         "search",
         help="Run Searcher against an explicit plan and store source candidates.",
@@ -295,6 +397,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=1,
         help="Minimum exact Planner queries required per task (default: 1).",
+    )
+    search_parser.add_argument(
+        "--official-first",
+        action="store_true",
+        help=(
+            "Materialize the unverified website seed and common first-party paths "
+            "before using paid search for gaps. Seeds remain unverified until retrieval/review."
+        ),
     )
     search_parser.add_argument(
         "--max-retry-tasks",
@@ -404,6 +514,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Hard evidence-text cap per OpenAI request (default: 100000).",
     )
     extract_parser.add_argument(
+        "--document-cache-dir",
+        type=Path,
+        help="Optional cross-run parsed-document cache keyed by URL and content hash.",
+    )
+    extract_parser.add_argument(
         "--model", help="Override OPENAI_MODEL for this invocation."
     )
     extract_parser.add_argument(
@@ -445,6 +560,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Review only changed Executor task scopes and inherit successful paid "
             "judgments through verified predecessor lineage."
+        ),
+    )
+    check_parser.add_argument(
+        "--risk-based",
+        action="store_true",
+        help=(
+            "Send only high-risk financial, website-identity and scale task scopes "
+            "to semantic review; retain other grounded claims for Human Review."
         ),
     )
     check_parser.add_argument(
@@ -665,6 +788,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=20,
         help="Hard paid Extractor request cap for this execution (default: 20).",
+    )
+    execute_parser.add_argument(
+        "--document-cache-dir",
+        type=Path,
+        help=(
+            "Optional canonical URL/content cache shared across runs; retrieval "
+            "still retains per-artifact provenance."
+        ),
     )
     execute_parser.add_argument(
         "--model", help="Override OPENAI_MODEL for Searcher and Extractor children."
@@ -1168,6 +1299,7 @@ def _run_search(args: argparse.Namespace) -> int:
                 max_retry_tasks=args.max_retry_tasks,
                 retry_search_calls=args.retry_search_calls,
                 max_candidate_routes=args.max_candidate_routes,
+                official_first=args.official_first,
             )
         except SearcherProviderError as exc:
             failure_artifacts: list[AgentFailureArtifact] = []
@@ -1467,6 +1599,11 @@ def _run_extract(args: argparse.Namespace) -> int:
             max_text_chars=args.max_pdf_scan_chars,
         )
         fetcher = DocumentFetcher(policy=fetch_policy)
+        if args.document_cache_dir is not None:
+            fetcher = DiskCachedDocumentFetcher(
+                fetcher,
+                args.document_cache_dir.resolve(),
+            )
         raw_document_archiver = RawDocumentArchive(
             result_directory
             / document_archive_directory_name(iteration, free=args.offline),
@@ -1797,6 +1934,7 @@ def _run_check(args: argparse.Namespace) -> int:
                 max_claims=args.max_claims,
                 max_evidence_chars=args.max_evidence_chars,
                 prior_checker_results=prior_checker_results,
+                risk_based=bool(getattr(args, "risk_based", False)),
                 prior_checker_sha256=prior_checker_sha256,
                 prior_checker_reference=prior_checker_reference,
                 prior_extraction_results=prior_extraction_results,
@@ -2436,6 +2574,11 @@ def _run_execute(args: argparse.Namespace) -> int:
             max_text_chars=args.max_pdf_scan_chars,
         )
         fetcher = DocumentFetcher(policy=fetch_policy)
+        if args.document_cache_dir is not None:
+            fetcher = DiskCachedDocumentFetcher(
+                fetcher,
+                args.document_cache_dir.resolve(),
+            )
         raw_document_archiver = RawDocumentArchive(
             result_directory
             / document_archive_directory_name(
@@ -2741,10 +2884,10 @@ def _save_normalizer_failure_ledger(results, reference_path: Path) -> Path:
 
 def _run_normalize(args: argparse.Namespace) -> int:
     checker_results, check_sha256 = load_checker_results(args.check)
-    if checker_results.checker_mode == CheckerMode.INCREMENTAL:
+    if checker_results.checker_mode != CheckerMode.FULL:
         raise NormalizerValidationError(
             "Normalizer requires a full Checker artifact. Run `datacollector check` "
-            "without --incremental against the same extraction first."
+            "without --incremental or --risk-based against the same extraction first."
         )
     if not checker_results.passed and not args.allow_incomplete:
         raise NormalizerValidationError(
@@ -4147,6 +4290,93 @@ def _run_profiles(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_benchmark(args: argparse.Namespace) -> int:
+    spec = load_benchmark_spec(args.spec)
+    if args.show_spec:
+        print(json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        return 0
+    if args.init_gold_set:
+        artifact = create_gold_set(spec, researcher=args.operator)
+        save_gold_set(args.init_gold_set, artifact, overwrite=args.force)
+        output = {
+            "created": "gold_set",
+            "path": str(args.init_gold_set),
+            "brands": len(artifact.brands),
+            "fields_per_brand": len(spec.fields),
+            "warning": "Fill independently; do not copy pipeline output into the gold set.",
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return 0
+    if args.init_submission:
+        if not args.method:
+            raise BenchmarkValidationError(
+                "--method is required with --init-submission."
+            )
+        artifact = create_submission(
+            spec,
+            method=args.method,
+            operator=args.operator,
+        )
+        save_submission(args.init_submission, artifact, overwrite=args.force)
+        output = {
+            "created": "submission",
+            "method": args.method,
+            "path": str(args.init_submission),
+            "brands": len(artifact.brands),
+            "fields_per_brand": len(spec.fields),
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return 0
+    if args.evaluate:
+        submission = load_submission(args.evaluate)
+        gold_set = load_gold_set(args.gold_set) if args.gold_set else None
+        output = evaluate_submission(spec, submission, gold_set=gold_set)
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return 0
+    if args.run_ai_experiment:
+        missing = [
+            flag
+            for flag, value in (
+                ("--gold-set", args.gold_set),
+                ("--direct-submission", args.direct_submission),
+                ("--pipeline-submission", args.pipeline_submission),
+            )
+            if value is None
+        ]
+        if missing:
+            raise BenchmarkValidationError(
+                "--run-ai-experiment requires " + ", ".join(missing) + "."
+            )
+        if args.max_cost_usd <= 0:
+            raise BenchmarkValidationError("--max-cost-usd must be positive.")
+        if not 1 <= args.max_search_calls <= 30:
+            raise BenchmarkValidationError(
+                "--max-search-calls must be between 1 and 30."
+            )
+        report = run_ai_assisted_benchmark(
+            gold_path=args.gold_set,
+            direct_path=args.direct_submission,
+            pipeline_path=args.pipeline_submission,
+            report_path=args.run_ai_experiment,
+            settings=OpenAISettings.from_env(),
+            max_cost_usd=args.max_cost_usd,
+            max_search_calls=args.max_search_calls,
+        )
+        output = {
+            "status": "completed",
+            "report_path": str(args.run_ai_experiment),
+            "brands": len(report["brands"]),
+            "calls": len(report["calls"]),
+            "known_experiment_cost_usd": report["known_experiment_cost_usd"],
+            "direct": report["direct_evaluation"]["aggregate"],
+            "pipeline": report["pipeline_evaluation"]["aggregate"],
+            "methodology_warning": report["methodology"]["review"],
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return 0
+    raise BenchmarkValidationError("No benchmark action selected.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -4175,8 +4405,12 @@ def main(argv: list[str] | None = None) -> int:
             return _run_questions(args)
         if args.command == "profiles":
             return _run_profiles(args)
+        if args.command == "benchmark":
+            return _run_benchmark(args)
     except (
         CatalogError,
+        BenchmarkExperimentError,
+        BenchmarkValidationError,
         ProfileCatalogError,
         ConfigurationError,
         PlannerProviderError,

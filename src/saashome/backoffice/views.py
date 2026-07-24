@@ -1,11 +1,12 @@
 from django.contrib import messages
 import hashlib
+import json
 
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.paginator import Paginator
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -52,7 +53,15 @@ from franchises.research_launches import (
     retry_research_launch,
 )
 
-from .forms import SalesActivityForm, SalesOpportunityStageForm
+from .forms import (
+    BenchmarkCampaignForm,
+    BenchmarkGoldFieldForm,
+    BenchmarkGoldPromotionForm,
+    BenchmarkMetricsForm,
+    BenchmarkSubmissionFieldForm,
+    SalesActivityForm,
+    SalesOpportunityStageForm,
+)
 from .models import SalesOpportunity
 from .services.revenue import (
     get_cancelled_subscriptions, get_monthly_revenue_forecast, get_recent_revenue_events,
@@ -62,6 +71,25 @@ from .services.revenue import (
 from .services.sales import (
     add_sales_activity, change_opportunity_stage, get_opportunity_pipeline, get_overdue_followups,
     get_sales_dashboard, get_stale_opportunities,
+)
+from franchises.research_benchmark import (
+    ResearchBenchmarkError,
+    benchmark_brand,
+    benchmark_campaign_scope,
+    benchmark_dashboard,
+    benchmark_gold_brand,
+    benchmark_gold_dashboard,
+    benchmark_paths,
+    eligible_campaigns,
+    export_campaign_submission,
+    update_gold_field,
+    update_submission_field,
+    update_submission_metrics,
+)
+from franchises.research_gold_promotion import (
+    GoldPromotionError,
+    gold_promotion_preview,
+    promote_gold_to_workspace,
 )
 
 
@@ -160,6 +188,9 @@ def _workspace_counts(workspace):
         "reviewed": total - pending,
         "accepted": counts.get(FranchiseResearchReviewField.DECISION_ACCEPTED, 0),
         "edited": counts.get(FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED, 0),
+        "policy_accepted": counts.get(
+            FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED, 0
+        ),
         "rejected": counts.get(FranchiseResearchReviewField.DECISION_REJECTED, 0),
         "gaps": counts.get(FranchiseResearchReviewField.DECISION_DOCUMENTED_GAP, 0),
         "progress": round((total - pending) * 100 / total) if total else 0,
@@ -233,6 +264,316 @@ def research_campaign_list_view(request):
 
 
 @staff_member_required
+def research_benchmark_view(request):
+    try:
+        dashboard = benchmark_dashboard()
+    except ResearchBenchmarkError as exc:
+        messages.error(request, str(exc))
+        dashboard = None
+    scope = benchmark_campaign_scope()
+    return render(
+        request,
+        "backoffice/research_benchmark.html",
+        internal_context(
+            page_title="PL:L1 Benchmark Workbench",
+            dashboard=dashboard,
+            campaigns=eligible_campaigns(),
+            benchmark_scope=scope,
+            benchmark_campaign_form=BenchmarkCampaignForm(
+                brand_count=scope["total"]
+            ),
+        ),
+    )
+
+
+@staff_member_required
+@require_POST
+def research_benchmark_campaign_create_view(request):
+    scope = benchmark_campaign_scope()
+    form = BenchmarkCampaignForm(request.POST, brand_count=scope["total"])
+    if not form.is_valid():
+        messages.error(request, _benchmark_form_errors(form))
+        return redirect("backoffice:research_benchmark")
+    if scope["missing_slugs"]:
+        messages.error(
+            request,
+            "Brakuje marek benchmarkowych w katalogu: "
+            + ", ".join(scope["missing_slugs"]),
+        )
+        return redirect("backoffice:research_benchmark")
+    if scope["busy_slugs"]:
+        messages.error(
+            request,
+            "Aktywny research już działa dla: " + ", ".join(scope["busy_slugs"]),
+        )
+        return redirect("backoffice:research_benchmark")
+    data = form.cleaned_data
+    per_run_cost = data["max_cost_usd"]
+    total_cost = per_run_cost * scope["total"]
+    try:
+        campaign = create_research_campaign(
+            name=f"PL:L1 benchmark v1 — {timezone.localdate().isoformat()}",
+            description=(
+                "Kontrolowana kohorta 10 marek z benchmarku PL:L1. "
+                "Nie publikować bez pełnego Human Review."
+            ),
+            franchises=scope["franchises"],
+            profile_id="PL:L1",
+            configuration={
+                "max_cost_usd": str(per_run_cost),
+                "initial_task_limit": 7,
+                "max_search_calls": 10,
+                "max_sources": 10,
+                "max_extractor_api_calls": 15,
+                "benchmark_spec_version": "1.0.0",
+            },
+            max_total_cost_usd=total_cost,
+            max_concurrent_runs=data["max_concurrent_runs"],
+            include_previously_researched=True,
+            allow_inactive=True,
+            requested_by=request.user,
+        )
+    except (ResearchCampaignError, ResearchLaunchError, ValueError) as exc:
+        messages.error(request, str(exc))
+        return redirect("backoffice:research_benchmark")
+    messages.success(
+        request,
+        f"Utworzono właściwą kampanię benchmarkową: {scope['total']} marek, "
+        f"maksymalnie ${total_cost:.2f}.",
+    )
+    return redirect(
+        "backoffice:research_campaign_detail",
+        campaign_id=campaign.campaign_id,
+    )
+
+
+@staff_member_required
+def research_benchmark_brand_view(request, brand_slug):
+    try:
+        context = benchmark_brand(brand_slug)
+    except ResearchBenchmarkError as exc:
+        raise Http404(str(exc)) from exc
+    return render(
+        request,
+        "backoffice/research_benchmark_brand.html",
+        internal_context(
+            page_title=f"Benchmark: {context['definition'].name}",
+            **context,
+        ),
+    )
+
+
+@staff_member_required
+def research_benchmark_gold_view(request):
+    try:
+        context = benchmark_gold_dashboard()
+    except ResearchBenchmarkError as exc:
+        messages.error(request, str(exc))
+        context = None
+    return render(
+        request,
+        "backoffice/research_benchmark_gold.html",
+        internal_context(
+            page_title="Zaślepiony Gold Set PL:L1",
+            dashboard=context,
+        ),
+    )
+
+
+@staff_member_required
+def research_benchmark_gold_brand_view(request, brand_slug):
+    try:
+        context = benchmark_gold_brand(brand_slug)
+    except ResearchBenchmarkError as exc:
+        raise Http404(str(exc)) from exc
+    return render(
+        request,
+        "backoffice/research_benchmark_gold_brand.html",
+        internal_context(
+            page_title=f"Gold Set: {context['definition'].name}",
+            **context,
+        ),
+    )
+
+
+@staff_member_required
+def research_benchmark_gold_promote_view(request, brand_slug):
+    workspace_id = (
+        request.POST.get("workspace_id")
+        if request.method == "POST"
+        else request.GET.get("workspace")
+    )
+    try:
+        context = gold_promotion_preview(brand_slug, workspace_id)
+    except GoldPromotionError as exc:
+        messages.error(request, str(exc))
+        return redirect(
+            "backoffice:research_benchmark_gold_brand",
+            brand_slug=brand_slug,
+        )
+
+    if request.method == "POST":
+        form = BenchmarkGoldPromotionForm(
+            request.POST,
+            promotion_rows=context["promotion_rows"],
+        )
+        if form.is_valid():
+            try:
+                result = promote_gold_to_workspace(
+                    brand_slug,
+                    workspace_id=form.cleaned_data["workspace_id"],
+                    selected_field_ids=form.cleaned_data["selected_field_ids"],
+                    expected_gold_sha256=form.cleaned_data["gold_sha256"],
+                    actor=request.user,
+                )
+            except GoldPromotionError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(
+                    request,
+                    f"Przeniesiono {result['imported']} pól do Workbencha. "
+                    "Pozostają oczekujące na Human Review.",
+                )
+                return redirect(
+                    "backoffice:research_workbench_detail",
+                    workspace_id=result["workspace"].workspace_id,
+                )
+        else:
+            messages.error(request, _benchmark_form_errors(form))
+    else:
+        initial_ids = [
+            str(row.review_field.pk)
+            for row in context["promotion_rows"]
+            if row.selected_by_default and row.review_field is not None
+        ]
+        form = BenchmarkGoldPromotionForm(
+            promotion_rows=context["promotion_rows"],
+            initial={
+                "workspace_id": context["workspace"].workspace_id,
+                "gold_sha256": context["gold_sha256"],
+                "selected_field_ids": initial_ids,
+            },
+        )
+    return render(
+        request,
+        "backoffice/research_benchmark_gold_promote.html",
+        internal_context(
+            page_title=f"Gold → Workbench: {context['definition'].name}",
+            form=form,
+            **context,
+        ),
+    )
+
+
+def _benchmark_form_errors(form):
+    return " ".join(
+        f"{field}: {'; '.join(errors)}" for field, errors in form.errors.items()
+    )
+
+
+@staff_member_required
+@require_POST
+def research_benchmark_field_update_view(request, brand_slug, kind):
+    if kind == "gold":
+        form = BenchmarkGoldFieldForm(request.POST)
+    elif kind in {"manual", "pipeline"}:
+        form = BenchmarkSubmissionFieldForm(request.POST)
+    else:
+        raise Http404("Nieznany artefakt benchmarku.")
+    if not form.is_valid():
+        messages.error(request, _benchmark_form_errors(form))
+    else:
+        try:
+            if kind == "gold":
+                update_gold_field(
+                    brand_slug,
+                    form.cleaned_data["target_field"],
+                    form.cleaned_data,
+                )
+            else:
+                update_submission_field(
+                    kind,
+                    brand_slug,
+                    form.cleaned_data["target_field"],
+                    form.cleaned_data,
+                )
+        except ResearchBenchmarkError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, "Pole benchmarku zapisano i zwalidowano.")
+    if kind == "gold" and request.POST.get("return_to") == "gold":
+        return redirect(
+            "backoffice:research_benchmark_gold_brand",
+            brand_slug=brand_slug,
+        )
+    return redirect("backoffice:research_benchmark_brand", brand_slug=brand_slug)
+
+
+@staff_member_required
+@require_POST
+def research_benchmark_metrics_update_view(request, brand_slug, kind):
+    if kind not in {"manual", "pipeline"}:
+        raise Http404("Nieznany artefakt benchmarku.")
+    form = BenchmarkMetricsForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, _benchmark_form_errors(form))
+    else:
+        try:
+            update_submission_metrics(kind, brand_slug, form.cleaned_data)
+        except ResearchBenchmarkError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, "Czas, zakres i koszt zapisano.")
+    return redirect("backoffice:research_benchmark_brand", brand_slug=brand_slug)
+
+
+@staff_member_required
+@require_POST
+def research_benchmark_export_view(request):
+    campaign = get_object_or_404(
+        FranchiseResearchCampaign, campaign_id=request.POST.get("campaign_id")
+    )
+    try:
+        result = export_campaign_submission(
+            campaign,
+            exported_by=request.user.get_username(),
+        )
+    except ResearchBenchmarkError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            "Eksport zakończony: "
+            f"{result['matched_brands']}/{result['benchmark_brands']} marek, "
+            f"{result['ready_brands']} gotowych do oceny.",
+        )
+    return redirect("backoffice:research_benchmark")
+
+
+@staff_member_required
+def research_benchmark_download_view(request, artifact):
+    if artifact in {"gold", "manual", "pipeline", "experiment"}:
+        try:
+            path = benchmark_paths()[artifact]
+            payload = path.read_bytes()
+        except (KeyError, OSError) as exc:
+            raise Http404("Artefakt benchmarku nie istnieje.") from exc
+        response = HttpResponse(payload, content_type="application/json")
+        response["Content-Disposition"] = f'attachment; filename="{path.name}"'
+        return response
+    if artifact in {"manual-evaluation", "pipeline-evaluation"}:
+        dashboard = benchmark_dashboard()
+        key = artifact.removesuffix("-evaluation") + "_evaluation"
+        payload = json.dumps(
+            dashboard[key], ensure_ascii=False, indent=2
+        ).encode("utf-8")
+        response = HttpResponse(payload, content_type="application/json")
+        response["Content-Disposition"] = f'attachment; filename="{artifact}.json"'
+        return response
+    raise Http404("Nieznany eksport benchmarku.")
+
+
+@staff_member_required
 def research_campaign_create_view(request):
     form = ResearchCampaignForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -243,6 +584,7 @@ def research_campaign_create_view(request):
             "max_search_calls": data["max_search_calls"],
             "max_sources": data["max_sources"],
             "max_extractor_api_calls": data["max_extractor_api_calls"],
+            "auto_review_finalize": data["auto_review_finalize"],
         }
         try:
             campaign = create_research_campaign(
@@ -310,6 +652,9 @@ def research_campaign_status_view(request, campaign_id):
                 "franchise": launch.franchise.name,
                 "status": launch.status,
                 "status_label": launch.get_status_display(),
+                "scope_label": launch.scope_label,
+                "proposed_fields": launch.proposed_field_count,
+                "projectable_fields": launch.projectable_field_count,
                 "stage": launch.current_stage,
                 "progress": launch.progress_percent,
                 "cost": launch.cost_summary.get("estimated_cost_usd") or "0",
@@ -340,6 +685,22 @@ def research_campaign_status_view(request, campaign_id):
             "tokens": snapshot["tokens"],
             "cost_complete": snapshot["cost_complete"],
             "unknown_cost_attempts": snapshot["unknown_cost_attempts"],
+            "proposed_fields": snapshot["proposed_fields"],
+            "projectable_fields": snapshot["projectable_fields"],
+            "planned_fields": snapshot["planned_fields"],
+            "field_coverage_percent": snapshot["field_coverage_percent"],
+            "normalized_values": snapshot["normalized_values"],
+            "selected_documents": snapshot["selected_documents"],
+            "parsed_documents": snapshot["parsed_documents"],
+            "claims": snapshot["claims"],
+            "accepted_claims": snapshot["accepted_claims"],
+            "needs_review_claims": snapshot["needs_review_claims"],
+            "rejected_claims": snapshot["rejected_claims"],
+            "cost_per_proposed_field_usd": (
+                str(snapshot["cost_per_proposed_field_usd"])
+                if snapshot["cost_per_proposed_field_usd"] is not None
+                else None
+            ),
             "launches": launches,
         }
     )
@@ -388,6 +749,7 @@ def research_launch_create_view(request):
             "max_search_calls": data["max_search_calls"],
             "max_sources": data["max_sources"],
             "max_extractor_api_calls": data["max_extractor_api_calls"],
+            "auto_review_finalize": data["auto_review_finalize"],
         }
         try:
             launch = queue_research_launch(
@@ -622,8 +984,19 @@ def _reopen_workspace_if_needed(workspace):
         workspace.status = FranchiseResearchWorkspace.STATUS_REVIEW
         workspace.reviewed_by = None
         workspace.reviewed_at = None
+        workspace.auto_reviewed = False
+        workspace.review_policy_version = ""
+        workspace.auto_review_summary = {}
         workspace.save(
-            update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"]
+            update_fields=[
+                "status",
+                "reviewed_by",
+                "reviewed_at",
+                "auto_reviewed",
+                "review_policy_version",
+                "auto_review_summary",
+                "updated_at",
+            ]
         )
 
 
@@ -640,14 +1013,66 @@ def _workbench_return(request, workspace_id, *, anchor=""):
     return redirect(candidate)
 
 
+def _wants_json(request):
+    return (
+        request.headers.get("x-requested-with") == "XMLHttpRequest"
+        or "application/json" in request.headers.get("accept", "")
+    )
+
+
+def _field_review_payload(field):
+    return {
+        "id": field.pk,
+        "decision": field.decision,
+        "decision_label": field.get_decision_display(),
+        "effective_value": field.effective_value,
+        "reviewer_value": field.reviewer_value,
+        "reviewer_note": field.reviewer_note,
+        "decided_by": field.decided_by.get_username() if field.decided_by else None,
+        "decided_at": field.decided_at.isoformat() if field.decided_at else None,
+        "updated_at": field.updated_at.isoformat(),
+    }
+
+
+def _workbench_mutation_error(request, workspace_id, message, *, anchor="", status=400):
+    if _wants_json(request):
+        return JsonResponse({"ok": False, "error": message}, status=status)
+    messages.error(request, message)
+    return _workbench_return(request, workspace_id, anchor=anchor)
+
+
+def _field_review_json(workspace, field, event, message):
+    return JsonResponse(
+        {
+            "ok": True,
+            "message": message,
+            "field": _field_review_payload(field),
+            "counts": _workspace_counts(workspace),
+            "event": {
+                "message": event.message,
+                "created_at": timezone.localtime(event.created_at).strftime("%d.%m.%Y %H:%M"),
+                "actor": event.actor.get_username() if event.actor else None,
+            },
+        }
+    )
+
+
+def _field_version_conflict(request, workspace_id, field):
+    supplied_version = request.POST.get("field_version", "").strip()
+    if supplied_version and supplied_version != field.updated_at.isoformat():
+        return _workbench_mutation_error(
+            request,
+            workspace_id,
+            "To pole zostało już zmienione w innej karcie. Odśwież widok przed ponownym zapisem.",
+            anchor=f"field-{field.pk}",
+            status=409,
+        )
+    return None
+
+
 @staff_member_required
 @require_POST
 def research_workbench_field_action_view(request, workspace_id, pk, action):
-    workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
-    if workspace.is_finalized or workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
-        messages.error(request, "Najpierw otwórz Workbench ponownie do edycji.")
-        return _workbench_return(request, workspace_id)
-    field = get_object_or_404(workspace.review_fields, pk=pk)
     decisions = {
         "accept": FranchiseResearchReviewField.DECISION_ACCEPTED,
         "reject": FranchiseResearchReviewField.DECISION_REJECTED,
@@ -656,57 +1081,105 @@ def research_workbench_field_action_view(request, workspace_id, pk, action):
     }
     if action not in decisions:
         raise Http404
-    if action == "accept" and not field.effective_value:
-        messages.error(request, "Najpierw wpisz wartość albo oznacz pole jako udokumentowany brak.")
-        return _workbench_return(request, workspace_id, anchor=f"field-{field.pk}")
-    field.decision = (
-        FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED
-        if action == "accept" and field.reviewer_value.strip()
-        else decisions[action]
-    )
-    if action == "reset":
-        field.decided_by = None
-        field.decided_at = None
-    else:
-        field.decided_by = request.user
-        field.decided_at = timezone.now()
-    field.save(update_fields=["decision", "decided_by", "decided_at", "updated_at"])
-    _reopen_workspace_if_needed(workspace)
-    FranchiseResearchEvent.objects.create(
-        workspace=workspace,
-        event_type="field_decision",
-        message=f"{field.target_field}: {field.get_decision_display()}.",
-        metadata={"field_id": field.pk, "decision": field.decision},
-        actor=request.user,
-    )
-    messages.success(request, f"Zapisano decyzję dla pola „{field.target_field}”.")
+    with transaction.atomic():
+        workspace = get_object_or_404(
+            FranchiseResearchWorkspace.objects.select_for_update(),
+            workspace_id=workspace_id,
+        )
+        if workspace.is_finalized or workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
+            return _workbench_mutation_error(
+                request,
+                workspace_id,
+                "Najpierw otwórz Workbench ponownie do edycji.",
+                status=409,
+            )
+        field = get_object_or_404(
+            FranchiseResearchReviewField.objects.select_for_update(),
+            workspace=workspace,
+            pk=pk,
+        )
+        conflict = _field_version_conflict(request, workspace_id, field)
+        if conflict:
+            return conflict
+        if action == "accept" and not field.effective_value:
+            return _workbench_mutation_error(
+                request,
+                workspace_id,
+                "Najpierw wpisz wartość albo oznacz pole jako udokumentowany brak.",
+                anchor=f"field-{field.pk}",
+            )
+        field.decision = (
+            FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED
+            if action == "accept" and field.reviewer_value.strip()
+            else decisions[action]
+        )
+        if action == "reset":
+            field.decided_by = None
+            field.decided_at = None
+        else:
+            field.decided_by = request.user
+            field.decided_at = timezone.now()
+        field.save(update_fields=["decision", "decided_by", "decided_at", "updated_at"])
+        event = FranchiseResearchEvent.objects.create(
+            workspace=workspace,
+            event_type="field_decision",
+            message=f"{field.target_field}: {field.get_decision_display()}.",
+            metadata={"field_id": field.pk, "decision": field.decision},
+            actor=request.user,
+        )
+    message = f"Zapisano decyzję dla pola „{field.target_field}”."
+    if _wants_json(request):
+        return _field_review_json(workspace, field, event, message)
+    messages.success(request, message)
     return _workbench_return(request, workspace_id, anchor=f"field-{field.pk}")
 
 
 @staff_member_required
 @require_POST
 def research_workbench_field_edit_view(request, workspace_id, pk):
-    workspace = get_object_or_404(FranchiseResearchWorkspace, workspace_id=workspace_id)
-    if workspace.is_finalized or workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
-        messages.error(request, "Najpierw otwórz Workbench ponownie do edycji.")
-        return _workbench_return(request, workspace_id)
-    field = get_object_or_404(workspace.review_fields, pk=pk)
-    previous_document_ids = set(field.supporting_documents.values_list("id", flat=True))
-    form = ResearchReviewFieldForm(request.POST, instance=field)
-    if not form.is_valid():
-        messages.error(request, "Nie udało się zapisać korekty. Sprawdź wpisane dane.")
-    elif not form.cleaned_data["reviewer_value"].strip():
-        messages.error(request, "Wartość po korekcie nie może być pusta.")
-    else:
+    with transaction.atomic():
+        workspace = get_object_or_404(
+            FranchiseResearchWorkspace.objects.select_for_update(),
+            workspace_id=workspace_id,
+        )
+        if workspace.is_finalized or workspace.status != FranchiseResearchWorkspace.STATUS_REVIEW:
+            return _workbench_mutation_error(
+                request,
+                workspace_id,
+                "Najpierw otwórz Workbench ponownie do edycji.",
+                status=409,
+            )
+        field = get_object_or_404(
+            FranchiseResearchReviewField.objects.select_for_update(),
+            workspace=workspace,
+            pk=pk,
+        )
+        conflict = _field_version_conflict(request, workspace_id, field)
+        if conflict:
+            return conflict
+        previous_document_ids = set(field.supporting_documents.values_list("id", flat=True))
+        form = ResearchReviewFieldForm(request.POST, instance=field)
+        if not form.is_valid():
+            return _workbench_mutation_error(
+                request,
+                workspace_id,
+                "Nie udało się zapisać korekty. Sprawdź wpisane dane.",
+                anchor=f"field-{field.pk}",
+            )
+        if not form.cleaned_data["reviewer_value"].strip():
+            return _workbench_mutation_error(
+                request,
+                workspace_id,
+                "Wartość po korekcie nie może być pusta.",
+                anchor=f"field-{field.pk}",
+            )
         field = form.save(commit=False)
         field.decision = FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED
         field.decided_by = request.user
         field.decided_at = timezone.now()
         field.save()
         form.save_m2m()
-        current_document_ids = set(
-            field.supporting_documents.values_list("id", flat=True)
-        )
+        current_document_ids = set(field.supporting_documents.values_list("id", flat=True))
         impacted_document_ids = previous_document_ids | current_document_ids
         for document in workspace.documents.filter(id__in=impacted_document_ids):
             document.status = (
@@ -715,15 +1188,17 @@ def research_workbench_field_edit_view(request, workspace_id, pk):
                 else FranchiseResearchDocument.STATUS_PENDING
             )
             document.save(update_fields=["status"])
-        _reopen_workspace_if_needed(workspace)
-        FranchiseResearchEvent.objects.create(
+        event = FranchiseResearchEvent.objects.create(
             workspace=workspace,
             event_type="field_edited",
             message=f"Uzupełniono i zatwierdzono pole {field.target_field}.",
             metadata={"field_id": field.pk},
             actor=request.user,
         )
-        messages.success(request, "Korekta została zapisana i zaakceptowana.")
+    message = "Korekta została zapisana i zaakceptowana."
+    if _wants_json(request):
+        return _field_review_json(workspace, field, event, message)
+    messages.success(request, message)
     return _workbench_return(request, workspace_id, anchor=f"field-{field.pk}")
 
 

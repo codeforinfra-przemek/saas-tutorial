@@ -9,6 +9,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from .models import Franchise, FranchiseResearchCampaign, FranchiseResearchLaunch
+from .research_fields import L1_PUBLIC_FIELD_ORDER
 from .research_launches import (
     PROFILE_CHOICES,
     ResearchLaunchError,
@@ -59,10 +60,81 @@ def campaign_snapshot(campaign: FranchiseResearchCampaign) -> dict:
         for launch in launches
     )
     total = len(launches)
-    completed = statuses[FranchiseResearchLaunch.STATUS_SUCCEEDED]
+    complete = statuses[FranchiseResearchLaunch.STATUS_COMPLETE]
+    partial = statuses[FranchiseResearchLaunch.STATUS_PARTIAL]
+    insufficient = statuses[FranchiseResearchLaunch.STATUS_INSUFFICIENT]
+    legacy_succeeded = statuses[FranchiseResearchLaunch.STATUS_SUCCEEDED]
+    completed = complete + partial + insufficient + legacy_succeeded
     failed = statuses[FranchiseResearchLaunch.STATUS_FAILED]
     cancelled = statuses[FranchiseResearchLaunch.STATUS_CANCELLED]
     terminal = completed + failed + cancelled
+    proposed_fields = 0
+    projectable_fields = 0
+    planned_fields = 0
+    normalized_values = 0
+    selected_documents = 0
+    parsed_documents = 0
+    claims = 0
+    accepted_claims = 0
+    needs_review_claims = 0
+    rejected_claims = 0
+    auto_finalized = 0
+    published_fields = 0
+    for launch in launches:
+        planned_tasks = int(launch.result_summary.get("planned_tasks") or 0)
+        evaluated_tasks = int(launch.result_summary.get("evaluated_tasks") or 0)
+        launch.scope_label = (
+            f"zakres {evaluated_tasks}/{planned_tasks}"
+            if planned_tasks
+            else "zakres jeszcze nieustalony"
+        )
+        launch.proposed_field_count = 0
+        launch.projectable_field_count = 0
+        if launch.result_workspace_id:
+            targets = list(
+                launch.result_workspace.review_fields.exclude(
+                    proposed_values=[]
+                ).values_list("target_field", flat=True)
+            )
+            launch.proposed_field_count = len(set(targets))
+            launch.projectable_field_count = len(
+                {
+                    target
+                    for target in targets
+                    if target in L1_PUBLIC_FIELD_ORDER
+                }
+            )
+            if hasattr(launch.result_workspace, "finalization"):
+                auto_finalized += int(launch.result_workspace.auto_reviewed)
+                published_fields += (
+                    launch.result_workspace.finalization.published_fields.filter(
+                        status="projected",
+                        is_current=True,
+                    ).count()
+                )
+        proposed_fields += launch.proposed_field_count
+        projectable_fields += launch.projectable_field_count
+        if launch.result_workspace_id:
+            planned_fields += int(launch.result_workspace.planned_fields or 0)
+            normalized_values += int(
+                launch.result_workspace.normalized_values_count or 0
+            )
+        selected_documents += int(
+            launch.result_summary.get("selected_documents") or 0
+        )
+        parsed_documents += int(
+            launch.result_summary.get("parsed_documents") or 0
+        )
+        claims += int(launch.result_summary.get("claims") or 0)
+        accepted_claims += int(
+            launch.result_summary.get("accepted_claims") or 0
+        )
+        needs_review_claims += int(
+            launch.result_summary.get("needs_review_claims") or 0
+        )
+        rejected_claims += int(
+            launch.result_summary.get("rejected_claims") or 0
+        )
     progress = round(
         sum(int(launch.progress_percent or 0) for launch in launches) / total
     ) if total else 0
@@ -71,6 +143,9 @@ def campaign_snapshot(campaign: FranchiseResearchCampaign) -> dict:
         "queued": statuses[FranchiseResearchLaunch.STATUS_QUEUED],
         "running": statuses[FranchiseResearchLaunch.STATUS_RUNNING],
         "succeeded": completed,
+        "complete": complete,
+        "partial": partial,
+        "insufficient": insufficient,
         "failed": failed,
         "cancelled": cancelled,
         "terminal": terminal,
@@ -84,6 +159,24 @@ def campaign_snapshot(campaign: FranchiseResearchCampaign) -> dict:
             launch.cost_summary.get("cost_complete", True)
             for launch in launches
             if launch.cost_summary
+        ),
+        "proposed_fields": proposed_fields,
+        "projectable_fields": projectable_fields,
+        "planned_fields": planned_fields,
+        "field_coverage_percent": (
+            round(proposed_fields * 100 / planned_fields) if planned_fields else 0
+        ),
+        "normalized_values": normalized_values,
+        "selected_documents": selected_documents,
+        "parsed_documents": parsed_documents,
+        "claims": claims,
+        "accepted_claims": accepted_claims,
+        "needs_review_claims": needs_review_claims,
+        "rejected_claims": rejected_claims,
+        "auto_finalized": auto_finalized,
+        "published_fields": published_fields,
+        "cost_per_proposed_field_usd": (
+            estimated_cost / proposed_fields if proposed_fields else None
         ),
         "launches": launches,
     }
@@ -101,7 +194,15 @@ def sync_campaign(campaign: FranchiseResearchCampaign) -> FranchiseResearchCampa
     running = FranchiseResearchLaunch.STATUS_RUNNING in statuses
     queued = FranchiseResearchLaunch.STATUS_QUEUED in statuses
     failed = FranchiseResearchLaunch.STATUS_FAILED in statuses
-    succeeded = FranchiseResearchLaunch.STATUS_SUCCEEDED in statuses
+    succeeded = any(
+        status in statuses
+        for status in (
+            FranchiseResearchLaunch.STATUS_SUCCEEDED,
+            FranchiseResearchLaunch.STATUS_COMPLETE,
+            FranchiseResearchLaunch.STATUS_PARTIAL,
+            FranchiseResearchLaunch.STATUS_INSUFFICIENT,
+        )
+    )
     if running:
         status = FranchiseResearchCampaign.STATUS_RUNNING
     elif queued:
@@ -148,15 +249,19 @@ def create_research_campaign(
     max_total_cost_usd,
     max_concurrent_runs: int,
     include_previously_researched: bool,
+    allow_inactive: bool = False,
     requested_by=None,
 ) -> FranchiseResearchCampaign:
-    franchises = list(
-        Franchise.objects.select_for_update()
-        .filter(pk__in=[item.pk for item in franchises], is_active=True)
-        .order_by("name", "pk")
+    franchise_query = Franchise.objects.select_for_update().filter(
+        pk__in=[item.pk for item in franchises]
     )
+    if not allow_inactive:
+        franchise_query = franchise_query.filter(is_active=True)
+    franchises = list(franchise_query.order_by("name", "pk"))
     if not franchises:
-        raise ResearchCampaignError("Wybierz co najmniej jedną aktywną franczyzę.")
+        raise ResearchCampaignError(
+            "Wybierz co najmniej jedną franczyzę dostępną dla tego typu kampanii."
+        )
     if len(franchises) > 100:
         raise ResearchCampaignError("Jedna kampania może zawierać maksymalnie 100 franczyz.")
     if profile_id not in PROFILE_CHOICES:
@@ -214,8 +319,9 @@ def create_research_campaign(
             franchise,
             profile_id=profile_id,
             known_legal_name="",
-            # A directory URL is not automatically an audited official seed.
-            known_official_website="",
+            # A directory URL is only an unverified retrieval seed. Searcher
+            # and Human Review must validate it before it becomes official.
+            known_official_website=franchise.website_url,
             configuration=configuration,
             requested_by=requested_by,
             campaign=campaign,

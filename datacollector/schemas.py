@@ -1004,6 +1004,7 @@ class SearchLimits(ClosedModel):
     retry_search_calls: int = Field(default=1, ge=1, le=10)
     max_candidate_routes: int = Field(default=5, ge=0, le=100)
     query_overrides: dict[str, list[str]] = Field(default_factory=dict)
+    official_first: bool = False
 
 
 class SearchAction(ClosedModel):
@@ -1709,11 +1710,23 @@ class SearchResults(ClosedModel):
                     "provider sources."
                 )
             if any(
-                result.status != SearchTaskStatus.QUERY_WORKLOAD_ONLY
+                result.status not in {
+                    SearchTaskStatus.QUERY_WORKLOAD_ONLY,
+                    SearchTaskStatus.PARTIAL,
+                }
+                or (
+                    result.status == SearchTaskStatus.PARTIAL
+                    and any(
+                        source_by_id[source_id].origin
+                        != SearchSourceOrigin.PLAN_SEED
+                        for source_id in result.source_ids
+                    )
+                )
                 for result in self.task_results
             ):
                 raise ValueError(
-                    "Free Searcher task results must be query workloads only."
+                    "Free Searcher task results may contain only query workloads "
+                    "or explicitly partial unverified plan seeds."
                 )
         elif self.generated_by == "openai":
             if self.model is None or not self.model.strip():
@@ -2763,6 +2776,7 @@ class CheckerVerdict(StrEnum):
 class CheckerMode(StrEnum):
     FULL = "full"
     INCREMENTAL = "incremental"
+    RISK_BASED = "risk_based"
 
 
 class CheckerModelSemanticFit(StrEnum):
@@ -3325,11 +3339,15 @@ class CheckerResults(ClosedModel):
                     )
                 if self.reviewed_claim_ids != self.selected_claim_ids:
                     raise ValueError("Full Checker must review every selected claim.")
-            else:
+            elif self.checker_mode == CheckerMode.INCREMENTAL:
                 if not all(lineage):
                     raise ValueError(
                         "Incremental Checker requires complete predecessor lineage."
                     )
+            elif any(lineage):
+                raise ValueError(
+                    "Risk-based Checker cannot contain predecessor lineage."
+                )
 
         if [item.source_id for item in self.source_assessments] != (
             self.selected_source_ids
@@ -3400,12 +3418,22 @@ class CheckerResults(ClosedModel):
                 raise ValueError(
                     "Checker provider_executed must match recorded attempts."
                 )
-            if not self.failed_attempts and any(
-                item.verdict == CheckerVerdict.NOT_REVIEWED
+            unreviewed_claim_ids = {
+                item.claim_id
                 for item in self.claim_decisions
+                if item.verdict == CheckerVerdict.NOT_REVIEWED
+            }
+            allowed_unreviewed_claim_ids = (
+                set(self.inherited_claim_ids)
+                if self.checker_mode == CheckerMode.RISK_BASED
+                else set()
+            )
+            if not self.failed_attempts and not unreviewed_claim_ids.issubset(
+                allowed_unreviewed_claim_ids
             ):
                 raise ValueError(
-                    "Successful paid Checker cannot leave claims unreviewed."
+                    "Successful paid Checker left claims outside its declared "
+                    "risk-based scope unreviewed."
                 )
             reviewed_claim_set = set(self.reviewed_claim_ids)
             if self.failed_attempts and any(

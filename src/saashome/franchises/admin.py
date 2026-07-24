@@ -57,6 +57,8 @@ class FranchiseAdmin(admin.ModelAdmin):
         "name",
         "organization",
         "category",
+        "market_status",
+        "recruitment_status",
         "business_type",
         "min_investment",
         "max_investment",
@@ -76,6 +78,9 @@ class FranchiseAdmin(admin.ModelAdmin):
         "financing_available",
         "financial_performance_disclosed",
         "data_status",
+        "market_status",
+        "recruitment_status",
+        "website_url_status",
         "is_verified",
         "is_promoted",
         "is_featured",
@@ -83,10 +88,11 @@ class FranchiseAdmin(admin.ModelAdmin):
     )
     search_fields = ("name", "short_description", "description", "website_url")
     prepopulated_fields = {"slug": ("name",)}
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("catalog_imported_at", "created_at", "updated_at")
     inlines = [FranchiseLocationInline]
     fieldsets = (
-        (None, {"fields": ("name", "slug", "organization", "category", "short_description", "description", "logo", "website_url")}),
+        (None, {"fields": ("name", "slug", "organization", "category", "short_description", "description", "logo", "website_url", "website_url_status")}),
+        ("Market catalogue", {"fields": ("market_status", "recruitment_status", "market_status_checked_at", "catalog_sources", "catalog_imported_at")}),
         ("Investment", {"fields": ("min_investment", "max_investment", "initial_fee", "liquid_capital_required", "net_worth_required", "estimated_payback_months", "royalty_fee_text", "marketing_fee_text")}),
         ("Business model", {"fields": ("business_type", "required_premises", "home_based", "part_time_possible", "training_provided", "financing_available")}),
         ("Scale", {"fields": ("founded_year", "franchising_since", "total_units", "poland_units", "franchised_units", "company_owned_units", "units_opened_last_year", "units_closed_last_year", "units_transferred_last_year", "unit_growth_percent_1y")}),

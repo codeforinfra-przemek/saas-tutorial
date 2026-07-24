@@ -10,7 +10,7 @@ import unicodedata
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -773,16 +773,28 @@ def _select_tasks(
     return selected
 
 
-def _seed_sources(plan: ResearchPlan, discovered_at: datetime) -> list[SearchSource]:
+def _seed_sources(
+    plan: ResearchPlan,
+    discovered_at: datetime,
+    *,
+    tasks: list[ResearchTask] | None = None,
+    official_first: bool = False,
+) -> list[SearchSource]:
     urls: list[tuple[str, SourceType, str]] = []
     if plan.planner_input.known_official_website:
-        urls.append(
-            (
-                plan.planner_input.known_official_website,
-                SourceType.OFFICIAL,
-                "Known official website inherited from Planner input.",
-            )
-        )
+        website = plan.planner_input.known_official_website
+        urls.append((website, SourceType.UNKNOWN, "Unverified website seed inherited from Planner input."))
+        if official_first:
+            parsed = urlsplit(website)
+            root = urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
+            for path in ("franczyza/", "franchise/", "o-nas/", "kontakt/"):
+                urls.append(
+                    (
+                        urljoin(root, path),
+                        SourceType.UNKNOWN,
+                        "Deterministic official-first path candidate; reachability and ownership are not yet verified.",
+                    )
+                )
     for task in plan.tasks:
         for hint in task.source_hints:
             if _canonicalize_public_url(hint) is not None:
@@ -794,6 +806,7 @@ def _seed_sources(plan: ResearchPlan, discovered_at: datetime) -> list[SearchSou
                     )
                 )
     sources: list[SearchSource] = []
+    task_ids = [task.task_id for task in (tasks or plan.tasks)]
     seen: set[str] = set()
     for url, source_type, seed_note in urls:
         canonical = _canonicalize_public_url(url)
@@ -809,12 +822,12 @@ def _seed_sources(plan: ResearchPlan, discovered_at: datetime) -> list[SearchSou
                 source_type=source_type,
                 origin=SearchSourceOrigin.PLAN_SEED,
                 provider_observed=False,
-                task_ids=[],
+                task_ids=task_ids,
                 observed_in_action_ids=[],
                 discovered_via_queries=[],
                 relevance_note=(
-                    f"{seed_note} It was not searched or validated by the free "
-                    "Searcher."
+                    f"{seed_note} It is a retrieval candidate, not evidence; "
+                    "Extractor and Human Review must validate it."
                 ),
                 discovered_at=discovered_at,
             )
@@ -933,6 +946,7 @@ class SearcherAgent:
         retry_search_calls: int = 1,
         max_candidate_routes: int = DEFAULT_MAX_CANDIDATE_ROUTES,
         query_overrides: dict[str, list[str]] | None = None,
+        official_first: bool = False,
     ) -> SearchResults:
         if iteration < 1:
             raise SearcherValidationError("Searcher iteration must be at least 1.")
@@ -1072,33 +1086,54 @@ class SearcherAgent:
             )
 
         if self.llm is None:
-            sources = _seed_sources(plan, created_at)
-            task_results = [
-                SearchTaskResult(
+            sources = _seed_sources(
+                plan,
+                created_at,
+                tasks=sanitized,
+                official_first=official_first,
+            )
+            task_results = []
+            for task in sanitized:
+                seed_source_ids = [
+                    source.source_id
+                    for source in sources
+                    if task.task_id in source.task_ids
+                ]
+                task_results.append(SearchTaskResult(
                     task_id=task.task_id,
                     catalog_question_id=task.catalog_question_id,
-                    status=SearchTaskStatus.QUERY_WORKLOAD_ONLY,
+                    status=(
+                        SearchTaskStatus.PARTIAL
+                        if seed_source_ids
+                        else SearchTaskStatus.QUERY_WORKLOAD_ONLY
+                    ),
                     planned_queries=task.search_queries,
                     attempted_queries=[],
                     planned_queries_attempted=[],
                     derived_queries_attempted=[],
-                    query_coverage=SearchQueryCoverage.WORKLOAD_ONLY,
+                    query_coverage=(
+                        SearchQueryCoverage.NONE
+                        if seed_source_ids
+                        else SearchQueryCoverage.WORKLOAD_ONLY
+                    ),
                     minimum_query_attempts=min(
                         min_queries_per_task,
                         len(task.search_queries),
                     ),
                     minimum_sources=task.min_sources,
                     action_ids=[],
-                    source_ids=[],
-                    coverage_gaps=[],
+                    source_ids=seed_source_ids,
+                    coverage_gaps=(
+                        ["unverified_seed_requires_retrieval_and_validation"]
+                        if seed_source_ids
+                        else []
+                    ),
                     unresolved_targets=[],
                     notes=(
-                        "Free mode prepared the query workload only; no network "
-                        "search was executed."
+                        "Free mode materialized unverified seed candidates and the "
+                        "query workload; no network search was executed."
                     ),
-                )
-                for task in sanitized
-            ]
+                ))
             actions = []
             candidate_routes: list[CandidateRouteDecision] = []
             agent_usage = []
@@ -1121,6 +1156,15 @@ class SearcherAgent:
                 raise SearcherValidationError(
                     f"Cannot load Searcher prompt: {self.prompt_path}"
                 ) from exc
+            if official_first and plan.planner_input.known_official_website:
+                system_prompt += (
+                    "\n\nOFFICIAL-FIRST L1 MODE: The supplied website is an unverified "
+                    "seed that is fetched locally outside your tool budget. Use web "
+                    "search only for missing field-specific pages, registries, broad "
+                    "directory discovery, and independent confirmation. Never call "
+                    "the seed official merely because it was supplied. Prefer a few "
+                    "precise queries over repeating homepage discovery."
+                )
             reserved_retry_calls = min(
                 max_retry_tasks * retry_search_calls,
                 max_search_calls - 1,
@@ -1283,6 +1327,66 @@ class SearcherAgent:
             generated_by = "openai"
             search_executed = True
 
+            # Paid web search must not make a user-provided seed disappear.  It
+            # remains explicitly unverified and is never promoted to OFFICIAL
+            # merely because it was present in the directory database.
+            seed_sources = _seed_sources(
+                plan,
+                created_at,
+                tasks=sanitized,
+                official_first=official_first,
+            )
+            source_index = {
+                source.canonical_url: index for index, source in enumerate(sources)
+            }
+            for seed_source in seed_sources:
+                existing_index = source_index.get(seed_source.canonical_url)
+                if existing_index is None:
+                    source_index[seed_source.canonical_url] = len(sources)
+                    sources.append(seed_source)
+                # If the provider independently returned the same URL, retain
+                # its narrower action-backed task attribution. Expanding a
+                # provider source to every seed task would invent provenance;
+                # adding the seed's shared source ID without expanding it made
+                # task/source mappings asymmetric.
+            seed_urls = {source.canonical_url for source in seed_sources}
+            seed_source_ids_by_task = {
+                task.task_id: [
+                    source.source_id
+                    for source in sources
+                    if source.canonical_url in seed_urls
+                    and task.task_id in source.task_ids
+                ]
+                for task in sanitized
+            }
+            routed_task_results = []
+            for result in task_results:
+                seed_source_ids = seed_source_ids_by_task[result.task_id]
+                update = {
+                    "source_ids": _deduplicate(
+                        [*result.source_ids, *seed_source_ids]
+                    )
+                }
+                if seed_source_ids and result.status in {
+                    SearchTaskStatus.NOT_SEARCHED,
+                    SearchTaskStatus.NO_SOURCES_FOUND,
+                    SearchTaskStatus.QUERY_WORKLOAD_ONLY,
+                }:
+                    update["status"] = SearchTaskStatus.PARTIAL
+                    update["coverage_gaps"] = _deduplicate(
+                        [
+                            *result.coverage_gaps,
+                            "unverified_seed_requires_retrieval_and_validation",
+                        ]
+                    )
+                routed_task_results.append(result.model_copy(update=update))
+            task_results = routed_task_results
+            if seed_sources:
+                warnings.append(
+                    f"Added {len(seed_sources)} unverified official-first retrieval candidate(s); "
+                    "none is treated as official evidence before validation."
+                )
+
         selected_ids = [task.task_id for task in sanitized]
         unselected_ids = [
             task.task_id for task in plan.tasks if task.task_id not in set(selected_ids)
@@ -1323,6 +1427,7 @@ class SearcherAgent:
                     retry_search_calls=retry_search_calls,
                     max_candidate_routes=max_candidate_routes,
                     query_overrides=overrides,
+                    official_first=official_first,
                 ),
                 selected_task_ids=selected_ids,
                 unselected_task_ids=unselected_ids,

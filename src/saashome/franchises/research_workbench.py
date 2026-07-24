@@ -274,6 +274,21 @@ def create_research_workspace(
     }
     sources_by_id = {item.source_id: item for item in search.sources}
     citations_by_id = {item.citation_id: item for item in extraction.citations}
+    checker_decisions_by_id = {
+        item.claim_id: item for item in checker.claim_decisions
+    }
+    grounded_unreviewed_by_key = {}
+    if _enum_value(getattr(checker, "checker_mode", "")) == "risk_based":
+        for claim in extraction.claims:
+            decision = checker_decisions_by_id.get(claim.claim_id)
+            if (
+                decision is not None
+                and _enum_value(decision.verdict) == "not_reviewed"
+            ):
+                grounded_unreviewed_by_key.setdefault(
+                    (claim.task_id, claim.target_field),
+                    [],
+                ).append(claim)
     rows = []
     sort_order = 0
     for task in plan.tasks:
@@ -313,6 +328,15 @@ def create_research_workspace(
                                 "source_id": citation.source_id,
                                 "source_title": getattr(source, "title", "") or "Źródło",
                                 "url": getattr(source, "canonical_url", "") or "",
+                                "source_type": _enum_value(
+                                    getattr(source, "source_type", "")
+                                ),
+                                "discovered_at": (
+                                    source.discovered_at.isoformat()
+                                    if source is not None
+                                    and getattr(source, "discovered_at", None)
+                                    else ""
+                                ),
                             }
                         )
                 pipeline_status = _enum_value(normalized_field.status)
@@ -328,6 +352,73 @@ def create_research_workspace(
                 notes = []
                 source_ids = []
                 normalized_field_id = ""
+            # Risk-based Checker deliberately spends semantic-review tokens only
+            # on high-risk fields. Exact quote-grounded low-risk Extractor claims
+            # must still reach Human Review, but remain visibly unreviewed and
+            # cannot become public without an explicit human decision.
+            unreviewed_claims = grounded_unreviewed_by_key.get(
+                (task.task_id, target_field),
+                [],
+            )
+            if not proposed_values and unreviewed_claims:
+                raw_source_ids = []
+                for claim in unreviewed_claims:
+                    proposed_values.append(
+                        {
+                            "id": claim.claim_id,
+                            "display": claim.value_text,
+                            "canonical_text": claim.value_text,
+                            "type": "text",
+                            "precision": "as_stated",
+                            "needs_corroboration": True,
+                            "provenance": "extractor_grounded_unreviewed",
+                        }
+                    )
+                    for citation_id in claim.citation_ids:
+                        if citation_id in seen_citations:
+                            continue
+                        seen_citations.add(citation_id)
+                        citation = citations_by_id.get(citation_id)
+                        if citation is None:
+                            continue
+                        source = sources_by_id.get(citation.source_id)
+                        raw_source_ids.append(citation.source_id)
+                        evidence.append(
+                            {
+                                "citation_id": citation_id,
+                                "quote": citation.quote,
+                                "locator": citation.locator,
+                                "source_id": citation.source_id,
+                                "source_title": (
+                                    getattr(source, "title", "") or "Źródło"
+                                ),
+                                "url": (
+                                    getattr(source, "canonical_url", "") or ""
+                                ),
+                                "source_type": _enum_value(
+                                    getattr(source, "source_type", "")
+                                ),
+                                "discovered_at": (
+                                    source.discovered_at.isoformat()
+                                    if source is not None
+                                    and getattr(source, "discovered_at", None)
+                                    else ""
+                                ),
+                                "provenance": "extractor_grounded_unreviewed",
+                            }
+                        )
+                source_ids = list(
+                    dict.fromkeys([*source_ids, *raw_source_ids])
+                )
+                pipeline_status = "grounded_unreviewed"
+                checker_status = "not_reviewed"
+                notes = [
+                    *notes,
+                    (
+                        "Quote-grounded Extractor proposal omitted from semantic "
+                        "Checker by the PL:L1 risk policy; requires Human Review."
+                    ),
+                ]
             rows.append(
                 FranchiseResearchReviewField(
                     workspace=workspace,

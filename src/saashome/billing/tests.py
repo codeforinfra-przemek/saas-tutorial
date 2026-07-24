@@ -12,9 +12,11 @@ from billing.models import (
     FranchiseSubscription,
     FranchiseSubscriptionRequest,
     Plan,
+    FranchisePromotion,
     StripeWebhookEvent,
 )
 from billing.services import (
+    apply_promotion_flags,
     approve_subscription_request,
     franchise_has_feature,
     sync_subscription_from_stripe,
@@ -357,3 +359,33 @@ class StripeBillingTests(TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertTrue(failed_event.processed)
         self.assertEqual(failed_event.processing_error, "")
+
+
+class PromotionTrustSeparationTests(TestCase):
+    def setUp(self):
+        category = FranchiseCategory.objects.create(name="Trust", slug="trust")
+        self.franchise = Franchise.objects.create(
+            name="Sponsored but unverified",
+            slug="sponsored-unverified",
+            category=category,
+            short_description="Trust fixture",
+            data_status=Franchise.DATA_STATUS_RESEARCH_WITH_GAPS,
+            is_verified=False,
+        )
+
+    def test_legacy_paid_verified_product_is_only_a_promotion(self):
+        FranchisePromotion.objects.create(
+            franchise=self.franchise,
+            promotion_type=FranchisePromotion.TYPE_VERIFIED_BADGE,
+            starts_at=timezone.now() - timedelta(days=1),
+            ends_at=timezone.now() + timedelta(days=1),
+            priority=100,
+        )
+
+        decorated = apply_promotion_flags([self.franchise])[0]
+
+        self.assertTrue(decorated.display_promoted)
+        self.assertTrue(decorated.has_legacy_verified_promotion)
+        self.assertFalse(decorated.display_verified)
+        self.assertFalse(decorated.display_data_verified)
+        self.assertTrue(decorated.display_research_with_gaps)

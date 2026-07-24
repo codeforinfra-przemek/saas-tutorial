@@ -97,6 +97,12 @@ def _user_label(user) -> str:
     return (user.get_full_name() or user.get_username()).strip()
 
 
+def _reviewer_label(workspace: FranchiseResearchWorkspace) -> str:
+    if workspace.auto_reviewed:
+        return f"System / {workspace.review_policy_version}"
+    return _user_label(workspace.reviewed_by)
+
+
 def _load_lineage(workspace: FranchiseResearchWorkspace) -> dict:
     normalized_path = _resolved(workspace.normalized_reference)
     normalized, normalized_sha256 = load_normalizer_results(normalized_path)
@@ -176,7 +182,7 @@ def _ensure_base_import(
             )
         return existing
 
-    reviewer_name = _user_label(workspace.reviewed_by)
+    reviewer_name = _reviewer_label(workspace)
     output_dir = (
         lineage["normalized_path"].parent
         / "finalizations"
@@ -279,6 +285,9 @@ def _field_snapshot(field) -> dict:
         "value_origin": (
             "human"
             if field.decision == FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED
+            else "policy"
+            if field.decision
+            == FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED
             else "ai"
             if field.decision == FranchiseResearchReviewField.DECISION_ACCEPTED
             else "none"
@@ -288,7 +297,11 @@ def _field_snapshot(field) -> dict:
             if field.decision
             == FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED
             else field.proposed_display
-            if field.decision == FranchiseResearchReviewField.DECISION_ACCEPTED
+            if field.decision
+            in {
+                FranchiseResearchReviewField.DECISION_ACCEPTED,
+                FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED,
+            }
             else ""
         ),
         "proposed_values": field.proposed_values,
@@ -326,7 +339,10 @@ def finalize_research_workspace(
         return finalization, False
 
     decision = _review_decision(workspace)
-    if workspace.reviewed_by is None or workspace.reviewed_at is None:
+    if (
+        workspace.reviewed_at is None
+        or (workspace.reviewed_by is None and not workspace.auto_reviewed)
+    ):
         raise ResearchFinalizationError("The final Workbench decision is not signed.")
     active_jobs = workspace.jobs.filter(status__in=["queued", "running"])
     if active_job_id is not None:
@@ -352,6 +368,7 @@ def finalize_research_workspace(
         in {
             FranchiseResearchReviewField.DECISION_ACCEPTED,
             FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED,
+            FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED,
         }
         and not item["effective_value"]
     ]
@@ -381,7 +398,8 @@ def finalize_research_workspace(
         "normalization_id": str(workspace.normalization_id),
         "normalized_sha256": workspace.normalized_sha256,
         "decision": decision.value,
-        "reviewer": _user_label(workspace.reviewed_by),
+        "reviewer": _reviewer_label(workspace),
+        "review_policy_version": workspace.review_policy_version,
         "reviewer_notes": workspace.reviewer_notes,
         "reviewed_at": workspace.reviewed_at.isoformat(),
         "fields": field_snapshots,
@@ -397,6 +415,10 @@ def finalize_research_workspace(
         for name, decision_value in (
             ("accepted", FranchiseResearchReviewField.DECISION_ACCEPTED),
             ("edited", FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED),
+            (
+                "policy_accepted",
+                FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED,
+            ),
             ("rejected", FranchiseResearchReviewField.DECISION_REJECTED),
             ("gaps", FranchiseResearchReviewField.DECISION_DOCUMENTED_GAP),
             ("pending", FranchiseResearchReviewField.DECISION_PENDING),
@@ -449,7 +471,7 @@ def finalize_research_workspace(
         supersedes=previous_finalization,
         decision=decision.value,
         reviewer=workspace.reviewed_by,
-        reviewer_name=_user_label(workspace.reviewed_by),
+        reviewer_name=_reviewer_label(workspace),
         reviewer_notes=workspace.reviewer_notes,
         normalized_sha256=workspace.normalized_sha256,
         workspace_state_sha256=state_sha256,
@@ -458,6 +480,7 @@ def finalize_research_workspace(
         field_count=len(fields),
         accepted_count=counts["accepted"],
         edited_count=counts["edited"],
+        policy_accepted_count=counts["policy_accepted"],
         rejected_count=counts["rejected"],
         gap_count=counts["gaps"],
         pending_count=counts["pending"],

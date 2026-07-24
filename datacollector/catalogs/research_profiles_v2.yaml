@@ -1,10 +1,181 @@
-version: "2.0.0"
+version: "2.1.0"
 title: "Country-calibrated franchise research profiles"
 question_catalog_version: "1.0.0"
 
 profiles:
-  - profile_id: "PL:L1:v1"
+  - profile_id: "PL:L1:v2"
     aliases: ["PL:L1"]
+    country: "PL"
+    level: "L1"
+    name: "Polska — rdzeń decyzyjny katalogu"
+    description: >-
+      Dwadzieścia publicznych pól, które użytkownik wykorzystuje do pierwszego
+      porównania marki, kosztów, wymagań, wsparcia i skali sieci.
+    intended_use: >-
+      Tanie masowe nasycenie katalogu pełnym, uczciwie oznaczonym L1 oraz
+      benchmark researcher plus ChatGPT kontra audytowalny pipeline.
+    access_scope: public
+    legacy_depth: due_diligence
+    default_availability: public_optional
+    country_authoritative_sources:
+      - "https://biznes.gov.pl/"
+    completion_required_availabilities: [public_expected]
+    question_rules:
+      - question_id: scope.brand_identity
+        requirement: critical
+        title: "Tożsamość marki i oficjalna oferta"
+        question: >-
+          Jaka jest nazwa, kategoria i zwięzły model marki oraz które strony i
+          ogólny kanał kontaktu są oficjalne dla aktualnej oferty franczyzowej?
+        search_query_templates:
+          - '"{brand}" franczyza oficjalna strona'
+          - '"{brand}" oficjalna oferta franczyzowa kontakt'
+        fields:
+          brand.name: public_expected
+          brand.category: public_expected
+          brand.public_summary: public_optional
+          websites.official: public_expected
+          websites.franchise_offer: public_expected
+          contact.generic_business_route: public_expected
+        min_sources: 1
+        preferred_source_types: [official, industry, marketplace]
+        acceptance_criteria: >-
+          Nazwa i kanały muszą być powiązane z aktywną marką. Statyczna aktywna
+          strona nie jest odrzucana wyłącznie dlatego, że nie ma daty publikacji;
+          zapisuje się datę pobrania i typ źródła.
+        requires_independent_corroboration: false
+        clear_max_age_days: true
+        dependencies: []
+
+      - question_id: scope.offer_and_transaction
+        requirement: critical
+        title: "Format współpracy i próg wejścia kandydata"
+        question: >-
+          Czy oferta dotyczy pojedynczej jednostki, wielu jednostek, master
+          franczyzy, transferu lub odsprzedaży oraz jakie kapitałowe i lokalowe
+          wymagania kandydata są publicznie deklarowane?
+        search_query_templates:
+          - '"{brand}" franczyza pojedyncza multiunit master odsprzedaż'
+          - '"{brand}" franczyza wymagania kandydat lokal'
+        fields:
+          offer.unit_formats: public_expected
+          candidate.capital_requirement: public_expected
+          candidate.premises_requirements: public_expected
+        min_sources: 1
+        preferred_source_types: [official, industry, marketplace]
+        acceptance_criteria: >-
+          Każda wartość zachowuje format transakcji i zakres oferty; wymagany
+          kapitał nie jest mylony z całkowitą inwestycją ani opłatą wejściową.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity]
+
+      - question_id: fdd05.initial_fees
+        requirement: critical
+        title: "Opłata wejściowa"
+        question: >-
+          Jaka opłata za przystąpienie jest obecnie publicznie deklarowana?
+        search_query_templates:
+          - '"{brand}" franczyza opłata wstępna wpisowa'
+          - '"{brand}" franczyza opłata za przystąpienie'
+        fields:
+          fees.joining_fee: public_expected
+        min_sources: 1
+        preferred_source_types: [official, legal_document, industry]
+        acceptance_criteria: >-
+          Kwota zachowuje walutę, netto lub brutto, format oferty, datę ważności
+          podaną przez autora albo co najmniej datę pobrania źródła.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd06.other_fees
+        requirement: required
+        title: "Opłaty bieżące"
+        question: >-
+          Jakie opłaty royalty i marketingowe są obecnie publicznie podawane?
+        search_query_templates:
+          - '"{brand}" franczyza royalty opłata marketingowa'
+          - '"{brand}" franczyza opłaty miesięczne bieżące'
+        fields:
+          fees.royalty: public_optional
+          fees.marketing: public_optional
+        min_sources: 1
+        preferred_source_types: [official, legal_document, industry]
+        acceptance_criteria: >-
+          Kwota lub procent zachowują podstawę naliczenia, częstotliwość, format
+          oferty i datę podaną przez autora albo datę pobrania.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd07.initial_investment
+        requirement: critical
+        title: "Inwestycja i wkład własny"
+        question: >-
+          Jaki jest aktualnie deklarowany zakres całkowitej inwestycji i wkład
+          własny dla poszczególnych formatów?
+        search_query_templates:
+          - '"{brand}" franczyza koszt inwestycji wkład własny'
+          - '"{brand}" franczyza koszt otwarcia inwestycja'
+        fields:
+          investment.total_low: public_expected
+          investment.total_high: public_expected
+          investment.currency: public_expected
+          investment.own_contribution: public_optional
+          investment.as_of: public_optional
+        min_sources: 1
+        preferred_source_types: [official, legal_document, industry]
+        acceptance_criteria: >-
+          Zakres, waluta i data dotyczą tego samego formatu. Brak jawnej daty
+          ważności nie zeruje kwoty, lecz wymaga zapisania daty pobrania i flagi
+          do późniejszego odświeżenia.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity, scope.offer_and_transaction]
+
+      - question_id: fdd11.advertising_it_training
+        requirement: required
+        title: "Szkolenie startowe"
+        question: >-
+          Jakie szkolenie dla franczyzobiorcy marka publicznie deklaruje?
+        search_query_templates:
+          - '"{brand}" franczyza szkolenie franczyzobiorcy'
+          - '"{brand}" franczyza wsparcie szkoleniowe'
+        fields:
+          support.training_program: public_optional
+        min_sources: 1
+        preferred_source_types: [official, industry]
+        acceptance_criteria: >-
+          Opis zachowuje autora i zakres deklaracji; materiał marketingowy jest
+          oznaczany jako deklaracja marki, nie gwarancja umowna.
+        requires_independent_corroboration: false
+        max_age_days: 730
+        dependencies: [scope.brand_identity]
+
+      - question_id: fdd20.systemwide_outlet_history
+        requirement: critical
+        title: "Skala sieci w Polsce"
+        question: >-
+          Ile placówek obejmuje aktualny publiczny snapshot sieci i na jaki dzień
+          oraz obszar podano tę liczbę?
+        search_query_templates:
+          - '"{brand}" liczba placówek Polska rok'
+          - '"{brand}" ile lokali placówek w Polsce'
+        fields:
+          outlets.current_total: public_expected
+          outlets.as_of: public_expected
+        min_sources: 1
+        preferred_source_types: [official, registry, industry]
+        acceptance_criteria: >-
+          Liczba zachowuje geografię i datę. Globalnej liczby ani wyniku mapy nie
+          wolno prezentować jako liczby działających placówek w Polsce.
+        requires_independent_corroboration: false
+        max_age_days: 365
+        dependencies: [scope.brand_identity]
+
+  - profile_id: "PL:L1:v1"
+    aliases: []
     country: "PL"
     level: "L1"
     name: "Polska — podstawowy profil katalogowy"

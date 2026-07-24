@@ -18,10 +18,11 @@ import socket
 import ssl
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from html.parser import HTMLParser
 from io import BytesIO
+from pathlib import Path
 from time import monotonic
 from typing import Protocol
 from urllib.parse import parse_qs, quote, urljoin, urlsplit, urlunsplit
@@ -841,6 +842,7 @@ class DocumentFetcher:
         raw = self._download(url, allowed="document", deadline=deadline)
         return self._build_document(source_id, raw)
 
+
     def _download(
         self,
         url: str,
@@ -1378,3 +1380,107 @@ class DocumentFetcher:
             resolved_via="eli_api",
             error_code=code,
         )
+
+
+class DiskCachedDocumentFetcher:
+    """Reuse parsed documents by canonical URL and content hash across runs."""
+
+    def __init__(
+        self,
+        fetcher: DocumentFetcher,
+        cache_dir: Path | str,
+        *,
+        max_age: timedelta = timedelta(days=7),
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self.fetcher = fetcher
+        self.cache_dir = Path(cache_dir)
+        self.max_age = max_age
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+
+    def fetch(self, url: str, *, source_id: str = "") -> FetchedDocument:
+        url_key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        index_path = self.cache_dir / "url" / f"{url_key}.json"
+        cached = self._load(index_path, url=url, source_id=source_id)
+        if cached is not None:
+            return cached
+        fetched = self.fetcher.fetch(url, source_id=source_id)
+        if fetched.status in {FetchStatus.FETCHED, FetchStatus.PARTIAL} and fetched.content_sha256:
+            self._store(index_path, fetched)
+        return fetched
+
+    def _load(self, index_path: Path, *, url: str, source_id: str) -> FetchedDocument | None:
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            fetched_at = datetime.fromisoformat(index["fetched_at"])
+            if self.clock() - fetched_at > self.max_age:
+                return None
+            content_path = self.cache_dir / "content" / f"{index['content_sha256']}.json"
+            payload = json.loads(content_path.read_text(encoding="utf-8"))
+            if payload.get("content_sha256") != index["content_sha256"]:
+                return None
+            return FetchedDocument(
+                source_id=source_id,
+                requested_url=url,
+                final_url=index.get("final_url"),
+                status=FetchStatus(payload["status"]),
+                fetched_at=fetched_at,
+                http_status=index.get("http_status"),
+                media_type=payload.get("media_type"),
+                text=payload.get("text", ""),
+                title=payload.get("title", ""),
+                page_text=tuple(payload.get("page_text", [])),
+                page_count=payload.get("page_count"),
+                parsed_pages=payload.get("parsed_pages"),
+                byte_count=payload.get("byte_count", 0),
+                content_sha256=payload["content_sha256"],
+                text_sha256=payload.get("text_sha256"),
+                redirects=tuple(RedirectHop(**hop) for hop in index.get("redirects", [])),
+                resolved_via=payload.get("resolved_via", "disk_cache"),
+                official_metadata=tuple(
+                    (str(key), value) for key, value in payload.get("official_metadata", [])
+                ),
+                warnings=("document_cache_hit", *payload.get("warnings", [])),
+                error_code=payload.get("error_code"),
+            )
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            return None
+
+    def _store(self, index_path: Path, fetched: FetchedDocument) -> None:
+        assert fetched.content_sha256 is not None
+        content_path = self.cache_dir / "content" / f"{fetched.content_sha256}.json"
+        content_payload = {
+            "status": fetched.status.value,
+            "media_type": fetched.media_type,
+            "text": fetched.text,
+            "title": fetched.title,
+            "page_text": list(fetched.page_text),
+            "page_count": fetched.page_count,
+            "parsed_pages": fetched.parsed_pages,
+            "byte_count": fetched.byte_count,
+            "content_sha256": fetched.content_sha256,
+            "text_sha256": fetched.text_sha256,
+            "resolved_via": fetched.resolved_via,
+            "official_metadata": list(fetched.official_metadata),
+            "warnings": list(fetched.warnings),
+            "error_code": fetched.error_code,
+        }
+        index_payload = {
+            "requested_url": fetched.requested_url,
+            "final_url": fetched.final_url,
+            "fetched_at": fetched.fetched_at.isoformat(),
+            "http_status": fetched.http_status,
+            "content_sha256": fetched.content_sha256,
+            "redirects": [
+                {"status_code": hop.status_code, "from_url": hop.from_url, "to_url": hop.to_url}
+                for hop in fetched.redirects
+            ],
+        }
+        try:
+            content_path.parent.mkdir(parents=True, exist_ok=True)
+            index_path.parent.mkdir(parents=True, exist_ok=True)
+            if not content_path.exists():
+                content_path.write_text(json.dumps(content_payload, ensure_ascii=False), encoding="utf-8")
+            index_path.write_text(json.dumps(index_payload, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            return

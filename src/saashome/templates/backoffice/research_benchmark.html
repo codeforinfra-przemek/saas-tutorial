@@ -1,0 +1,96 @@
+{% extends "backoffice/base_internal.html" %}
+
+{% block internal_content %}
+<header class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+  <div>
+    <a href="{% url 'backoffice:research_workbench_list' %}" class="text-sm font-bold text-brand-700 hover:underline">← Research operations</a>
+    <p class="mt-4 text-xs font-extrabold uppercase tracking-widest text-violet-700">Benchmark Workbench</p>
+    <h2 class="mt-2 text-3xl font-black tracking-tight">PL:L1 — direct ChatGPT proxy vs pipeline</h2>
+    <p class="mt-2 max-w-4xl text-sm leading-6 text-slate-600">Kontrolowany panel dla zaślepionego Gold Setu, bezpośredniej metody porównawczej i automatycznego eksportu kampanii. Bieżący eksperyment jest AI-assisted: mierzy realny koszt i czas API, ale nie udaje niezależnej pracy człowieka.</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    <a href="{% url 'backoffice:research_benchmark_gold' %}" class="rounded-xl bg-amber-600 px-4 py-3 text-xs font-extrabold text-white">Otwórz zaślepiony Gold Set</a>
+    <a href="{% url 'backoffice:research_benchmark_download' 'manual-evaluation' %}" class="rounded-xl border border-slate-300 bg-white px-4 py-3 text-xs font-extrabold text-slate-800">Wynik manual JSON</a>
+    <a href="{% url 'backoffice:research_benchmark_download' 'pipeline-evaluation' %}" class="rounded-xl border border-slate-300 bg-white px-4 py-3 text-xs font-extrabold text-slate-800">Wynik pipeline JSON</a>
+  </div>
+</header>
+
+{% if dashboard %}
+<section class="mt-7 grid gap-4 md:grid-cols-3">
+  <article class="rounded-2xl border border-amber-200 bg-amber-50 p-5"><p class="text-xs font-extrabold uppercase tracking-wider text-amber-800">Niezależny Gold Set</p><strong class="mt-2 block text-3xl">{{ dashboard.progress.gold.brands_ready }}/{{ dashboard.progress.gold.brands_total }}</strong><span class="text-xs text-amber-900">marek kompletnych</span><a href="{% url 'backoffice:research_benchmark_download' 'gold' %}" class="mt-4 block text-xs font-extrabold underline">Pobierz artefakt</a></article>
+  <article class="rounded-2xl border border-blue-200 bg-blue-50 p-5"><p class="text-xs font-extrabold uppercase tracking-wider text-blue-800">Researcher + ChatGPT</p><strong class="mt-2 block text-3xl">{{ dashboard.progress.manual.brands_ready }}/{{ dashboard.progress.manual.brands_total }}</strong><span class="text-xs text-blue-900">marek gotowych do oceny</span><p class="mt-3 text-xs">{{ dashboard.manual_evaluation.aggregate.accepted_fields }} zaakceptowanych pól · ${{ dashboard.manual_evaluation.aggregate.known_cost_usd }}</p></article>
+  <article class="rounded-2xl border border-violet-200 bg-violet-50 p-5"><p class="text-xs font-extrabold uppercase tracking-wider text-violet-800">Pipeline</p><strong class="mt-2 block text-3xl">{{ dashboard.progress.pipeline.brands_ready }}/{{ dashboard.progress.pipeline.brands_total }}</strong><span class="text-xs text-violet-900">marek gotowych do oceny</span><p class="mt-3 text-xs">{{ dashboard.pipeline_evaluation.aggregate.accepted_fields }} zaakceptowanych pól · ${{ dashboard.pipeline_evaluation.aggregate.known_cost_usd }}</p></article>
+</section>
+
+<section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+  <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <div class="max-w-3xl">
+      <p class="text-xs font-extrabold uppercase tracking-widest text-emerald-700">Krok 1 · właściwa próba pipeline</p>
+      <h3 class="mt-1 text-xl font-black">Uruchom dokładną kohortę benchmarkową</h3>
+      <p class="mt-2 text-xs leading-5 text-slate-600">Lista pochodzi z wersjonowanej specyfikacji, więc nie można przypadkowo dodać innej marki. Nieaktywna marka pozostaje nieaktywna publicznie — run tworzy wyłącznie wewnętrzny draft do Human Review.</p>
+      <div class="mt-4 flex flex-wrap gap-2">
+        {% for row in benchmark_scope.rows %}<span class="rounded-full border px-2.5 py-1 text-[11px] font-bold {% if not row.exists %}border-red-200 bg-red-50 text-red-800{% elif row.active_launch %}border-amber-200 bg-amber-50 text-amber-800{% elif not row.is_active %}border-slate-300 bg-slate-100 text-slate-700{% else %}border-emerald-200 bg-emerald-50 text-emerald-800{% endif %}">{{ row.definition.name }}{% if not row.exists %} · brak w bazie{% elif row.active_launch %} · run aktywny{% elif not row.is_active %} · nieaktywna, tylko research{% endif %}</span>{% endfor %}
+      </div>
+      <p class="mt-3 text-xs text-slate-500">Dostępne {{ benchmark_scope.available }}/{{ benchmark_scope.total }} · nieaktywne {{ benchmark_scope.inactive }} · z wcześniejszym researchem {{ benchmark_scope.previously_researched }}</p>
+    </div>
+    {% if benchmark_scope.ready %}
+    <form method="post" action="{% url 'backoffice:research_benchmark_campaign_create' %}" class="w-full max-w-md space-y-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">{% csrf_token %}
+      <div class="grid grid-cols-2 gap-3"><label class="text-xs font-bold text-emerald-950">{{ benchmark_campaign_form.max_cost_usd.label }}{{ benchmark_campaign_form.max_cost_usd }}</label><label class="text-xs font-bold text-emerald-950">{{ benchmark_campaign_form.max_concurrent_runs.label }}{{ benchmark_campaign_form.max_concurrent_runs }}</label></div>
+      <p class="rounded-lg bg-white p-3 text-xs text-emerald-950">Rezerwacja maksymalna: <strong id="benchmark-total-cost">${{ benchmark_campaign_form.initial_total_cost|floatformat:2 }}</strong> dla {{ benchmark_scope.total }} marek. Realny koszt jest raportowany osobno.</p>
+      <label class="flex items-start gap-2 text-xs leading-5 text-emerald-950">{{ benchmark_campaign_form.acknowledge_scope }}<span>{{ benchmark_campaign_form.acknowledge_scope.label }}</span></label>
+      <label class="flex items-start gap-2 text-xs leading-5 text-emerald-950">{{ benchmark_campaign_form.acknowledge_paid }}<span>{{ benchmark_campaign_form.acknowledge_paid.label }}</span></label>
+      <button class="w-full rounded-lg bg-emerald-700 px-4 py-3 text-sm font-extrabold text-white hover:bg-emerald-800">Utwórz i dodaj 10 runów do kolejki</button>
+    </form>
+    {% else %}
+    <div class="w-full max-w-md rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-950"><strong>Kampania jest zablokowana.</strong><br>{% if benchmark_scope.missing_slugs %}Dodaj do katalogu: {{ benchmark_scope.missing_slugs|join:", " }}.{% endif %}{% if benchmark_scope.busy_slugs %} Poczekaj na aktywne runy: {{ benchmark_scope.busy_slugs|join:", " }}.{% endif %}</div>
+    {% endif %}
+  </div>
+</section>
+
+{% if dashboard.experiment.comparison %}
+<section class="mt-6 rounded-2xl border border-cyan-200 bg-cyan-50 p-5 shadow-sm">
+  <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <div>
+      <p class="text-xs font-extrabold uppercase tracking-widest text-cyan-800">Zakończony eksperyment AI-assisted</p>
+      <h3 class="mt-1 text-xl font-black text-cyan-950">10 marek · 200 pól · {{ dashboard.experiment.calls|length }} calli</h3>
+      <p class="mt-2 max-w-3xl text-xs leading-5 text-cyan-950">{{ dashboard.experiment.methodology.review }}</p>
+    </div>
+    <a href="{% url 'backoffice:research_benchmark_download' 'experiment' %}" class="rounded-xl border border-cyan-300 bg-white px-4 py-3 text-xs font-extrabold text-cyan-950">Pobierz pełny raport JSON</a>
+  </div>
+  <div class="mt-5 grid gap-4 md:grid-cols-2">
+    <article class="rounded-xl border border-blue-200 bg-white p-4"><p class="text-xs font-extrabold uppercase text-blue-700">Direct ChatGPT</p><div class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><strong class="block text-2xl">{{ dashboard.experiment.comparison.direct.proposed_fields }}</strong><span class="text-xs text-slate-500">propozycji</span></div><div><strong class="block text-2xl">{{ dashboard.experiment.comparison.direct.accepted_fields }}</strong><span class="text-xs text-slate-500">zaakceptowanych</span></div><div><strong class="block text-xl">${{ dashboard.experiment.comparison.direct.known_cost_usd|floatformat:4 }}</strong><span class="text-xs text-slate-500">koszt metody</span></div><div><strong class="block text-xl">{{ dashboard.experiment.comparison.direct.accepted_fields_per_usd|floatformat:2 }}</strong><span class="text-xs text-slate-500">zaakceptowanych / USD</span></div></div></article>
+    <article class="rounded-xl border border-violet-200 bg-white p-4"><p class="text-xs font-extrabold uppercase text-violet-700">Pipeline</p><div class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><strong class="block text-2xl">{{ dashboard.experiment.comparison.pipeline.proposed_fields }}</strong><span class="text-xs text-slate-500">propozycji</span></div><div><strong class="block text-2xl">{{ dashboard.experiment.comparison.pipeline.accepted_fields }}</strong><span class="text-xs text-slate-500">zaakceptowanych</span></div><div><strong class="block text-xl">${{ dashboard.experiment.comparison.pipeline.known_cost_usd|floatformat:4 }}</strong><span class="text-xs text-slate-500">koszt metody</span></div><div><strong class="block text-xl">{{ dashboard.experiment.comparison.pipeline.accepted_fields_per_usd|floatformat:2 }}</strong><span class="text-xs text-slate-500">zaakceptowanych / USD</span></div></div></article>
+  </div>
+  <p class="mt-4 rounded-lg bg-white p-3 text-xs leading-5 text-slate-700"><strong>Ograniczenie:</strong> Gold jest niezależny od submissionów, ale został przygotowany przez osobny call tego samego modelu. Wynik jest benchmarkiem operacyjnym i sygnałem do przebudowy L1, nie dowodem prawdy porównywalnym z niezależnym audytem człowieka.</p>
+</section>
+{% endif %}
+
+<section class="mt-6 rounded-2xl border border-violet-200 bg-white p-5 shadow-sm">
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p class="text-xs font-extrabold uppercase tracking-widest text-violet-700">Automatyczny eksporter</p><h3 class="mt-1 text-xl font-black">Zasil wariant pipeline z kampanii</h3><p class="mt-1 max-w-3xl text-xs leading-5 text-slate-600">Eksport aktualizuje wyłącznie marki obecne w wybranej kampanii. Decyzje i korekty pochodzą z Human Review; brak decyzji pozostaje nieoceniony. Plik jest zapisywany atomowo.</p></div>
+  <form method="post" action="{% url 'backoffice:research_benchmark_export' %}" class="flex flex-col gap-2 sm:flex-row">{% csrf_token %}<select name="campaign_id" required class="min-h-11 rounded-xl border border-slate-300 bg-white px-3 text-sm"><option value="">Wybierz kampanię PL:L1…</option>{% for campaign in campaigns %}<option value="{{ campaign.campaign_id }}">{{ campaign.name }} · {{ campaign.launches.count }} marek · {{ campaign.get_status_display }}</option>{% endfor %}</select><button class="min-h-11 rounded-xl bg-violet-700 px-5 text-sm font-extrabold text-white hover:bg-violet-800">Eksportuj kampanię</button></form></div>
+  {% if dashboard.pipeline.export_history %}<div class="mt-4 border-t border-slate-200 pt-3 text-xs text-slate-500">Ostatni eksport: {% with item=dashboard.pipeline.export_history|last %}<strong>{{ item.campaign_name }}</strong> · {{ item.exported_at|date:"d.m.Y H:i" }}{% if item.exported_by %} · {{ item.exported_by }}{% endif %} · {{ item.brand_slugs|length }} marek{% endwith %}</div>{% endif %}
+</section>
+
+<section class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+  <div class="border-b border-slate-200 px-5 py-4"><h3 class="text-lg font-black">Macierz 10 marek × 20 pól</h3><p class="mt-1 text-xs text-slate-500">Otwórz markę, aby uzupełniać Gold Set i próbę researcher + ChatGPT bez edycji JSON.</p></div>
+  <div class="overflow-x-auto"><table class="min-w-full divide-y divide-slate-200 text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-5 py-3">Marka</th><th class="px-5 py-3">Dostępność</th><th class="px-5 py-3">Gold</th><th class="px-5 py-3">Manual</th><th class="px-5 py-3">Pipeline</th><th class="px-5 py-3"></th></tr></thead><tbody class="divide-y divide-slate-100">{% for row in dashboard.brands %}<tr><td class="px-5 py-4"><strong>{{ row.definition.name }}</strong><span class="mt-1 block text-xs text-slate-500">{{ row.definition.category }}</span></td><td class="px-5 py-4"><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold">{{ row.definition.source_availability }}</span></td><td class="px-5 py-4"><strong>{{ row.gold.completed_fields }}/{{ row.gold.total_fields }}</strong><span class="block text-[11px] {% if row.gold.ready %}text-emerald-700{% else %}text-amber-700{% endif %}">{% if row.gold.ready %}gotowe{% else %}w toku{% endif %}</span></td><td class="px-5 py-4"><strong>{{ row.manual.assessed_fields }}/{{ row.manual.total_fields }}</strong><span class="block text-[11px] {% if row.manual.ready %}text-emerald-700{% else %}text-slate-500{% endif %}">{% if row.manual.ready %}gotowe{% else %}niegotowe{% endif %}</span></td><td class="px-5 py-4"><strong>{{ row.pipeline.assessed_fields }}/{{ row.pipeline.total_fields }}</strong><span class="block text-[11px] {% if row.pipeline.ready %}text-emerald-700{% else %}text-slate-500{% endif %}">{% if row.pipeline.ready %}gotowe{% else %}niegotowe{% endif %}</span></td><td class="px-5 py-4 text-right"><a href="{% url 'backoffice:research_benchmark_brand' row.definition.slug %}" class="rounded-lg bg-slate-950 px-3 py-2 text-xs font-extrabold text-white">Otwórz →</a></td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% else %}
+<section class="mt-7 rounded-2xl border border-red-200 bg-red-50 p-6"><h3 class="font-black text-red-900">Workbench nie może odczytać artefaktów</h3><p class="mt-2 text-sm text-red-800">Sprawdź komunikat powyżej. Pliki nie zostały automatycznie zastąpione.</p></section>
+{% endif %}
+{% endblock %}
+
+{% block extra_body %}
+<script>
+const benchmarkCost = document.getElementById("id_max_cost_usd");
+const benchmarkTotal = document.getElementById("benchmark-total-cost");
+if (benchmarkCost && benchmarkTotal) {
+  const updateBenchmarkTotal = () => {
+    const value = Number.parseFloat(benchmarkCost.value);
+    benchmarkTotal.textContent = Number.isFinite(value) ? "$" + (value * {{ benchmark_scope.total|default:0 }}).toFixed(2) : "—";
+  };
+  benchmarkCost.addEventListener("input", updateBenchmarkTotal);
+  updateBenchmarkTotal();
+}
+</script>
+{% endblock %}

@@ -97,3 +97,5 @@ Desktop.ini
 datacollector/.env
 datacollector/data/runs/*
 !datacollector/data/runs/.gitkeep
+datacollector/data/document_cache/
+data/catalog_backups/

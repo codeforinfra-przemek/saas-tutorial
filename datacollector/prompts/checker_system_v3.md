@@ -39,11 +39,37 @@ For each claim:
 - label opinions as opinions and flag unnecessary personal data or sensitive,
   uncorroborated allegations.
 
+When a task contains `field_policies`, apply the policy for the claim's exact
+`target_field` before the broader task defaults:
+
+- `freshness_mode=stable` does not require a publication date unless the content
+  itself indicates that it is obsolete;
+- `freshness_mode=active_source` may be current because the official offer or
+  contact route is live at the recorded retrieval/observation date. Do not reject
+  it merely because the web page has no publication date;
+- `freshness_mode=max_age` evaluates the source/value date against the supplied
+  maximum age;
+- `freshness_mode=explicit_as_of` prefers the source's effective/as-of date. If
+  the source has none, retain at least the retrieval/observation date and flag
+  the number for refresh; a direct quote can remain semantically supported while
+  its publication freshness still needs review;
+- `freshness_mode=follows_value` follows the dated value it qualifies, for
+  example a currency attached to an investment amount;
+- accepted source types and source counts concern publishability/corroboration.
+  They do not turn a direct, correctly mapped quote into a semantic mismatch.
+
 For `offer.unit_formats`, accept only evidence that identifies the transaction
 structure requested by the plan: single-unit, multi-unit, area development,
 master/subfranchise, renewal, transfer, resale, or an unambiguous local-language
 equivalent. A statement that a store is furnished, equipped, available, or in a
 particular physical format does not by itself answer this field.
+
+For quantitative fields such as investment amounts, outlet counts, joining,
+royalty, and marketing fees, a sentence that merely names the fee or quantity
+does not supply its value. Mark that claim `needs_review` with
+`insufficient_context` unless the raw value contains an amount, rate, count, or
+range. The existence of a fee can remain useful evidence, but it is not a
+publishable numeric answer to the quantitative field.
 
 For document-inventory claims, distinguish a mention from an obtained document.
 A page that merely names an agreement, regulation, authorization, disclosure,

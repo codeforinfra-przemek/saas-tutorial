@@ -10,6 +10,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from ..documents import DocumentFetcher, FetchedDocument, FetchStatus
@@ -33,6 +34,7 @@ from ..schemas import (
     ResearchTask,
     SearchResults,
     SearchSource,
+    SearchSourceOrigin,
     SourceDocument,
     SourceType,
 )
@@ -337,6 +339,20 @@ def _select_sources(
         for source in results.sources
         if not requested or source.source_id in requested
     ]
+    if not requested:
+        # Searcher output order reflects provider response order, not evidence
+        # value.  In official-first mode the deterministic seeds are appended
+        # after provider candidates, so a simple ``[:limit]`` could omit the
+        # known franchise page and spend every Extractor call on weaker news or
+        # directory results.  Rank only automatic selection; an explicit
+        # ``--source`` list remains authoritative and keeps its artifact order.
+        selected = [
+            source
+            for _, source in sorted(
+                enumerate(selected),
+                key=lambda item: _automatic_source_rank(item[1], item[0]),
+            )
+        ]
     if requested and source_limit is not None and len(selected) > source_limit:
         raise ExtractorValidationError(
             f"Explicit source selection matched {len(selected)} sources but "
@@ -358,6 +374,73 @@ def _select_sources(
             f"{unmapped}"
         )
     return selected
+
+
+_SOURCE_TYPE_SELECTION_WEIGHT = {
+    SourceType.OFFICIAL: 100,
+    SourceType.REGULATOR: 95,
+    SourceType.GOVERNMENT: 90,
+    SourceType.REGISTRY: 90,
+    SourceType.COURT: 90,
+    SourceType.LEGAL_DOCUMENT: 88,
+    SourceType.AUDITED_FINANCIAL: 85,
+    SourceType.INDUSTRY: 65,
+    SourceType.MARKETPLACE: 50,
+    SourceType.REPUTABLE_MEDIA: 40,
+    SourceType.FRANCHISEE_INTERVIEW: 35,
+    SourceType.BLOG: 25,
+    SourceType.YOUTUBE: 15,
+    SourceType.REVIEW_PLATFORM: 10,
+    SourceType.SOCIAL: 10,
+    SourceType.UNKNOWN: 25,
+    SourceType.ROUTING_LEAD: -100,
+    SourceType.LEGISLATIVE_PROJECT: 20,
+}
+
+
+def _automatic_source_rank(source: SearchSource, original_index: int) -> tuple:
+    """Return a deterministic evidence-first order for bounded extraction.
+
+    The rank deliberately does not claim that a supplied website is official.
+    It only ensures that a locally retrievable first-party candidate is tested
+    before lower-value generic results.  Extractor and Checker still validate
+    ownership, semantics, freshness and source role.
+    """
+
+    parsed = urlsplit(source.canonical_url)
+    path = parsed.path.casefold().rstrip("/")
+    score = _SOURCE_TYPE_SELECTION_WEIGHT.get(source.source_type, 0)
+    if source.origin == SearchSourceOrigin.PLAN_SEED:
+        score += 70
+    if source.provider_observed:
+        score += 10
+    if any(marker in path for marker in ("franczyz", "franchis")):
+        score += 55
+    if any(
+        marker in path
+        for marker in (
+            "koszt",
+            "investment",
+            "inwestyc",
+            "oplata",
+            "fee",
+            "royalty",
+        )
+    ):
+        score += 35
+    if any(marker in path for marker in ("kontakt", "contact")):
+        score += 25
+    if any(marker in path for marker in ("o-nas", "about")):
+        score += 15
+    if path.endswith(".pdf"):
+        score += 20
+    if any(marker in path for marker in ("aktualnosci", "article", "artykul", "news")):
+        score -= 20
+    # More task mappings increase the chance that one download can satisfy
+    # several fields, but the cap prevents broad seeds from dominating solely
+    # because they were conservatively mapped to every selected task.
+    score += min(len(source.task_ids), 5) * 2
+    return (-score, original_index, source.canonical_url)
 
 
 def _retrieval_status(fetched: FetchedDocument) -> DocumentRetrievalStatus:

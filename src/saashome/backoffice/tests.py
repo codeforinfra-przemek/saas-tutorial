@@ -2,11 +2,14 @@ from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, TestCase
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -22,7 +25,18 @@ from franchises.models import (
     FranchiseResearchReviewField,
     FranchiseResearchWorkspace,
 )
+from franchises import research_benchmark as _research_benchmark  # noqa: F401
 from saashome.exception_filters import CredentialSafeExceptionReporterFilter
+
+from datacollector.benchmark import (
+    create_gold_set,
+    create_submission,
+    load_benchmark_spec,
+    load_gold_set,
+    load_submission,
+    save_gold_set,
+    save_submission,
+)
 
 from .models import RevenueEvent, SalesAccount, SalesActivity, SalesOpportunity
 from .services.revenue import get_revenue_overview, get_subscription_mrr
@@ -331,6 +345,435 @@ class ResearchWorkbenchViewTests(TestCase):
         self.assertEqual(status["counts"]["queued"], 2)
         self.assertEqual(status["estimated_cost_usd"], "0")
 
+    def _benchmark_artifacts(self, root):
+        spec = load_benchmark_spec()
+        save_gold_set(root / "pl-l1-gold-v1.json", create_gold_set(spec))
+        save_submission(
+            root / "pl-l1-manual-v1.json",
+            create_submission(spec, method="researcher_chatgpt"),
+        )
+        save_submission(
+            root / "pl-l1-pipeline-v1.json",
+            create_submission(spec, method="pipeline"),
+        )
+        return spec
+
+    def _create_benchmark_franchises(self, spec):
+        franchises = []
+        for definition in spec.brands:
+            franchises.append(
+                Franchise.objects.create(
+                    name=definition.name,
+                    slug=definition.slug,
+                    category=self.workspace.franchise.category,
+                    short_description="Benchmark fixture",
+                    is_active=definition.slug != "north-fish",
+                )
+            )
+        return franchises
+
+    def test_benchmark_workbench_creates_exact_paid_cohort_after_confirmation(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            spec = self._benchmark_artifacts(root)
+            self._create_benchmark_franchises(spec)
+            self.client.force_login(self.staff)
+            with override_settings(RESEARCH_BENCHMARK_DIR=root):
+                overview = self.client.get(reverse("backoffice:research_benchmark"))
+                self.assertContains(overview, "Uruchom dokładną kohortę benchmarkową")
+                self.assertContains(overview, "North Fish · nieaktywna, tylko research")
+                response = self.client.post(
+                    reverse("backoffice:research_benchmark_campaign_create"),
+                    {
+                        "max_cost_usd": "0.75",
+                        "max_concurrent_runs": "1",
+                        "acknowledge_scope": "on",
+                        "acknowledge_paid": "on",
+                    },
+                )
+        campaign = FranchiseResearchCampaign.objects.get()
+        self.assertRedirects(
+            response,
+            reverse(
+                "backoffice:research_campaign_detail",
+                args=[campaign.campaign_id],
+            ),
+        )
+        self.assertEqual(campaign.profile_id, "PL:L1")
+        self.assertEqual(campaign.reserved_cost_usd, Decimal("7.50"))
+        self.assertEqual(campaign.launches.count(), 10)
+        self.assertEqual(
+            set(campaign.launches.values_list("franchise__slug", flat=True)),
+            {brand.slug for brand in spec.brands},
+        )
+        self.assertFalse(Franchise.objects.get(slug="north-fish").is_active)
+
+    def test_benchmark_campaign_requires_explicit_paid_confirmation(self):
+        spec = load_benchmark_spec()
+        self._create_benchmark_franchises(spec)
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("backoffice:research_benchmark_campaign_create"),
+            {
+                "max_cost_usd": "0.75",
+                "max_concurrent_runs": "1",
+                "acknowledge_scope": "on",
+            },
+        )
+        self.assertRedirects(response, reverse("backoffice:research_benchmark"))
+        self.assertFalse(FranchiseResearchCampaign.objects.exists())
+
+    def test_benchmark_workbench_edits_validated_artifacts_without_json_work(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._benchmark_artifacts(root)
+            self.client.force_login(self.staff)
+            with override_settings(RESEARCH_BENCHMARK_DIR=root):
+                overview = self.client.get(reverse("backoffice:research_benchmark"))
+                self.assertEqual(overview.status_code, 200)
+                self.assertContains(overview, "Macierz 10 marek × 20 pól")
+                detail = self.client.get(
+                    reverse("backoffice:research_benchmark_brand", args=["zabka"])
+                )
+                self.assertEqual(detail.status_code, 200)
+                self.assertContains(detail, "Niezależny Gold Set")
+                self.assertContains(detail, "Researcher + ChatGPT")
+                response = self.client.post(
+                    reverse(
+                        "backoffice:research_benchmark_field_update",
+                        args=["zabka", "gold"],
+                    ),
+                    {
+                        "target_field": "brand.name",
+                        "status": "found",
+                        "canonical_value": "Żabka",
+                        "source_url": "https://www.zabka.pl/",
+                        "source_type": "official",
+                        "observed_at": "2026-07-22",
+                        "valid_as_of": "",
+                        "notes": "Źródło oficjalne",
+                    },
+                )
+            self.assertEqual(response.status_code, 302)
+            gold = load_gold_set(root / "pl-l1-gold-v1.json")
+            field = gold.brands[0].fields[0]
+            self.assertEqual(field.status, "found")
+            self.assertEqual(field.canonical_value, "Żabka")
+
+    def test_blind_gold_workbench_never_loads_or_displays_submissions(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._benchmark_artifacts(root)
+            self.client.force_login(self.staff)
+            with override_settings(RESEARCH_BENCHMARK_DIR=root):
+                overview = self.client.get(
+                    reverse("backoffice:research_benchmark_gold")
+                )
+                self.assertEqual(overview.status_code, 200)
+                self.assertContains(overview, "Tryb zaślepiony")
+                self.assertNotContains(overview, "Researcher + ChatGPT")
+                self.assertNotContains(overview, "Pipeline")
+                detail = self.client.get(
+                    reverse(
+                        "backoffice:research_benchmark_gold_brand",
+                        args=["zabka"],
+                    )
+                )
+                self.assertEqual(detail.status_code, 200)
+                self.assertContains(detail, "tylko dane referencyjne")
+                self.assertNotContains(detail, "Researcher + ChatGPT")
+                self.assertNotContains(detail, "Pipeline")
+                response = self.client.post(
+                    reverse(
+                        "backoffice:research_benchmark_field_update",
+                        args=["zabka", "gold"],
+                    ),
+                    {
+                        "return_to": "gold",
+                        "target_field": "brand.name",
+                        "status": "found",
+                        "canonical_value": "Żabka",
+                        "source_url": "https://www.zabka.pl/",
+                        "source_type": "official",
+                        "observed_at": "2026-07-23",
+                        "valid_as_of": "",
+                        "notes": "Blind source",
+                    },
+                )
+            self.assertRedirects(
+                response,
+                reverse(
+                    "backoffice:research_benchmark_gold_brand",
+                    args=["zabka"],
+                ),
+            )
+
+    def test_gold_can_be_staged_as_pending_workbench_proposal_with_provenance(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._benchmark_artifacts(root)
+            franchise = Franchise.objects.create(
+                name="Żabka",
+                slug="zabka",
+                category=self.workspace.franchise.category,
+                short_description="Benchmark promotion fixture",
+            )
+            workspace = FranchiseResearchWorkspace.objects.create(
+                franchise=franchise,
+                normalization_id="23fc94a4-8a79-42a4-a879-9c8588bb313f",
+                plan_run_id="3d0f8781-ec74-499d-8b27-279303a8be97",
+                target_country="PL",
+                depth="directory_basic",
+                profile_id="PL:L1:v2",
+                iteration=1,
+                normalized_reference="/tmp/zabka-normalized.json",
+                normalized_sha256="a" * 64,
+            )
+            review_field = FranchiseResearchReviewField.objects.create(
+                workspace=workspace,
+                task_id="task-brand",
+                task_title="Brand",
+                target_field="brand.name",
+                pipeline_status="missing",
+            )
+            comparison_field = FranchiseResearchReviewField.objects.create(
+                workspace=workspace,
+                task_id="task-brand",
+                task_title="Brand",
+                target_field="brand.category",
+                pipeline_status="normalized",
+                proposed_values=[
+                    {
+                        "display": "Kategoria pipeline",
+                        "canonical_text": "Kategoria pipeline",
+                    }
+                ],
+            )
+            self.client.force_login(self.staff)
+            with override_settings(RESEARCH_BENCHMARK_DIR=root):
+                self.client.post(
+                    reverse(
+                        "backoffice:research_benchmark_field_update",
+                        args=["zabka", "gold"],
+                    ),
+                    {
+                        "return_to": "gold",
+                        "target_field": "brand.name",
+                        "status": "found",
+                        "canonical_value": "Żabka",
+                        "source_url": "https://www.zabka.pl/",
+                        "source_type": "official",
+                        "observed_at": "2026-07-23",
+                        "valid_as_of": "",
+                        "notes": "Blind source",
+                    },
+                )
+                self.client.post(
+                    reverse(
+                        "backoffice:research_benchmark_field_update",
+                        args=["zabka", "gold"],
+                    ),
+                    {
+                        "return_to": "gold",
+                        "target_field": "brand.category",
+                        "status": "found",
+                        "canonical_value": "Convenience retail",
+                        "source_url": "https://www.zabka.pl/",
+                        "source_type": "official",
+                        "observed_at": "2026-07-23",
+                        "valid_as_of": "",
+                        "notes": "Gold comparison",
+                    },
+                )
+                preview = self.client.get(
+                    reverse(
+                        "backoffice:research_benchmark_gold_promote",
+                        args=["zabka"],
+                    )
+                )
+                self.assertEqual(preview.status_code, 200)
+                self.assertContains(preview, "Przenieś Gold do Workbencha")
+                response = self.client.post(
+                    reverse(
+                        "backoffice:research_benchmark_gold_promote",
+                        args=["zabka"],
+                    ),
+                    {
+                        "workspace_id": str(workspace.workspace_id),
+                        "gold_sha256": preview.context["gold_sha256"],
+                        "selected_field_ids": [
+                            str(review_field.pk),
+                            str(comparison_field.pk),
+                        ],
+                    },
+                )
+            self.assertRedirects(
+                response,
+                reverse(
+                    "backoffice:research_workbench_detail",
+                    args=[workspace.workspace_id],
+                ),
+            )
+            review_field.refresh_from_db()
+            self.assertEqual(
+                review_field.decision,
+                FranchiseResearchReviewField.DECISION_PENDING,
+            )
+            self.assertEqual(review_field.proposed_display, "Żabka")
+            self.assertEqual(
+                review_field.proposed_values[0]["provenance"],
+                "benchmark_gold_ai_proxy",
+            )
+            self.assertTrue(
+                workspace.events.filter(
+                    event_type="benchmark_gold_staged",
+                    metadata__auto_approved=False,
+                ).exists()
+            )
+            comparison_field.refresh_from_db()
+            self.assertEqual(comparison_field.proposed_display, "Kategoria pipeline")
+            self.assertEqual(
+                comparison_field.decision,
+                FranchiseResearchReviewField.DECISION_PENDING,
+            )
+            self.assertEqual(
+                comparison_field.evidence[-1]["benchmark_value"],
+                "Convenience retail",
+            )
+
+    def test_campaign_exporter_populates_pipeline_from_human_review(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._benchmark_artifacts(root)
+            zabka = Franchise.objects.create(
+                name="Żabka",
+                slug="zabka",
+                category=self.workspace.franchise.category,
+                short_description="Benchmark fixture",
+            )
+            workspace = FranchiseResearchWorkspace.objects.create(
+                franchise=zabka,
+                normalization_id="90e1c2f4-b919-491d-bef5-30727e9096e4",
+                plan_run_id="9be7db7f-6871-4867-a90b-2729a676968d",
+                target_country="PL",
+                depth="directory_basic",
+                profile_id="PL:L1:v2",
+                iteration=1,
+                normalized_reference="/tmp/zabka-normalized.json",
+                normalized_sha256="b" * 64,
+                planned_tasks=7,
+                evaluated_tasks=7,
+                planned_fields=20,
+                reviewed_at=timezone.now(),
+            )
+            FranchiseResearchReviewField.objects.create(
+                workspace=workspace,
+                task_id="task-brand",
+                task_title="Brand",
+                target_field="brand.name",
+                pipeline_status="normalized",
+                proposed_values=[{"display": "Żabka", "canonical_text": "Żabka"}],
+                evidence=[{"url": "https://www.zabka.pl/"}],
+                decision=FranchiseResearchReviewField.DECISION_ACCEPTED,
+                decided_at=timezone.now(),
+            )
+            campaign = FranchiseResearchCampaign.objects.create(
+                name="Benchmark PL:L1",
+                profile_id="PL:L1",
+                status=FranchiseResearchCampaign.STATUS_COMPLETED,
+                max_total_cost_usd=Decimal("2.00"),
+                reserved_cost_usd=Decimal("1.00"),
+            )
+            FranchiseResearchLaunch.objects.create(
+                campaign=campaign,
+                campaign_position=1,
+                franchise=zabka,
+                profile_id="PL:L1",
+                status=FranchiseResearchLaunch.STATUS_SUCCEEDED,
+                result_workspace=workspace,
+                started_at=timezone.now() - timedelta(minutes=8),
+                completed_at=timezone.now(),
+                cost_summary={"estimated_cost_usd": "0.82"},
+            )
+            self.client.force_login(self.staff)
+            with override_settings(RESEARCH_BENCHMARK_DIR=root):
+                response = self.client.post(
+                    reverse("backoffice:research_benchmark_export"),
+                    {"campaign_id": str(campaign.campaign_id)},
+                )
+            self.assertEqual(response.status_code, 302)
+            pipeline = load_submission(root / "pl-l1-pipeline-v1.json")
+            brand = pipeline.brands[0]
+            self.assertEqual(brand.tasks_attempted, 7)
+            self.assertEqual(brand.known_cost_usd, Decimal("0.82"))
+            self.assertEqual(brand.fields[0].proposed_value, "Żabka")
+            self.assertEqual(
+                brand.fields[0].review_decision,
+                "accepted_unchanged",
+            )
+            self.assertEqual(pipeline.export_history[0].campaign_id, str(campaign.campaign_id))
+            self.assertEqual(pipeline.export_history[0].exported_by, self.staff.username)
+
+    def test_benchmark_artifact_helpers_unpack_storage_lineage_hashes(self):
+        observed_at = timezone.now()
+        launch = SimpleNamespace(
+            sources_reference="/tmp/sources.json",
+            normalized_reference="/tmp/normalized.json",
+            extractions_reference="/tmp/extractions.json",
+        )
+        search = SimpleNamespace(
+            sources=[
+                SimpleNamespace(
+                    source_id="source-1",
+                    canonical_url="https://example.com/franczyza",
+                    source_type=SimpleNamespace(value="official"),
+                    discovered_at=observed_at,
+                )
+            ]
+        )
+        normalized = SimpleNamespace(
+            normalized_values=[
+                SimpleNamespace(
+                    normalized_value_id="value-1",
+                    claim_ids=["claim-1"],
+                )
+            ]
+        )
+        extraction = SimpleNamespace(
+            claims=[
+                SimpleNamespace(
+                    claim_id="claim-1",
+                    effective_date_text="obowiązuje od 2026-07-01",
+                    as_of_text="",
+                )
+            ]
+        )
+        with (
+            patch.object(
+                _research_benchmark,
+                "load_search_results",
+                return_value=(search, "a" * 64),
+            ),
+            patch.object(
+                _research_benchmark,
+                "load_normalizer_results",
+                return_value=(normalized, "b" * 64),
+            ),
+            patch.object(
+                _research_benchmark,
+                "load_extraction_results",
+                return_value=(extraction, "c" * 64),
+            ),
+        ):
+            sources = _research_benchmark._source_metadata(launch)
+            valid_as_of = _research_benchmark._valid_as_of_metadata(launch)
+        self.assertEqual(
+            sources["source-1"]["url"],
+            "https://example.com/franczyza",
+        )
+        self.assertEqual(sources["source-1"]["source_type"], "official")
+        self.assertEqual(str(valid_as_of["value-1"]), "2026-07-01")
+
     def test_batch_campaign_requires_explicit_override_for_existing_research(self):
         self.client.force_login(self.staff)
         response = self.client.post(
@@ -394,6 +837,65 @@ class ResearchWorkbenchViewTests(TestCase):
         self.assertTrue(
             self.workspace.events.filter(event_type="field_decision").exists()
         )
+
+    def test_one_click_decision_returns_json_for_async_workbench(self):
+        action = reverse(
+            "backoffice:research_workbench_field_action",
+            args=[self.workspace.workspace_id, self.proposed.pk, "accept"],
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            action,
+            {"field_version": self.proposed.updated_at.isoformat()},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["field"]["decision"], "accepted")
+        self.assertEqual(payload["counts"]["accepted"], 1)
+        self.assertEqual(payload["counts"]["reviewed"], 1)
+        self.assertEqual(payload["event"]["actor"], self.staff.username)
+
+    def test_async_field_decision_rejects_stale_browser_state(self):
+        action = reverse(
+            "backoffice:research_workbench_field_action",
+            args=[self.workspace.workspace_id, self.proposed.pk, "accept"],
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            action,
+            {"field_version": "2020-01-01T00:00:00+00:00"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()["ok"])
+        self.proposed.refresh_from_db()
+        self.assertEqual(self.proposed.decision, "pending")
+
+    def test_async_field_edit_updates_value_and_review_counts(self):
+        edit = reverse(
+            "backoffice:research_workbench_field_edit",
+            args=[self.workspace.workspace_id, self.missing.pk],
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            edit,
+            {
+                "field_version": self.missing.updated_at.isoformat(),
+                "reviewer_value": "250 000 PLN",
+                "reviewer_note": "Potwierdzone ręcznie.",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["field"]["decision"], "accepted_edited")
+        self.assertEqual(payload["field"]["effective_value"], "250 000 PLN")
+        self.assertEqual(payload["counts"]["edited"], 1)
 
     def test_researcher_can_fill_a_gap_and_accept_it_in_one_submit(self):
         edit = reverse(

@@ -22,7 +22,7 @@
         <div class="rounded-lg bg-slate-50 p-3">
             <p class="font-bold uppercase tracking-wide text-slate-400">Inwestycja</p>
             <p class="mt-1 font-black text-slate-950">
-                {% if franchise.min_investment %}od {{ franchise.min_investment|floatformat:0 }} zł{% else %}b/d{% endif %}
+                {% if franchise.has_public_financial_data and franchise.min_investment %}od {{ franchise.min_investment|floatformat:0 }} zł{% else %}b/d{% endif %}
             </p>
         </div>
         <div class="rounded-lg bg-slate-50 p-3">

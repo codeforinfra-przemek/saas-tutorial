@@ -87,7 +87,7 @@ def _source_from_mapping(value: Any) -> ProviderSearchSource | None:
     )
 
 
-def _extract_response_provenance(
+def extract_response_provenance(
     response: Any,
     *,
     call_index: int,
@@ -316,7 +316,7 @@ class OpenAISearcherClient:
                 **attempt_context,
             ) from None
 
-        actions, provider_sources, action_counts = _extract_response_provenance(
+        actions, provider_sources, action_counts = extract_response_provenance(
             response,
             call_index=call_index,
             scope_task_ids=[task.task_id for task in tasks],

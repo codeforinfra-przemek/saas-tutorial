@@ -32,6 +32,7 @@ from datacollector.storage.json_store import (
 )
 
 from .models import Franchise, FranchiseResearchLaunch
+from .research_fields import L1_PUBLIC_FIELD_ORDER
 from .research_jobs import ResearchCommandResult
 from .research_workbench import create_research_workspace
 
@@ -83,11 +84,101 @@ def _unknown_provider_attempt_summary(error_code: str) -> dict:
 
 
 def _provider_failure_summaries(launch: FranchiseResearchLaunch) -> list[dict]:
-    return [
-        _unknown_provider_attempt_summary(item.get("error_code") or "provider_exception")
-        for item in (launch.provider_failure_history or [])
-        if item.get("token_usage_unknown", True)
-    ]
+    summaries = []
+    for item in launch.provider_failure_history or []:
+        usage = item.get("usage")
+        if isinstance(usage, dict):
+            summaries.append({"agent_usage": [usage], "failed_attempts": []})
+        elif item.get("token_usage_unknown", True):
+            summaries.append(
+                _unknown_provider_attempt_summary(
+                    item.get("error_code") or "provider_exception"
+                )
+            )
+    return summaries
+
+
+_FAILURE_LEDGER_REFERENCE = re.compile(
+    r"(?:Failure ledger|Provider usage saved to):\s*([^\n]+)"
+)
+
+
+def _failure_ledger_paths(output: str) -> list[Path]:
+    """Return only datacollector attempt ledgers inside this repository."""
+
+    paths = []
+    seen = set()
+    repository_root = REPOSITORY_ROOT.resolve()
+    for match in _FAILURE_LEDGER_REFERENCE.finditer(output or ""):
+        for raw_value in match.group(1).split(","):
+            raw_path = raw_value.strip().rstrip(".")
+            if not raw_path:
+                continue
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = repository_root / candidate
+            try:
+                candidate = candidate.resolve()
+                candidate.relative_to(repository_root)
+            except (OSError, ValueError):
+                continue
+            if (
+                candidate.parent.name != "attempts"
+                or candidate.suffix != ".json"
+                or candidate in seen
+                or not candidate.is_file()
+            ):
+                continue
+            paths.append(candidate)
+            seen.add(candidate)
+    return paths
+
+
+def _capture_failure_ledgers(
+    launch: FranchiseResearchLaunch,
+    output: str,
+    *,
+    stage: str,
+) -> list[dict]:
+    """Persist paid failure usage so retries and campaign totals cannot lose it."""
+
+    history = list(launch.provider_failure_history or [])
+    known_paths = {item.get("ledger_path") for item in history}
+    summaries = []
+    changed = False
+    for path in _failure_ledger_paths(output):
+        path_value = str(path)
+        if path_value in known_paths:
+            continue
+        try:
+            ledger = _artifact_summary(path)
+        except ResearchLaunchError:
+            continue
+        usage = ledger.get("usage")
+        usage = usage if isinstance(usage, dict) else None
+        error_code = str(ledger.get("error_code") or "provider_exception")[:80]
+        history.append(
+            {
+                "error_code": error_code,
+                "stage": stage,
+                "usage_recorded": usage is not None,
+                "token_usage_unknown": usage is None,
+                "ledger_path": path_value,
+                "usage": usage,
+                "recorded_at": timezone.now().isoformat(),
+            }
+        )
+        summaries.append(
+            {"agent_usage": [usage], "failed_attempts": []}
+            if usage is not None
+            else _unknown_provider_attempt_summary(error_code)
+        )
+        known_paths.add(path_value)
+        changed = True
+    if changed:
+        launch.provider_failure_history = history[-50:]
+        launch.save(update_fields=["provider_failure_history"])
+    return summaries
 
 
 def _record_unknown_provider_failure(
@@ -306,6 +397,7 @@ def queue_research_launch(
         raise ResearchLaunchError("Nieobsługiwany profil researchu.")
     if franchise.research_launches.filter(status__in=["queued", "running"]).exists():
         raise ResearchLaunchError("Ta franczyza ma już aktywny pierwszy run.")
+    website_seed = known_official_website.strip() or franchise.website_url.strip()
     try:
         return FranchiseResearchLaunch.objects.create(
             franchise=franchise,
@@ -314,8 +406,23 @@ def queue_research_launch(
             target_country="PL",
             profile_id=profile_id,
             known_legal_name=known_legal_name,
-            known_official_website=known_official_website,
-            configuration=configuration,
+            known_official_website=website_seed,
+            configuration={
+                **configuration,
+                "website_seed_trust": (
+                    "validated_official"
+                    if website_seed
+                    and franchise.website_url_status == Franchise.WEBSITE_VALIDATED
+                    else "unverified_seed"
+                    if website_seed
+                    else "missing"
+                ),
+                "l1_pipeline_version": (
+                    "cheap-effective-v2"
+                    if profile_id in {"PL:L1", "PL:L1:v2"}
+                    else "standard-v1"
+                ),
+            },
             requested_by=requested_by,
         )
     except IntegrityError as exc:
@@ -398,6 +505,16 @@ def retry_research_launch(launch: FranchiseResearchLaunch) -> None:
         ]
     ).exclude(pk=locked.pk).exists():
         raise ResearchLaunchError("Ta franczyza ma już inny aktywny run.")
+    captured = _capture_failure_ledgers(
+        locked,
+        locked.log,
+        stage=locked.current_stage or "Nieudany etap sprzed wdrożenia retry",
+    )
+    if captured:
+        locked.cost_summary = _combined_usage(
+            [{"usage_totals": locked.cost_summary}, *captured]
+        )
+        locked.save(update_fields=["cost_summary"])
     if not locked.provider_failure_history:
         legacy_transient_code = _transient_provider_failure(locked.log)
         if legacy_transient_code:
@@ -441,6 +558,47 @@ def _artifact_summary(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ResearchLaunchError(f"Zachowany artefakt {path.name} nie jest obiektem JSON.")
     return value
+
+
+_SOURCES_PATH_REFERENCE = re.compile(r'"sources_path"\s*:\s*"([^"\n]+)"')
+
+
+def _recover_paid_search_artifact(
+    launch: FranchiseResearchLaunch,
+    *,
+    plan_sha256: str,
+) -> Path | None:
+    """Adopt a valid paid Searcher artifact left behind by a crashed parent worker."""
+
+    repository_root = REPOSITORY_ROOT.resolve()
+    raw_paths = _SOURCES_PATH_REFERENCE.findall(launch.log or "")
+    for raw_path in reversed(raw_paths):
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            candidate = repository_root / candidate
+        try:
+            candidate = candidate.resolve()
+            candidate.relative_to(repository_root)
+        except (OSError, ValueError):
+            continue
+        if not candidate.is_file():
+            continue
+        try:
+            search, artifact_sha256 = load_search_results(candidate)
+        except Exception:
+            continue
+        if search.generated_by != "openai" or search.plan_sha256 != plan_sha256:
+            continue
+        launch.sources_reference = str(candidate)
+        launch.sources_sha256 = artifact_sha256
+        launch.log = (
+            launch.log
+            + "\n[Worker] Odzyskano poprawny płatny artefakt Searchera po "
+            + "błędzie procesu nadrzędnego; zapytanie nie będzie ponawiane.\n"
+        )[-100_000:]
+        launch.save(update_fields=["sources_reference", "sources_sha256", "log"])
+        return candidate
+    return None
 
 
 def fail_stale_launches(*, older_than: timedelta = timedelta(hours=2)) -> int:
@@ -503,9 +661,18 @@ def _run_stage(launch, runner, command, *, label, progress, summaries):
             launch.save(update_fields=["cost_summary"])
             return summary
 
+        captured_failures = _capture_failure_ledgers(
+            launch,
+            result.stdout,
+            stage=label,
+        )
+        if captured_failures:
+            summaries.extend(captured_failures)
+            launch.cost_summary = _combined_usage(summaries)
+            launch.save(update_fields=["cost_summary"])
         transient_code = _transient_provider_failure(result.stdout)
         if transient_code is None or retries_used >= max_retries:
-            if transient_code:
+            if transient_code and not captured_failures:
                 _record_unknown_provider_failure(
                     launch,
                     error_code=transient_code,
@@ -524,12 +691,13 @@ def _run_stage(launch, runner, command, *, label, progress, summaries):
                 f"Etap „{label}” zakończył się kodem {result.returncode}.{detail}"
             )
 
-        _record_unknown_provider_failure(
-            launch,
-            error_code=transient_code,
-            stage=label,
-        )
-        summaries.append(_unknown_provider_attempt_summary(transient_code))
+        if not captured_failures:
+            _record_unknown_provider_failure(
+                launch,
+                error_code=transient_code,
+                stage=label,
+            )
+            summaries.append(_unknown_provider_attempt_summary(transient_code))
         retries_used += 1
         launch.cost_summary = _combined_usage(summaries)
         launch.log = (
@@ -578,6 +746,303 @@ def _guard_budget(launch: FranchiseResearchLaunch) -> None:
         )
 
 
+def _accepted_checker_fields(checker) -> set[str]:
+    return {
+        decision.target_field
+        for decision in checker.claim_decisions
+        if decision.verdict.value == "accepted"
+    }
+
+
+def _process_hybrid_l1_discovery(
+    launch: FranchiseResearchLaunch,
+    runner,
+    *,
+    python: str,
+    plan,
+    plan_path: Path,
+    config: dict,
+    summaries: list[dict],
+) -> tuple[Path, Path, Path | None, dict]:
+    """Run official-first L1 and search only Checker/Resolver-defined gaps."""
+
+    cache_dir = (
+        Path(__file__).resolve().parents[3]
+        / "datacollector"
+        / "data"
+        / "document_cache"
+    )
+    if launch.seed_sources_reference:
+        seed_sources_path = Path(launch.seed_sources_reference).resolve()
+        _adopt_existing_stage(
+            launch,
+            seed_sources_path,
+            label="Wznowienie / oficjalne seedy L1",
+            progress=14,
+            summaries=summaries,
+        )
+    else:
+        seed_search_summary = _run_stage(
+            launch,
+            runner,
+            [
+                python,
+                "-m",
+                "datacollector",
+                "search",
+                "--plan",
+                str(plan_path),
+                "--iteration",
+                "1",
+                "--limit-tasks",
+                str(config["initial_task_limit"]),
+                "--max-search-calls",
+                "1",
+                "--min-queries-per-task",
+                "1",
+                "--max-candidate-routes",
+                "0",
+                "--official-first",
+                "--offline",
+            ],
+            label="L1/2A · oficjalne seedy bez Searchera",
+            progress=14,
+            summaries=summaries,
+        )
+        seed_sources_path = Path(seed_search_summary["sources_path"]).resolve()
+        launch.seed_sources_reference = str(seed_sources_path)
+        launch.save(update_fields=["seed_sources_reference"])
+    seed_search, seed_search_sha256 = load_search_results(seed_sources_path)
+    if seed_search.plan_sha256 != launch.plan_sha256:
+        raise ResearchLaunchError("Oficjalne seedy nie pochodzą z utworzonego Planu.")
+
+    if launch.seed_extractions_reference:
+        seed_extractions_path = Path(launch.seed_extractions_reference).resolve()
+        _adopt_existing_stage(
+            launch,
+            seed_extractions_path,
+            label="Wznowienie / ekstrakcja oficjalnych seedów",
+            progress=31,
+            summaries=summaries,
+        )
+    else:
+        seed_extract_summary = _run_stage(
+            launch,
+            runner,
+            [
+                python,
+                "-m",
+                "datacollector",
+                "extract",
+                "--sources",
+                str(seed_sources_path),
+                "--iteration",
+                "1",
+                "--limit-sources",
+                str(min(5, config["max_sources"])),
+                "--max-api-calls",
+                str(min(5, config["max_extractor_api_calls"])),
+                "--max-evidence-chars-per-call",
+                "50000",
+                "--document-cache-dir",
+                str(cache_dir),
+            ],
+            label="L1/2A · pobranie, cache i ekstrakcja stron oficjalnych",
+            progress=31,
+            summaries=summaries,
+        )
+        seed_extractions_path = Path(
+            seed_extract_summary["extractions_path"]
+        ).resolve()
+        launch.seed_extractions_reference = str(seed_extractions_path)
+        launch.save(update_fields=["seed_extractions_reference"])
+    seed_extraction, seed_extraction_sha256 = load_extraction_results(
+        seed_extractions_path
+    )
+    if seed_extraction.search_sha256 != seed_search_sha256:
+        raise ResearchLaunchError("Ekstrakcja seedów nie pochodzi z ich Searchera.")
+    _guard_budget(launch)
+
+    if launch.seed_check_reference:
+        seed_check_path = Path(launch.seed_check_reference).resolve()
+        _adopt_existing_stage(
+            launch,
+            seed_check_path,
+            label="Wznowienie / kontrola seedów L1",
+            progress=43,
+            summaries=summaries,
+        )
+    else:
+        seed_check_summary = _run_stage(
+            launch,
+            runner,
+            [
+                python,
+                "-m",
+                "datacollector",
+                "check",
+                "--extractions",
+                str(seed_extractions_path),
+                "--iteration",
+                "1",
+                "--max-claims",
+                "200",
+                "--max-evidence-chars",
+                "250000",
+                "--risk-based",
+            ],
+            label="L1/2A · kontrola ryzyka bez audytu pól niskiego ryzyka",
+            progress=43,
+            summaries=summaries,
+        )
+        seed_check_path = Path(seed_check_summary["check_path"]).resolve()
+        launch.seed_check_reference = str(seed_check_path)
+        launch.save(update_fields=["seed_check_reference"])
+    seed_checker, _ = load_checker_results(seed_check_path)
+    accepted_seed_fields = _accepted_checker_fields(seed_checker)
+    minimum_l1_proposals = 8
+    if len(accepted_seed_fields) >= minimum_l1_proposals:
+        launch.sources_reference = str(seed_sources_path)
+        launch.sources_sha256 = seed_search_sha256
+        launch.extractions_reference = str(seed_extractions_path)
+        launch.extractions_sha256 = seed_extraction_sha256
+        launch.check_reference = str(seed_check_path)
+        _, launch.check_sha256 = load_checker_results(seed_check_path)
+        launch.save(
+            update_fields=[
+                "sources_reference",
+                "sources_sha256",
+                "extractions_reference",
+                "extractions_sha256",
+                "check_reference",
+                "check_sha256",
+            ]
+        )
+        return (
+            seed_sources_path,
+            seed_extractions_path,
+            seed_check_path,
+            {
+                "route": "official_only",
+                "seed_accepted_fields": len(accepted_seed_fields),
+                "paid_search_skipped": True,
+            },
+        )
+
+    if launch.resolution_reference:
+        resolution_path = Path(launch.resolution_reference).resolve()
+        _adopt_existing_stage(
+            launch,
+            resolution_path,
+            label="Wznowienie / plan braków L1",
+            progress=48,
+            summaries=summaries,
+        )
+    else:
+        resolution_summary = _run_stage(
+            launch,
+            runner,
+            [
+                python,
+                "-m",
+                "datacollector",
+                "resolve",
+                "--check",
+                str(seed_check_path),
+                "--free",
+                "--iteration",
+                "1",
+                "--max-follow-ups",
+                "30",
+                "--max-source-actions",
+                str(config["max_sources"]),
+                "--max-search-tasks",
+                str(config["initial_task_limit"]),
+                "--max-queries-per-item",
+                "2",
+            ],
+            label="L1/2B · deterministyczny plan wyłącznie dla braków",
+            progress=48,
+            summaries=summaries,
+        )
+        resolution_path = Path(resolution_summary["resolution_path"]).resolve()
+        launch.resolution_reference = str(resolution_path)
+        launch.save(update_fields=["resolution_reference"])
+
+    if launch.execution_reference:
+        execution_path = Path(launch.execution_reference).resolve()
+        execution_summary = _adopt_existing_stage(
+            launch,
+            execution_path,
+            label="Wznowienie / scalony research braków L1",
+            progress=63,
+            summaries=summaries,
+        )
+    else:
+        execution_summary = _run_stage(
+            launch,
+            runner,
+            [
+                python,
+                "-m",
+                "datacollector",
+                "execute",
+                "--resolution",
+                str(resolution_path),
+                "--iteration",
+                "2",
+                "--max-search-calls",
+                str(config["max_search_calls"]),
+                "--min-queries-per-task",
+                "1",
+                "--max-candidate-routes",
+                "3",
+                "--max-extractor-api-calls",
+                str(config["max_extractor_api_calls"]),
+                "--max-evidence-chars-per-call",
+                "75000",
+                "--document-cache-dir",
+                str(cache_dir),
+            ],
+            label="L1/2B · Searcher braków i scalona ekstrakcja",
+            progress=63,
+            summaries=summaries,
+        )
+        execution_path = Path(execution_summary["execution_path"]).resolve()
+        launch.execution_reference = str(execution_path)
+        launch.save(update_fields=["execution_reference"])
+    sources_path = Path(execution_summary["sources_path"]).resolve()
+    extractions_path = Path(execution_summary["extractions_path"]).resolve()
+    search, search_sha256 = load_search_results(sources_path)
+    extraction, extraction_sha256 = load_extraction_results(extractions_path)
+    if search.plan_sha256 != launch.plan_sha256:
+        raise ResearchLaunchError("Scalony Searcher L1 nie pochodzi z Planu.")
+    if extraction.search_sha256 != search_sha256:
+        raise ResearchLaunchError("Scalony Extractor L1 nie pochodzi z Searchera.")
+    launch.sources_reference = str(sources_path)
+    launch.sources_sha256 = search_sha256
+    launch.extractions_reference = str(extractions_path)
+    launch.extractions_sha256 = extraction_sha256
+    launch.save(
+        update_fields=[
+            "sources_reference",
+            "sources_sha256",
+            "extractions_reference",
+            "extractions_sha256",
+        ]
+    )
+    return (
+        sources_path,
+        extractions_path,
+        None,
+        {
+            "route": "official_plus_gap_search",
+            "seed_accepted_fields": len(accepted_seed_fields),
+            "paid_search_skipped": False,
+        },
+    )
+
+
 def process_research_launch(
     launch: FranchiseResearchLaunch,
     *,
@@ -586,8 +1051,16 @@ def process_research_launch(
     if launch.status != FranchiseResearchLaunch.STATUS_RUNNING:
         raise ResearchLaunchError("Run musi zostać przejęty przez worker.")
     python = sys.executable
-    config = launch.configuration
+    config = dict(launch.configuration)
+    if (
+        launch.profile_id in {"PL:L1", "PL:L1:v2"}
+        and config.get("l1_pipeline_version") != "cheap-effective-v2"
+    ):
+        config["l1_pipeline_version"] = "cheap-effective-v2"
+        launch.configuration = config
+        launch.save(update_fields=["configuration"])
     summaries: list[dict] = _provider_failure_summaries(launch)
+    hybrid_summary: dict = {}
     try:
         if launch.plan_reference:
             plan_path = Path(launch.plan_reference).resolve()
@@ -606,6 +1079,8 @@ def process_research_launch(
                 "--profile", launch.profile_id,
                 "--iteration", "1",
             ]
+            if launch.profile_id in {"PL:L1", "PL:L1:v2"}:
+                plan_command.append("--offline")
             if launch.known_legal_name:
                 plan_command.extend(["--known-legal-name", launch.known_legal_name])
             if launch.known_official_website:
@@ -620,8 +1095,19 @@ def process_research_launch(
             raise ResearchLaunchError("Planner zwrócił artefakt dla innej marki.")
         launch.plan_reference = str(plan_path)
         launch.save(update_fields=["plan_reference", "plan_sha256"])
+        if not launch.sources_reference:
+            _recover_paid_search_artifact(
+                launch,
+                plan_sha256=launch.plan_sha256,
+            )
         _guard_budget(launch)
 
+        prebuilt_extractions_path: Path | None = None
+        prebuilt_check_path: Path | None = None
+        is_hybrid_l1 = (
+            launch.profile_id in {"PL:L1", "PL:L1:v2"}
+            and bool(launch.known_official_website)
+        )
         if launch.sources_reference:
             sources_path = Path(launch.sources_reference).resolve()
             _adopt_existing_stage(
@@ -631,7 +1117,29 @@ def process_research_launch(
                 progress=25,
                 summaries=summaries,
             )
+        elif is_hybrid_l1:
+            (
+                sources_path,
+                prebuilt_extractions_path,
+                prebuilt_check_path,
+                hybrid_summary,
+            ) = _process_hybrid_l1_discovery(
+                launch,
+                runner,
+                python=python,
+                plan=plan,
+                plan_path=plan_path,
+                config=config,
+                summaries=summaries,
+            )
         else:
+            # Searcher v4 requires one task-specific query action for every
+            # selected task.  The previous official-first optimization reduced
+            # this cap to four even when PL:L1 selected seven tasks, making the
+            # final investment/training/outlet tasks impossible to search.  A
+            # known website reduces retrieval work, not the explicit paid tool
+            # ceiling requested by the campaign operator.
+            paid_search_calls = int(config["max_search_calls"])
             search_summary = _run_stage(
                 launch, runner,
                 [
@@ -639,9 +1147,10 @@ def process_research_launch(
                     "--plan", str(plan_path),
                     "--iteration", "1",
                     "--limit-tasks", str(config["initial_task_limit"]),
-                    "--max-search-calls", str(config["max_search_calls"]),
+                    "--max-search-calls", str(paid_search_calls),
                     "--min-queries-per-task", "1",
                     "--max-candidate-routes", "5",
+                    "--official-first",
                 ],
                 label="Searcher / wyszukiwanie źródeł", progress=25, summaries=summaries,
             )
@@ -653,7 +1162,9 @@ def process_research_launch(
         launch.save(update_fields=["sources_reference", "sources_sha256"])
         _guard_budget(launch)
 
-        if launch.extractions_reference:
+        if prebuilt_extractions_path is not None:
+            extractions_path = prebuilt_extractions_path
+        elif launch.extractions_reference:
             extractions_path = Path(launch.extractions_reference).resolve()
             _adopt_existing_stage(
                 launch,
@@ -672,6 +1183,10 @@ def process_research_launch(
                     "--limit-sources", str(config["max_sources"]),
                     "--max-api-calls", str(config["max_extractor_api_calls"]),
                     "--max-evidence-chars-per-call", "100000",
+                    "--document-cache-dir", str(
+                        Path(__file__).resolve().parents[3]
+                        / "datacollector" / "data" / "document_cache"
+                    ),
                 ],
                 label="Extractor / pobieranie i analiza dokumentów", progress=45, summaries=summaries,
             )
@@ -683,7 +1198,9 @@ def process_research_launch(
         launch.save(update_fields=["extractions_reference", "extractions_sha256"])
         _guard_budget(launch)
 
-        if launch.check_reference:
+        if prebuilt_check_path is not None:
+            check_path = prebuilt_check_path
+        elif launch.check_reference:
             check_path = Path(launch.check_reference).resolve()
             _adopt_existing_stage(
                 launch,
@@ -698,11 +1215,22 @@ def process_research_launch(
                 [
                     python, "-m", "datacollector", "check",
                     "--extractions", str(extractions_path),
-                    "--iteration", "1",
+                    "--iteration", str(extraction.iteration),
                     "--max-claims", "500",
                     "--max-evidence-chars", "500000",
+                    *(
+                        ["--risk-based"]
+                        if launch.profile_id in {"PL:L1", "PL:L1:v2"}
+                        else []
+                    ),
                 ],
-                label="Checker / pełna kontrola jakości", progress=65, summaries=summaries,
+                label=(
+                    "Checker / kontrola ryzyka L1"
+                    if launch.profile_id in {"PL:L1", "PL:L1:v2"}
+                    else "Checker / pełna kontrola jakości"
+                ),
+                progress=65,
+                summaries=summaries,
             )
             check_path = Path(check_summary["check_path"]).resolve()
         checker, launch.check_sha256 = load_checker_results(check_path)
@@ -725,7 +1253,7 @@ def process_research_launch(
             normalize_command = [
                 python, "-m", "datacollector", "normalize",
                 "--check", str(check_path),
-                "--iteration", "1",
+                "--iteration", str(checker.iteration),
                 "--max-claims", "500",
                 "--max-input-chars", "500000",
             ]
@@ -753,17 +1281,129 @@ def process_research_launch(
             franchise_slug=launch.franchise.slug,
             created_by=launch.requested_by,
         )
+        # The final merged artifacts intentionally retain only their own paid
+        # usage plus immutable predecessor references.  The launcher has the
+        # complete official-seed + gap-repair ledger, so the Workbench must use
+        # that total instead of under-reporting the Stage 2 cost.
+        workspace.cost_summary = dict(launch.cost_summary)
+        workspace.save(update_fields=["cost_summary", "updated_at"])
         launch.result_workspace = workspace
-        launch.status = FranchiseResearchLaunch.STATUS_SUCCEEDED
-        launch.current_stage = "Workbench gotowy do Human Review"
+        proposed_fields = workspace.review_fields.exclude(
+            proposed_values=[]
+        ).values("target_field").distinct().count()
+        projectable_fields = len(
+            {
+                target_field
+                for target_field in workspace.review_fields.exclude(
+                    proposed_values=[]
+                ).values_list("target_field", flat=True)
+                if target_field in L1_PUBLIC_FIELD_ORDER
+            }
+        )
+        minimum_l1_proposals = 8
+        is_l1 = launch.profile_id in {"PL:L1", "PL:L1:v2"}
+        if is_l1 and proposed_fields <= 2:
+            launch.status = FranchiseResearchLaunch.STATUS_INSUFFICIENT
+            completion = "insufficient"
+            launch.current_stage = (
+                "Niewystarczający L1 — Workbench wymaga uzupełnienia"
+            )
+        elif is_l1 and (
+            not workspace.scope_complete
+            or proposed_fields < minimum_l1_proposals
+        ):
+            launch.status = FranchiseResearchLaunch.STATUS_PARTIAL
+            completion = "partial"
+            launch.current_stage = (
+                "Częściowy L1 — Workbench gotowy do Human Review"
+            )
+        elif workspace.scope_complete:
+            launch.status = FranchiseResearchLaunch.STATUS_COMPLETE
+            completion = "complete"
+            launch.current_stage = "Pełny L1 — Workbench gotowy do Human Review"
+        else:
+            launch.status = FranchiseResearchLaunch.STATUS_PARTIAL
+            completion = "partial"
+            launch.current_stage = (
+                "Częściowy wynik — Workbench gotowy do Human Review"
+            )
+        auto_review_summary = {}
+        finalization_summary = {}
+        if is_l1 and config.get("auto_review_finalize"):
+            from .research_auto_review import auto_review_l1_workspace
+            from .research_finalizer import finalize_research_workspace
+
+            auto_review_summary = auto_review_l1_workspace(
+                workspace,
+                actor=launch.requested_by,
+            )
+            if auto_review_summary["policy_accepted"]:
+                finalization, _ = finalize_research_workspace(
+                    workspace,
+                    actor=launch.requested_by,
+                )
+                published = list(
+                    finalization.published_fields.filter(
+                        status="projected",
+                        is_current=True,
+                    ).values_list("target_field", flat=True)
+                )
+                finalization_summary = {
+                    "finalization_id": str(finalization.finalization_id),
+                    "release_number": finalization.release_number,
+                    "published_fields": len(published),
+                    "published_target_fields": published,
+                }
+                launch.current_stage = (
+                    f"{launch.current_stage.split(' — Workbench')[0]} — "
+                    f"opublikowano automatycznie {len(published)}/20 bezpiecznych pól"
+                )
+            else:
+                launch.current_stage = (
+                    f"{launch.current_stage} — auto-review nie dopuścił żadnego pola"
+                )
         launch.progress_percent = 100
         launch.result_summary = {
             "profile_id": workspace.profile_id,
+            "l1_pipeline_version": (
+                "cheap-effective-v2"
+                if launch.profile_id in {"PL:L1", "PL:L1:v2"}
+                else None
+            ),
+            "l1_route": hybrid_summary.get("route"),
+            "seed_accepted_fields": hybrid_summary.get("seed_accepted_fields"),
+            "paid_search_skipped": hybrid_summary.get("paid_search_skipped"),
             "workspace_id": str(workspace.workspace_id),
             "planned_tasks": workspace.planned_tasks,
             "evaluated_tasks": workspace.evaluated_tasks,
             "planned_fields": workspace.planned_fields,
+            "proposed_fields": proposed_fields,
+            "projectable_fields": projectable_fields,
+            "auto_review": auto_review_summary,
+            "auto_finalization": finalization_summary,
+            "minimum_proposed_fields": minimum_l1_proposals if is_l1 else None,
+            "selected_sources": len(search.sources),
+            "selected_documents": len(extraction.documents),
+            "parsed_documents": sum(
+                document.parse_status.value in {"parsed", "partial"}
+                for document in extraction.documents
+            ),
+            "claims": len(extraction.claims),
+            "accepted_claims": sum(
+                decision.verdict.value == "accepted"
+                for decision in checker.claim_decisions
+            ),
+            "needs_review_claims": sum(
+                decision.verdict.value == "needs_review"
+                for decision in checker.claim_decisions
+            ),
+            "rejected_claims": sum(
+                decision.verdict.value == "rejected"
+                for decision in checker.claim_decisions
+            ),
+            "normalized_values": len(normalized.normalized_values),
             "quality_score": workspace.quality_score,
+            "completion": completion,
         }
         launch.cost_summary = _combined_usage(summaries)
         launch.completed_at = timezone.now()

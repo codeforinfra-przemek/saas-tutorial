@@ -41,7 +41,7 @@ from .models import (
     FranchiseResearchValueClaim,
 )
 from .presentation import category_visual, decorate_categories
-from .research_fields import field_metadata, profile_info
+from .research_fields import L1_PUBLIC_FIELD_ORDER, field_metadata, profile_info
 
 def management_context(**kwargs):
     context = {
@@ -120,6 +120,18 @@ def filtered_directory_franchises(filters):
         )
     if filters["category"]:
         franchises = franchises.filter(category__slug=filters["category"], category__is_active=True)
+    uses_measured_data = any(
+        (
+            filters["investment_max"] is not None,
+            filters["growth_min"] is not None,
+            filters["revenue_min"] is not None,
+            bool(filters["payback_max"]),
+            filters["financing"] == "yes",
+            filters["financials"] == "yes",
+        )
+    )
+    if uses_measured_data:
+        franchises = franchises.exclude(data_status=Franchise.DATA_STATUS_DEMO)
     if filters["investment_max"] is not None:
         franchises = franchises.filter(
             Q(min_investment__lte=filters["investment_max"])
@@ -170,7 +182,9 @@ def franchise_list_view(request):
         except ValueError:
             investment_max_value = None
         if investment_max_value is not None:
-            franchises = franchises.filter(
+            franchises = franchises.exclude(
+                data_status=Franchise.DATA_STATUS_DEMO
+            ).filter(
                 Q(min_investment__lte=investment_max_value)
                 | Q(max_investment__lte=investment_max_value)
             )
@@ -321,6 +335,39 @@ def franchise_detail_view(request, slug, data_only=False):
         if latest_research
         else None
     )
+    l1_research_rows = []
+    if latest_finalization and latest_research.profile_id in {"PL:L1", "PL:L1:v2"}:
+        publications = {
+            item.target_field: item
+            for item in latest_finalization.published_fields.filter(
+                status="projected",
+                is_current=True,
+            ).select_related("editorial_decision")
+        }
+        decisions = {
+            item.target_field: item
+            for item in latest_finalization.field_decisions.all()
+        }
+        for target_field in L1_PUBLIC_FIELD_ORDER:
+            publication = publications.get(target_field)
+            decision = decisions.get(target_field)
+            evidence = decision.evidence if decision else []
+            l1_research_rows.append(
+                {
+                    "target_field": target_field,
+                    "metadata": field_metadata(target_field),
+                    "publication": publication,
+                    "decision": decision,
+                    "source_url": next(
+                        (
+                            item.get("url")
+                            for item in evidence
+                            if item.get("url")
+                        ),
+                        "",
+                    ),
+                }
+            )
     approved_assets = franchise.assets.filter(status=FranchiseAsset.STATUS_APPROVED)
     similar_franchises = apply_promotion_flags(
         Franchise.objects.filter(is_active=True, category=franchise.category)
@@ -357,6 +404,7 @@ def franchise_detail_view(request, slug, data_only=False):
         "similar_franchises": similar_franchises,
         "latest_research": latest_research,
         "latest_finalization": latest_finalization,
+        "l1_research_rows": l1_research_rows,
         "published_research_fields": (
             latest_finalization.published_fields.filter(
                 status="projected",

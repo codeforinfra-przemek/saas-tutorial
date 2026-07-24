@@ -565,8 +565,9 @@ class ResearchLaunchForm(forms.Form):
     initial_task_limit = forms.IntegerField(
         min_value=1,
         max_value=15,
-        initial=5,
+        initial=7,
         label="Zadania w pierwszej partii",
+        help_text="PL:L1:v2 ma 7 zadań — wartość 7 wykonuje pełny poziom L1.",
     )
     max_search_calls = forms.IntegerField(
         min_value=1,
@@ -586,6 +587,18 @@ class ResearchLaunchForm(forms.Form):
         initial=15,
         label="Limit wywołań Extractora",
     )
+    auto_review_finalize = forms.BooleanField(
+        required=False,
+        initial=False,
+        label=(
+            "Po runie automatycznie opublikuj wyłącznie bezpieczne pola PL:L1 "
+            "spełniające wersjonowaną politykę"
+        ),
+        help_text=(
+            "Pola finansowe, skala sieci, wiele wartości i słabe źródła pozostaną "
+            "nieopublikowane do Human Review."
+        ),
+    )
     acknowledge_paid = forms.BooleanField(
         label="Rozumiem, że uruchomienie użyje płatnego API OpenAI.",
     )
@@ -602,6 +615,15 @@ class ResearchLaunchForm(forms.Form):
                 )
             else:
                 field.widget.attrs["class"] = FIELD_CLASSES
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("auto_review_finalize") and cleaned.get("profile_id") != "PL:L1":
+            self.add_error(
+                "auto_review_finalize",
+                "Kontrolowana automatyczna publikacja jest dostępna tylko dla PL:L1.",
+            )
+        return cleaned
 
 
 class ResearchCampaignForm(forms.Form):
@@ -654,8 +676,9 @@ class ResearchCampaignForm(forms.Form):
     initial_task_limit = forms.IntegerField(
         min_value=1,
         max_value=15,
-        initial=5,
+        initial=7,
         label="Zadania w pierwszej partii",
+        help_text="PL:L1:v2 ma 7 zadań — wartość 7 wykonuje pełny poziom L1.",
     )
     max_search_calls = forms.IntegerField(
         min_value=1,
@@ -678,6 +701,18 @@ class ResearchCampaignForm(forms.Form):
     include_previously_researched = forms.BooleanField(
         required=False,
         label="Świadomie utwórz nowe wydanie także dla franczyz, które mają już Workbench lub import",
+    )
+    auto_review_finalize = forms.BooleanField(
+        required=False,
+        initial=False,
+        label=(
+            "Auto-review + auto-finalize: publikuj tylko bezpieczne pola PL:L1, "
+            "pozostałe zachowaj do pracy człowieka"
+        ),
+        help_text=(
+            "Każda automatyczna decyzja jest oznaczona jako reguła systemowa, "
+            "nigdy jako Human Review."
+        ),
     )
     acknowledge_paid = forms.BooleanField(
         label="Rozumiem łączny budżet i potwierdzam użycie płatnego API OpenAI.",
@@ -706,6 +741,11 @@ class ResearchCampaignForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned.get("auto_review_finalize") and cleaned.get("profile_id") != "PL:L1":
+            self.add_error(
+                "auto_review_finalize",
+                "Kontrolowana automatyczna publikacja jest dostępna tylko dla PL:L1.",
+            )
         franchises = cleaned.get("franchises")
         per_run = cleaned.get("max_cost_usd")
         total = cleaned.get("max_total_cost_usd")

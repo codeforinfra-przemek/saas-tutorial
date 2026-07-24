@@ -715,7 +715,7 @@ class CheckerAgentTests(TestCase):
             if item.target_field == optional_field
         )
         self.assertEqual(results.schema_version, "1.5.0")
-        self.assertEqual(results.profile_id, "PL:L1:v1")
+        self.assertEqual(results.profile_id, "PL:L1:v2")
         self.assertFalse(optional_result.required_for_completion)
         self.assertEqual(
             optional_result.availability, FieldAvailability.PUBLIC_OPTIONAL
@@ -740,7 +740,7 @@ class CheckerAgentTests(TestCase):
 
     def test_profile_required_field_in_high_priority_task_is_critical(self):
         plan, task, search_results, extraction_results = self._profile_fixture(
-            "PL:L1", "scope.jurisdictions"
+            "PL:L2", "scope.jurisdictions"
         )
         policy = next(
             question
@@ -1470,6 +1470,71 @@ class CheckerAgentTests(TestCase):
 
         self.assertEqual(decisions[0].verdict, CheckerVerdict.ACCEPTED)
 
+    def test_local_quantitative_contract_requires_an_actual_value(self):
+        claim = RawExtractionClaim(
+            claim_id="claim-cccccccccccccccc",
+            task_id="task-fees",
+            target_field="fees.royalty",
+            value_text="Opłata licencyjna",
+            citation_ids=["citation-cccccccccccccccc"],
+            confidence=ExtractionConfidence.HIGH,
+        )
+        draft = CheckerDraft(
+            decisions=[
+                CheckerClaimDecisionDraft(
+                    claim_id=claim.claim_id,
+                    verdict=CheckerModelVerdict.ACCEPTED,
+                    semantic_fit=CheckerModelSemanticFit.DIRECT,
+                    source_support=CheckerModelSourceSupport.SUFFICIENT,
+                    rationale="The quote names a fee but supplies no amount.",
+                )
+            ]
+        )
+
+        decisions, _, _ = CheckerAgent._ground_draft(
+            draft,
+            [claim],
+            {"citation-cccccccccccccccc": "source-cccccccccccccccc"},
+            ["source-cccccccccccccccc"],
+        )
+
+        self.assertEqual(decisions[0].verdict, CheckerVerdict.NEEDS_REVIEW)
+        self.assertEqual(decisions[0].semantic_fit, CheckerSemanticFit.PARTIAL)
+        self.assertIn(
+            CheckerIssueCode.INSUFFICIENT_CONTEXT,
+            decisions[0].issue_codes,
+        )
+
+    def test_local_quantitative_contract_allows_a_rate(self):
+        claim = RawExtractionClaim(
+            claim_id="claim-dddddddddddddddd",
+            task_id="task-fees",
+            target_field="fees.royalty",
+            value_text="7% sprzedaży netto",
+            citation_ids=["citation-dddddddddddddddd"],
+            confidence=ExtractionConfidence.HIGH,
+        )
+        draft = CheckerDraft(
+            decisions=[
+                CheckerClaimDecisionDraft(
+                    claim_id=claim.claim_id,
+                    verdict=CheckerModelVerdict.ACCEPTED,
+                    semantic_fit=CheckerModelSemanticFit.DIRECT,
+                    source_support=CheckerModelSourceSupport.SUFFICIENT,
+                    rationale="The quote contains the royalty rate.",
+                )
+            ]
+        )
+
+        decisions, _, _ = CheckerAgent._ground_draft(
+            draft,
+            [claim],
+            {"citation-dddddddddddddddd": "source-dddddddddddddddd"},
+            ["source-dddddddddddddddd"],
+        )
+
+        self.assertEqual(decisions[0].verdict, CheckerVerdict.ACCEPTED)
+
     def test_invalid_provider_claim_coverage_retains_usage_as_failed_attempt(self):
         def invalid_draft(extraction_results):
             exact = self._accepted_draft(extraction_results)
@@ -1530,6 +1595,53 @@ class CheckerAgentTests(TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(CheckerValidationError, message):
                     self._run(**arguments)
+
+    def test_accepts_partition_when_selected_sources_are_not_search_prefix(self):
+        extraction = self.extraction_results.model_copy(
+            update={
+                "selected_source_ids": [
+                    self.sources[0].source_id,
+                    self.sources[1].source_id,
+                ],
+                "unselected_source_ids": [self.sources[2].source_id],
+                "documents": self.extraction_results.documents[:2],
+                "evidence_passages": [
+                    item
+                    for item in self.extraction_results.evidence_passages
+                    if item.source_id != self.sources[2].source_id
+                ],
+                "citations": [
+                    item
+                    for item in self.extraction_results.citations
+                    if item.source_id != self.sources[2].source_id
+                ],
+                "claims": [
+                    item
+                    for item in self.extraction_results.claims
+                    if all(
+                        citation_id
+                        in {
+                            citation.citation_id
+                            for citation in self.extraction_results.citations
+                            if citation.source_id != self.sources[2].source_id
+                        }
+                        for citation_id in item.citation_ids
+                    )
+                ],
+            }
+        )
+        search = self.search_results.model_copy(
+            update={
+                "sources": [self.sources[0], self.sources[2], self.sources[1]],
+            }
+        )
+
+        results = self._run(
+            search_results=search,
+            extraction_results=extraction,
+        )
+
+        self.assertEqual(results.selected_source_ids, extraction.selected_source_ids)
 
     def test_rejects_iteration_claim_and_evidence_limits(self):
         self.assertGreater(len(self.extraction_results.claims), 1)

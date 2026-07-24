@@ -27,6 +27,7 @@ class ResearchPublicationError(ValueError):
 ACCEPTED_DECISIONS = {
     FranchiseResearchReviewField.DECISION_ACCEPTED,
     FranchiseResearchReviewField.DECISION_ACCEPTED_EDITED,
+    FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED,
 }
 MONETARY_ATTRIBUTES = {
     "min_investment",
@@ -45,7 +46,10 @@ def _json_value(value):
 
 
 def _normalized_value(decision: FranchiseResearchEditorialDecision):
-    if decision.value_origin != FranchiseResearchEditorialDecision.ORIGIN_AI:
+    if decision.value_origin not in {
+        FranchiseResearchEditorialDecision.ORIGIN_AI,
+        FranchiseResearchEditorialDecision.ORIGIN_POLICY,
+    }:
         return None
     if decision.research_field_id is None:
         return None
@@ -121,26 +125,48 @@ def _typed_value(decision, franchise_attribute: str):
     return value
 
 
+def _virtual_attribute(target_field: str) -> str:
+    return f"research.{target_field}"
+
+
+def _is_model_attribute(attribute: str) -> bool:
+    try:
+        Franchise._meta.get_field(attribute)
+    except Exception:
+        return False
+    return True
+
+
 def _selected_decisions(finalization: FranchiseResearchFinalization):
+    """Give every accepted field one public destination.
+
+    Dedicated model columns remain useful to cards and filters. Every other L1
+    value (including a second value competing for one legacy column) receives
+    an audited virtual destination rendered by the research panel.
+    """
+
     decisions = (
         finalization.field_decisions.filter(decision__in=ACCEPTED_DECISIONS)
         .select_related("research_field")
         .prefetch_related("research_field__values")
     )
-    grouped: dict[str, list[FranchiseResearchEditorialDecision]] = {}
-    for decision in decisions:
+    ordered = sorted(
+        decisions,
+        key=lambda item: (
+            TARGET_PRECEDENCE.get(item.target_field, 10_000),
+            item.target_field,
+            item.pk,
+        ),
+    )
+    used_model_attributes = set()
+    selected = []
+    for decision in ordered:
         attribute = field_metadata(decision.target_field).franchise_attribute
-        if attribute:
-            grouped.setdefault(attribute, []).append(decision)
-    selected = {}
-    for attribute, candidates in grouped.items():
-        candidates.sort(key=lambda item: TARGET_PRECEDENCE.get(item.target_field, 10_000))
-        distinct_values = {item.effective_value.strip() for item in candidates}
-        if len(distinct_values) > 1:
-            raise ResearchPublicationError(
-                f"Conflicting accepted values target Franchise.{attribute}."
-            )
-        selected[attribute] = candidates[0]
+        if attribute and attribute not in used_model_attributes:
+            used_model_attributes.add(attribute)
+            selected.append((attribute, decision, True))
+        else:
+            selected.append((_virtual_attribute(decision.target_field), decision, False))
     return selected
 
 
@@ -183,18 +209,34 @@ def project_approved_research(
     old_by_attribute = {item.franchise_attribute: item for item in old_publications}
     actions = []
     prepared = {}
-    for attribute, decision in selected.items():
-        try:
-            value = _typed_value(decision, attribute)
-        except ResearchPublicationError as exc:
+    for attribute, decision, is_model_attribute in selected:
+        if not is_model_attribute:
             actions.append(
                 {
                     "target_field": decision.target_field,
                     "franchise_attribute": attribute,
-                    "status": FranchiseResearchPublishedField.STATUS_SKIPPED,
-                    "issue_code": str(exc),
-                    "previous_value": _json_value(getattr(franchise, attribute)),
-                    "projected_value": None,
+                    "status": FranchiseResearchPublishedField.STATUS_PROJECTED,
+                    "issue_code": "",
+                    "previous_value": None,
+                    "projected_value": decision.effective_value.strip(),
+                    "decision": decision,
+                }
+            )
+            continue
+        try:
+            value = _typed_value(decision, attribute)
+        except ResearchPublicationError as exc:
+            # A reviewed value is still useful in the complete L1 panel even
+            # when it cannot safely populate a typed legacy model column.
+            virtual_attribute = _virtual_attribute(decision.target_field)
+            actions.append(
+                {
+                    "target_field": decision.target_field,
+                    "franchise_attribute": virtual_attribute,
+                    "status": FranchiseResearchPublishedField.STATUS_PROJECTED,
+                    "issue_code": f"legacy_projection:{exc}",
+                    "previous_value": None,
+                    "projected_value": decision.effective_value.strip(),
                     "decision": decision,
                 }
             )
@@ -224,6 +266,8 @@ def project_approved_research(
     for old in old_publications:
         if old.franchise_attribute in selected_attributes:
             continue
+        if not _is_model_attribute(old.franchise_attribute):
+            continue
         current_value = _json_value(getattr(franchise, old.franchise_attribute))
         if current_value == old.projected_value:
             field = Franchise._meta.get_field(old.franchise_attribute)
@@ -242,6 +286,8 @@ def project_approved_research(
     ).update(is_current=False)
     for attribute, value in prepared.items():
         setattr(franchise, attribute, value)
+    if "website_url" in prepared:
+        franchise.website_url_status = Franchise.WEBSITE_VALIDATED
     franchise.data_status = (
         Franchise.DATA_STATUS_RESEARCH_REVIEWED
         if finalization.decision == "approved"
@@ -254,7 +300,8 @@ def project_approved_research(
     )
     franchise.save(
         update_fields=sorted(
-            set(prepared) | {"data_status", "is_verified", "updated_at"}
+            set(prepared)
+            | {"data_status", "is_verified", "website_url_status", "updated_at"}
         )
     )
     for action in actions:

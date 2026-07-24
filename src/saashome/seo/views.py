@@ -65,7 +65,10 @@ def budget_detail_view(request, slug):
     page = get_seo_page(BUDGET_PAGES, slug)
     if not page:
         raise Http404
-    franchises = Franchise.objects.filter(is_active=True, min_investment__lte=page["max_investment"]).select_related("category")
+    franchises = Franchise.objects.filter(
+        is_active=True,
+        min_investment__lte=page["max_investment"],
+    ).exclude(data_status=Franchise.DATA_STATUS_DEMO).select_related("category")
     breadcrumbs = _breadcrumbs(request, {"name": "Franczyzy", "url": request.build_absolute_uri(reverse("franchises:list"))}, {"name": page["title"], "url": request.build_absolute_uri(request.path)})
     return render(request, "franchises/seo_franchise_list.html", _franchise_list_context(request, page, franchises, breadcrumbs))
 

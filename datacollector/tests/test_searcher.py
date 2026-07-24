@@ -735,7 +735,9 @@ class SearcherAgentTests(TestCase):
             results.sources[0].canonical_url,
             "https://example.com/franchise",
         )
-        self.assertEqual(results.sources[0].source_type, SourceType.OFFICIAL)
+        self.assertEqual(results.sources[0].source_type, SourceType.UNKNOWN)
+        self.assertEqual(results.sources[0].task_ids, [results.selected_task_ids[0]])
+        self.assertEqual(results.task_results[0].status, SearchTaskStatus.PARTIAL)
 
     def test_paid_searcher_routes_single_task_provider_candidates(self):
         llm = FakeSearcherLLM()
@@ -797,6 +799,38 @@ class SearcherAgentTests(TestCase):
             any("non-public" in warning for warning in results.warnings)
         )
         self.assertEqual(llm.calls[0][3:], (1, 1, 4, 1))
+
+    def test_paid_official_first_merges_overlapping_seed_task_attribution(self):
+        plan = PlannerAgent(load_question_catalog()).create_plan(
+            PlannerInput(
+                brand_name="Example",
+                depth="catalog",
+                known_official_website="https://example.com/franchise",
+            )
+        )
+
+        results = SearcherAgent(FakeSearcherLLM()).create_search_results(
+            plan,
+            plan_sha256="b" * 64,
+            plan_reference="/tmp/plan.json",
+            task_limit=2,
+            max_search_calls=4,
+            official_first=True,
+        )
+
+        overlapping = next(
+            source
+            for source in results.sources
+            if source.canonical_url == "https://example.com/franchise"
+        )
+        self.assertTrue(overlapping.provider_observed)
+        self.assertEqual(overlapping.task_ids, [results.selected_task_ids[0]])
+        for task_result in results.task_results:
+            for source_id in task_result.source_ids:
+                source = next(
+                    item for item in results.sources if item.source_id == source_id
+                )
+                self.assertIn(task_result.task_id, source.task_ids)
 
     def test_candidate_router_respects_zero_route_limit(self):
         results = SearcherAgent(FakeSearcherLLM()).create_search_results(

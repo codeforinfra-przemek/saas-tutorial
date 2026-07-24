@@ -45,7 +45,12 @@ class Command(BaseCommand):
                 )
                 process_research_launch(launch)
                 launch.refresh_from_db()
-                if launch.status == launch.STATUS_SUCCEEDED:
+                if launch.status in {
+                    launch.STATUS_SUCCEEDED,
+                    launch.STATUS_COMPLETE,
+                    launch.STATUS_PARTIAL,
+                    launch.STATUS_INSUFFICIENT,
+                }:
                     self.stdout.write(
                         self.style.SUCCESS(f"Launch {launch.launch_id} succeeded.")
                     )

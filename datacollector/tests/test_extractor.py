@@ -8,6 +8,7 @@ from datacollector.agents.extractor import (
     ExtractorAgent,
     ExtractorValidationError,
     _build_passages,
+    _select_sources,
 )
 from datacollector.agents.planner import PlannerAgent
 from datacollector.catalog import load_question_catalog
@@ -239,6 +240,43 @@ class ExtractorAgentTests(TestCase):
                     tool_usage=[build_web_search_tool_usage({"search": 1})],
                 )
             ],
+        )
+
+    def test_automatic_source_selection_prioritizes_official_first_seed(self):
+        weak = self._source(1, source_type=SourceType.BLOG)
+        seed = self._source(2, source_type=SourceType.UNKNOWN).model_copy(
+            update={
+                "url": "https://example.com/franczyza/",
+                "canonical_url": "https://example.com/franczyza/",
+                "origin": SearchSourceOrigin.PLAN_SEED,
+                "provider_observed": False,
+                "observed_in_action_ids": [],
+            }
+        )
+        selected = _select_sources(
+            self._search_results([weak, seed]),
+            requested_source_ids=[],
+            source_limit=1,
+        )
+        self.assertEqual([source.source_id for source in selected], [seed.source_id])
+
+    def test_explicit_source_selection_is_not_reordered(self):
+        first = self._source(1, source_type=SourceType.BLOG)
+        seed = self._source(2, source_type=SourceType.UNKNOWN).model_copy(
+            update={
+                "origin": SearchSourceOrigin.PLAN_SEED,
+                "provider_observed": False,
+                "observed_in_action_ids": [],
+            }
+        )
+        selected = _select_sources(
+            self._search_results([first, seed]),
+            requested_source_ids=[first.source_id, seed.source_id],
+            source_limit=2,
+        )
+        self.assertEqual(
+            [source.source_id for source in selected],
+            [first.source_id, seed.source_id],
         )
 
     @staticmethod

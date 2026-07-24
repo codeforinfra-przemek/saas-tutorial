@@ -900,19 +900,19 @@ class CollectorCliTests(TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(
             [profile["profile_id"] for profile in profiles],
-            ["PL:L1:v1", "PL:L2:v1", "PL:L3:v1"],
+            ["PL:L1:v2", "PL:L1:v1", "PL:L2:v1", "PL:L3:v1"],
         )
         self.assertEqual(
-            [profile["questions"] for profile in profiles], [13, 26, 34]
+            [profile["questions"] for profile in profiles], [7, 13, 26, 34]
         )
         self.assertEqual(
-            [profile["fields"] for profile in profiles], [61, 179, 273]
+            [profile["fields"] for profile in profiles], [20, 61, 179, 273]
         )
         self.assertEqual(
             [profile["completion_required_fields"] for profile in profiles],
-            [30, 77, 101],
+            [14, 30, 77, 101],
         )
-        self.assertTrue(profiles[1]["country_authoritative_sources"])
+        self.assertTrue(profiles[2]["country_authoritative_sources"])
 
     def test_profile_question_preview_matches_plan_completion_gate(self):
         stdout = StringIO()
@@ -929,16 +929,16 @@ class CollectorCliTests(TestCase):
         )
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["selection_mode"], "profile")
-        self.assertEqual(payload["profile"], "PL:L1:v1")
-        self.assertEqual(payload["question_count"], 13)
-        self.assertEqual(payload["field_count"], 61)
-        self.assertEqual(payload["critical_fields"], 30)
+        self.assertEqual(payload["profile"], "PL:L1:v2")
+        self.assertEqual(payload["question_count"], 7)
+        self.assertEqual(payload["field_count"], 20)
+        self.assertEqual(payload["critical_fields"], 14)
         self.assertEqual(
             payload["completion_required_availabilities"],
             ["public_expected"],
         )
         self.assertFalse(
-            brand_question["field_completion_required"]["brand.aliases"]
+            brand_question["field_completion_required"]["brand.public_summary"]
         )
         self.assertTrue(
             brand_question["field_completion_required"]["brand.name"]
@@ -975,12 +975,12 @@ class CollectorCliTests(TestCase):
             plan_path = Path(summary["plan_path"])
             artifact = json.loads(plan_path.read_text(encoding="utf-8"))
             self.assertEqual(exit_code, 0)
-            self.assertEqual(summary["profile"], "PL:L1:v1")
-            self.assertEqual(summary["tasks"], 13)
-            self.assertEqual(summary["critical_fields"], 30)
+            self.assertEqual(summary["profile"], "PL:L1:v2")
+            self.assertEqual(summary["tasks"], 7)
+            self.assertEqual(summary["critical_fields"], 14)
             self.assertEqual(artifact["schema_version"], "1.3.0")
             self.assertEqual(
-                artifact["profile_snapshot"]["profile_id"], "PL:L1:v1"
+                artifact["profile_snapshot"]["profile_id"], "PL:L1:v2"
             )
             self.assertEqual(artifact["authoritative_sources"], ["https://biznes.gov.pl/"])
             self.assertFalse(
@@ -1620,12 +1620,12 @@ class CollectorCliTests(TestCase):
             summary = json.loads(stdout.getvalue())
             results, _ = load_checker_results(Path(summary["check_path"]))
             self.assertEqual(exit_code, 0)
-            self.assertEqual(summary["profile"], "PL:L1:v1")
+            self.assertEqual(summary["profile"], "PL:L1:v2")
             self.assertEqual(
                 summary["profile_sha256"], results.profile_sha256
             )
-            self.assertEqual(summary["profile_total_fields"], 61)
-            self.assertEqual(summary["profile_completion_required_fields"], 30)
+            self.assertEqual(summary["profile_total_fields"], 20)
+            self.assertEqual(summary["profile_completion_required_fields"], 14)
             self.assertGreater(summary["selected_total_fields"], 0)
             self.assertGreater(
                 summary["selected_completion_required_fields"], 0

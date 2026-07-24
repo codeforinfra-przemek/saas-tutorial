@@ -37,7 +37,7 @@ class ResearchProfileTests(TestCase):
 
     def test_polish_profile_aliases_resolve_to_versioned_ids(self):
         expected = {
-            "PL:L1": "PL:L1:v1",
+            "PL:L1": "PL:L1:v2",
             "pl:l2": "PL:L2:v1",
             "PL:L3:v1": "PL:L3:v1",
         }
@@ -53,7 +53,7 @@ class ResearchProfileTests(TestCase):
 
     def test_profile_sizes_are_explicit_release_contracts(self):
         expected = {
-            "PL:L1": (13, 61),
+            "PL:L1": (7, 20),
             "PL:L2": (26, 179),
             "PL:L3": (34, 273),
         }
@@ -110,8 +110,8 @@ class ResearchProfileTests(TestCase):
     def test_every_selected_field_has_exactly_one_availability_policy(self):
         expected_availability = {
             "PL:L1": {
-                "public_expected": 30,
-                "public_optional": 31,
+                "public_expected": 14,
+                "public_optional": 6,
             },
             "PL:L2": {
                 "public_expected": 30,
@@ -214,7 +214,7 @@ class ResearchProfileTests(TestCase):
 
     def test_completion_gate_is_field_level_and_country_calibrated(self):
         expected_required_fields = {
-            "PL:L1": 30,
+            "PL:L1": 14,
             "PL:L2": 77,
             "PL:L3": 101,
         }
@@ -359,8 +359,8 @@ class ResearchProfileTests(TestCase):
             )
         )
 
-        self.assertEqual(plan.planner_input.profile_id, "PL:L1:v1")
-        self.assertEqual(plan.profile_snapshot.profile_id, "PL:L1:v1")
+        self.assertEqual(plan.planner_input.profile_id, "PL:L1:v2")
+        self.assertEqual(plan.profile_snapshot.profile_id, "PL:L1:v2")
         task = plan.tasks[0]
         policy = plan.profile_snapshot.questions[0]
         self.assertEqual(task.preferred_source_types, policy.preferred_source_types)
@@ -374,7 +374,7 @@ class ResearchProfileTests(TestCase):
     def test_profile_hash_changes_with_effective_inherited_policy(self):
         original, _ = self.materialized("PL:L3")
         payload = self.profile_catalog.model_dump(mode="json")
-        payload["profiles"][0]["question_rules"][0]["fields"][
+        payload["profiles"][1]["question_rules"][0]["fields"][
             "brand.name"
         ] = "public_optional"
         changed_catalog = ResearchProfileCatalog.model_validate(payload)

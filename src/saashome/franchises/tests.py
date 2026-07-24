@@ -1,5 +1,6 @@
 import hashlib
 import json
+import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -9,12 +10,15 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.db import connection
+from django.db import IntegrityError, transaction
 from django.test.utils import CaptureQueriesContext
 
 from .research_import import _resolved, import_franchise_research
 from .research_workbench import create_research_workspace
 from .research_finalizer import finalize_research_workspace
+from .research_auto_review import auto_review_l1_workspace
 from .research_fields import field_metadata, profile_info
 from .research_jobs import (
     ResearchCommandResult,
@@ -26,6 +30,8 @@ from .research_jobs import (
 )
 from .research_launches import (
     _combined_usage,
+    _process_hybrid_l1_discovery,
+    _recover_paid_search_artifact,
     _run_stage,
     ResearchLaunchError,
     claim_next_launch,
@@ -37,6 +43,7 @@ from .research_campaigns import (
     create_research_campaign,
     sync_campaign,
 )
+from .views import filtered_directory_franchises
 
 from datacollector.agents.reviewer import HumanReviewer
 from datacollector.schemas import HumanReviewDecision, NormalizerMode
@@ -63,6 +70,244 @@ from .models import (
     FranchiseResearchValue,
     FranchiseResearchWorkspace,
 )
+
+
+class L1AutoReviewPolicyTests(TestCase):
+    def setUp(self):
+        category = FranchiseCategory.objects.create(name="Auto L1", slug="auto-l1")
+        franchise = Franchise.objects.create(
+            name="Auto Review Brand",
+            slug="auto-review-brand",
+            category=category,
+            short_description="Policy fixture",
+        )
+        self.workspace = FranchiseResearchWorkspace.objects.create(
+            franchise=franchise,
+            normalization_id=uuid.uuid4(),
+            plan_run_id=uuid.uuid4(),
+            target_country="PL",
+            depth="due_diligence",
+            profile_id="PL:L1:v2",
+            iteration=1,
+            normalized_reference="/tmp/not-needed-for-policy.json",
+            normalized_sha256="a" * 64,
+            planned_fields=20,
+        )
+
+    def test_only_safe_verified_typed_source_is_auto_accepted(self):
+        now = timezone.now()
+        safe = FranchiseResearchReviewField.objects.create(
+            workspace=self.workspace,
+            task_id="scope.brand_identity",
+            task_title="Identity",
+            target_field="brand.name",
+            pipeline_status="normalized",
+            checker_status="verified",
+            proposed_values=[
+                {
+                    "display": "Auto Review Brand",
+                    "canonical_text": "Auto Review Brand",
+                    "needs_corroboration": False,
+                }
+            ],
+            evidence=[
+                {
+                    "url": "https://example.com/franchise",
+                    "source_type": "official",
+                    "discovered_at": now.isoformat(),
+                    "quote": "Auto Review Brand",
+                }
+            ],
+        )
+        financial = FranchiseResearchReviewField.objects.create(
+            workspace=self.workspace,
+            task_id="fdd07.initial_investment",
+            task_title="Investment",
+            target_field="investment.total_low",
+            pipeline_status="normalized",
+            checker_status="verified",
+            proposed_values=[
+                {
+                    "display": "100000 PLN",
+                    "canonical_text": "100000",
+                    "needs_corroboration": False,
+                }
+            ],
+            evidence=[
+                {
+                    "url": "https://example.com/franchise",
+                    "source_type": "official",
+                    "discovered_at": now.isoformat(),
+                }
+            ],
+        )
+        missing = FranchiseResearchReviewField.objects.create(
+            workspace=self.workspace,
+            task_id="fdd06.other_fees",
+            task_title="Fees",
+            target_field="fees.marketing",
+            pipeline_status="missing",
+            checker_status="missing",
+        )
+
+        summary = auto_review_l1_workspace(self.workspace)
+
+        safe.refresh_from_db()
+        financial.refresh_from_db()
+        missing.refresh_from_db()
+        self.workspace.refresh_from_db()
+        self.assertEqual(
+            safe.decision,
+            FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED,
+        )
+        self.assertEqual(
+            financial.decision,
+            FranchiseResearchReviewField.DECISION_PENDING,
+        )
+        self.assertEqual(
+            missing.decision,
+            FranchiseResearchReviewField.DECISION_DOCUMENTED_GAP,
+        )
+        self.assertTrue(self.workspace.auto_reviewed)
+        self.assertEqual(
+            self.workspace.status,
+            FranchiseResearchWorkspace.STATUS_APPROVED_WITH_GAPS,
+        )
+        self.assertEqual(summary["policy_accepted"], 1)
+        self.assertEqual(summary["pending_human_review"], 1)
+
+
+class PolishCatalogSyncTests(TestCase):
+    def test_sync_prunes_only_unresearched_outside_catalog(self):
+        category = FranchiseCategory.objects.create(name="Legacy", slug="legacy")
+        researched = Franchise.objects.create(
+            name="Researched Brand",
+            slug="researched-brand",
+            category=category,
+            short_description="Research exists",
+        )
+        FranchiseResearchLaunch.objects.create(
+            franchise=researched,
+            profile_id="PL:L1",
+            status=FranchiseResearchLaunch.STATUS_FAILED,
+        )
+        stale = Franchise.objects.create(
+            name="Demo Placeholder",
+            slug="demo-placeholder",
+            category=category,
+            short_description="Remove me",
+        )
+        retained = Franchise.objects.create(
+            name="Catalog Brand",
+            slug="catalog-brand",
+            category=category,
+            short_description="Retain by catalog",
+        )
+        payload = {
+            "schema_version": "1.0.0",
+            "country": "PL",
+            "snapshot_date": "2026-07-22",
+            "record_count": 1,
+            "records": [
+                {
+                    "name": "Catalog Brand",
+                    "slug": "catalog-brand",
+                    "category_key": "services",
+                    "category_name": "Usługi",
+                    "short_description": "Wpis katalogowy",
+                    "market_status": "listed",
+                    "recruitment_status": "listed_offer",
+                    "is_active": True,
+                    "website_url": "https://example.com/",
+                    "website_url_status": "unverified_seed",
+                    "sources": [
+                        {
+                            "url": "https://example.com/listing",
+                            "publisher": "Fixture",
+                            "source_type": "directory_listing",
+                            "observed_at": "2026-07-22",
+                            "supports": ["directory_presence"],
+                        }
+                    ],
+                }
+            ],
+        }
+        with TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "catalog.json"
+            catalog_path.write_text(json.dumps(payload), encoding="utf-8")
+            call_command(
+                "sync_pl_franchise_catalog",
+                catalog=catalog_path,
+                backup_dir=Path(directory) / "backups",
+                apply=True,
+                prune_unresearched=True,
+                prune_operational_placeholders=True,
+                confirm_prune_unresearched=True,
+                verbosity=0,
+            )
+
+        self.assertTrue(Franchise.objects.filter(pk=researched.pk).exists())
+        self.assertFalse(Franchise.objects.filter(pk=stale.pk).exists())
+        retained.refresh_from_db()
+        self.assertEqual(retained.market_status, Franchise.MARKET_STATUS_LISTED)
+
+
+class PublicCredibilityGuardTests(TestCase):
+    def setUp(self):
+        self.category = FranchiseCategory.objects.create(
+            name="Credibility",
+            slug="credibility",
+        )
+        self.demo = Franchise.objects.create(
+            name="Demo Credibility Brand",
+            slug="demo-credibility-brand",
+            category=self.category,
+            short_description="Profile containing values that must not be public.",
+            min_investment="987654321.00",
+            max_investment="987654322.00",
+            initial_fee="87654321.00",
+            royalty_fee_text="SECRET-DEMO-ROYALTY",
+            data_status=Franchise.DATA_STATUS_DEMO,
+            rank_score="99.00",
+        )
+
+    def test_database_rejects_verified_demo_profile(self):
+        self.demo.is_verified = True
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.demo.save(update_fields=["is_verified"])
+
+    def test_public_views_do_not_render_demo_financial_values(self):
+        urls = [
+            reverse("franchises:list"),
+            reverse("franchises:detail", args=[self.demo.slug]),
+            reverse("franchises:compare") + f"?ids={self.demo.pk}",
+            reverse("franchises:directory"),
+        ]
+
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertNotContains(response, "987654321")
+                self.assertNotContains(response, "87654321")
+                self.assertNotContains(response, "SECRET-DEMO-ROYALTY")
+
+    def test_demo_profile_cannot_match_measured_directory_filter(self):
+        filters = {
+            "q": "",
+            "category": "",
+            "investment_max": self.demo.min_investment,
+            "business_type": "",
+            "growth_min": None,
+            "revenue_min": None,
+            "payback_max": "",
+            "financing": "",
+            "financials": "",
+        }
+
+        results = filtered_directory_franchises(filters)
+
+        self.assertNotIn(self.demo, results)
 
 
 class FranchiseResearchImportTests(TestCase):
@@ -406,8 +651,10 @@ class FranchiseResearchImportTests(TestCase):
         self.assertEqual(FranchiseResearchFinalization.objects.count(), 1)
         self.assertEqual(finalization.field_decisions.count(), 3)
         self.assertEqual(finalization.pending_count, 1)
-        self.assertEqual(FranchiseResearchPublishedField.objects.count(), 1)
-        publication = FranchiseResearchPublishedField.objects.get()
+        self.assertEqual(FranchiseResearchPublishedField.objects.count(), 2)
+        publication = FranchiseResearchPublishedField.objects.get(
+            target_field=accepted.target_field
+        )
         self.assertEqual(publication.target_field, accepted.target_field)
         self.assertTrue(publication.is_current)
         imported.franchise.refresh_from_db()
@@ -420,6 +667,17 @@ class FranchiseResearchImportTests(TestCase):
         self.assertEqual(manual.effective_value, "250 000 PLN")
         self.assertIsNone(manual.research_field)
         self.assertEqual(manual.supporting_documents.count(), 1)
+        manual_publication = FranchiseResearchPublishedField.objects.get(
+            target_field="financials.private_contract_value"
+        )
+        self.assertEqual(
+            manual_publication.franchise_attribute,
+            "research.financials.private_contract_value",
+        )
+        self.assertEqual(
+            manual_publication.status,
+            FranchiseResearchPublishedField.STATUS_PROJECTED,
+        )
         payload = json.loads(Path(finalization.artifact_reference).read_text())
         self.assertFalse(payload["privacy"]["document_bytes_included"])
         self.assertFalse(payload["privacy"]["storage_paths_included"])
@@ -670,8 +928,8 @@ class FranchiseResearchImportTests(TestCase):
         claimed = claim_next_launch()
         paths = {
             "plan": Path(self.temporary_directory.name) / "plan.json",
-            "sources": Path(self.temporary_directory.name) / "sources.json",
-            "extractions": Path(self.temporary_directory.name) / "extractions.json",
+            "seed_sources": Path(self.temporary_directory.name) / "sources-free.json",
+            "seed_extractions": Path(self.temporary_directory.name) / "extractions.json",
             "check": Path(self.temporary_directory.name) / "check.json",
             "normalized": Path(self.temporary_directory.name) / "normalized-launch.json",
         }
@@ -679,8 +937,8 @@ class FranchiseResearchImportTests(TestCase):
             path.write_text("fixture", encoding="utf-8")
         summaries = [
             {"plan_path": str(paths["plan"]), "agent_usage": [{"input_tokens": 10, "output_tokens": 2, "reasoning_tokens": 0, "total_tokens": 12, "tool_calls": 0, "tool_cost_usd": "0", "estimated_cost_usd": "0.01"}]},
-            {"sources_path": str(paths["sources"]), "usage_totals": {"api_attempts_recorded": 1, "input_tokens": 10, "output_tokens": 2, "reasoning_tokens": 0, "total_tokens": 12, "tool_calls": 1, "tool_cost_usd": "0.01", "estimated_cost_usd": "0.02"}},
-            {"extractions_path": str(paths["extractions"]), "usage_totals": {"api_attempts_recorded": 1, "input_tokens": 10, "output_tokens": 2, "reasoning_tokens": 0, "total_tokens": 12, "tool_calls": 0, "tool_cost_usd": "0", "estimated_cost_usd": "0.02"}},
+            {"sources_path": str(paths["seed_sources"]), "usage_totals": {"api_attempts_recorded": 0, "input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0, "total_tokens": 0, "tool_calls": 0, "tool_cost_usd": "0", "estimated_cost_usd": "0"}},
+            {"extractions_path": str(paths["seed_extractions"]), "usage_totals": {"api_attempts_recorded": 1, "input_tokens": 10, "output_tokens": 2, "reasoning_tokens": 0, "total_tokens": 12, "tool_calls": 0, "tool_cost_usd": "0", "estimated_cost_usd": "0.02"}},
             {"check_path": str(paths["check"]), "usage_totals": {"api_attempts_recorded": 1, "input_tokens": 10, "output_tokens": 2, "reasoning_tokens": 0, "total_tokens": 12, "tool_calls": 0, "tool_cost_usd": "0", "estimated_cost_usd": "0.02"}},
             {"normalized_path": str(paths["normalized"]), "usage_totals": {"api_attempts_recorded": 1, "input_tokens": 10, "output_tokens": 2, "reasoning_tokens": 0, "total_tokens": 12, "tool_calls": 0, "tool_cost_usd": "0", "estimated_cost_usd": "0.02"}},
         ]
@@ -696,6 +954,10 @@ class FranchiseResearchImportTests(TestCase):
             patch("franchises.research_launches.load_extraction_results", return_value=(self.extraction, self.checker.extraction_sha256)),
             patch("franchises.research_launches.load_checker_results", return_value=(self.checker, self.normalized.check_sha256)),
             patch("franchises.research_launches.load_normalizer_results", return_value=(self.normalized, "e" * 64)),
+            patch(
+                "franchises.research_launches._accepted_checker_fields",
+                return_value={f"field-{index}" for index in range(8)},
+            ),
             patch("franchises.research_launches.create_research_workspace") as create_workspace,
         ):
             workspace = FranchiseResearchWorkspace.objects.create(
@@ -711,13 +973,136 @@ class FranchiseResearchImportTests(TestCase):
             create_workspace.return_value = (workspace, True)
             process_research_launch(claimed, runner=runner)
         launch.refresh_from_db()
-        self.assertEqual(launch.status, FranchiseResearchLaunch.STATUS_SUCCEEDED)
+        self.assertEqual(
+            launch.status,
+            FranchiseResearchLaunch.STATUS_INSUFFICIENT,
+        )
         self.assertEqual(launch.result_workspace, workspace)
         self.assertEqual(len(commands), 5)
         self.assertIn("--profile", commands[0])
         self.assertIn("PL:L1", commands[0])
-        self.assertNotIn("--free", [part for command in commands for part in command])
-        self.assertEqual(launch.cost_summary["estimated_cost_usd"], "0.09")
+        self.assertIn("--offline", commands[0])
+        self.assertIn("--official-first", commands[1])
+        self.assertNotIn("--offline", commands[2])
+        self.assertIn("--document-cache-dir", commands[2])
+        self.assertIn("--risk-based", commands[3])
+        self.assertNotIn("search", commands[4])
+        self.assertTrue(launch.result_summary["paid_search_skipped"])
+        self.assertEqual(launch.result_summary["l1_route"], "official_only")
+        self.assertEqual(launch.cost_summary["estimated_cost_usd"], "0.07")
+
+    def test_hybrid_l1_routes_only_checker_gaps_through_resolver_executor(self):
+        category, _ = FranchiseCategory.objects.get_or_create(
+            slug="hybrid-gap-test",
+            defaults={"name": "Hybrid gap test"},
+        )
+        franchise = Franchise.objects.create(
+            name=self.plan.planner_input.brand_name,
+            slug="hybrid-gap-brand",
+            category=category,
+            short_description="Hybrid gap fixture",
+        )
+        launch = queue_research_launch(
+            franchise,
+            profile_id="PL:L1",
+            known_legal_name="",
+            known_official_website="https://example.com/",
+            configuration={
+                "max_cost_usd": "99.00",
+                "initial_task_limit": 5,
+                "max_search_calls": 8,
+                "max_sources": 9,
+                "max_extractor_api_calls": 12,
+            },
+        )
+        claimed = claim_next_launch()
+        claimed.plan_sha256 = self.search.plan_sha256
+        claimed.save(update_fields=["plan_sha256"])
+        root = Path(self.temporary_directory.name)
+        paths = {
+            name: root / filename
+            for name, filename in {
+                "plan": "plan-hybrid.json",
+                "seed_sources": "sources-r001-free.json",
+                "seed_extractions": "extractions-r001.json",
+                "seed_check": "check-r001.json",
+                "resolution": "resolution-r001-free.json",
+                "execution": "execution-r002.json",
+                "sources": "sources-r002.json",
+                "extractions": "extractions-r002.json",
+            }.items()
+        }
+        for path in paths.values():
+            path.write_text("fixture", encoding="utf-8")
+        zero = {
+            "api_attempts_recorded": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+            "total_tokens": 0,
+            "tool_calls": 0,
+            "tool_cost_usd": "0",
+            "estimated_cost_usd": "0",
+        }
+        summaries = [
+            {"sources_path": str(paths["seed_sources"]), "usage_totals": zero},
+            {"extractions_path": str(paths["seed_extractions"]), "usage_totals": zero},
+            {"check_path": str(paths["seed_check"]), "usage_totals": zero},
+            {"resolution_path": str(paths["resolution"]), "usage_totals": zero},
+            {
+                "execution_path": str(paths["execution"]),
+                "sources_path": str(paths["sources"]),
+                "extractions_path": str(paths["extractions"]),
+                "usage_totals": zero,
+            },
+        ]
+        commands = []
+
+        def runner(_launch, command):
+            commands.append(command)
+            return ResearchCommandResult(0, json.dumps(summaries[len(commands) - 1]))
+
+        with (
+            patch(
+                "franchises.research_launches.load_search_results",
+                return_value=(self.search, self.extraction.search_sha256),
+            ),
+            patch(
+                "franchises.research_launches.load_extraction_results",
+                return_value=(self.extraction, self.checker.extraction_sha256),
+            ),
+            patch(
+                "franchises.research_launches.load_checker_results",
+                return_value=(self.checker, self.normalized.check_sha256),
+            ),
+            patch(
+                "franchises.research_launches._accepted_checker_fields",
+                return_value={"brand.name"},
+            ),
+        ):
+            sources_path, extractions_path, check_path, summary = (
+                _process_hybrid_l1_discovery(
+                    claimed,
+                    runner,
+                    python=".venv/bin/python",
+                    plan=self.plan,
+                    plan_path=paths["plan"],
+                    config=claimed.configuration,
+                    summaries=[],
+                )
+            )
+        self.assertEqual(sources_path, paths["sources"].resolve())
+        self.assertEqual(extractions_path, paths["extractions"].resolve())
+        self.assertIsNone(check_path)
+        self.assertEqual(summary["route"], "official_plus_gap_search")
+        self.assertEqual(len(commands), 5)
+        self.assertIn("--offline", commands[0])
+        self.assertNotIn("--offline", commands[1])
+        self.assertIn("--risk-based", commands[2])
+        self.assertIn("resolve", commands[3])
+        self.assertIn("--free", commands[3])
+        self.assertIn("execute", commands[4])
+        self.assertIn("--document-cache-dir", commands[4])
 
     def test_campaign_claim_respects_per_campaign_concurrency(self):
         category, _ = FranchiseCategory.objects.get_or_create(
@@ -965,3 +1350,122 @@ class FranchiseResearchImportTests(TestCase):
                 summaries=[],
             )
         self.assertEqual(len(calls), 1)
+
+    def test_launch_records_known_usage_from_paid_failure_ledger(self):
+        category, _ = FranchiseCategory.objects.get_or_create(
+            slug="known-failure-ledger-test",
+            defaults={"name": "Known failure ledger test"},
+        )
+        franchise = Franchise.objects.create(
+            name="Known Failure Brand",
+            slug="known-failure-brand",
+            category=category,
+            short_description="Failure ledger fixture",
+        )
+        launch = queue_research_launch(
+            franchise,
+            profile_id="PL:L1",
+            known_legal_name="",
+            known_official_website="",
+            configuration={
+                "max_cost_usd": "1.00",
+                "initial_task_limit": 5,
+                "max_search_calls": 10,
+                "max_sources": 10,
+                "max_extractor_api_calls": 15,
+            },
+        )
+        claimed = claim_next_launch()
+        root = Path(self.temporary_directory.name)
+        attempts = root / "attempts"
+        attempts.mkdir()
+        ledger_path = attempts / "searcher-r001-c001-failed-fixture.json"
+        ledger_path.write_text(
+            json.dumps(
+                {
+                    "error_code": "postprocessing_error",
+                    "usage": {
+                        "agent": "searcher",
+                        "iteration": 1,
+                        "call_index": 1,
+                        "tokens": {
+                            "input_tokens": 100,
+                            "output_tokens": 20,
+                            "reasoning_tokens": 5,
+                            "total_tokens": 120,
+                        },
+                        "tool_usage": [{"tool": "web_search", "calls": 1}],
+                        "cost_estimate": {
+                            "tool_cost_usd": "0.01",
+                            "total_estimated_cost_usd": "0.25",
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with (
+            patch("franchises.research_launches.REPOSITORY_ROOT", root),
+            self.assertRaises(ResearchLaunchError),
+        ):
+            _run_stage(
+                claimed,
+                lambda _launch, _command: ResearchCommandResult(
+                    2,
+                    "error: post-processing failed. "
+                    f"Provider usage saved to: {ledger_path}.",
+                ),
+                ["search"],
+                label="Searcher / wyszukiwanie źródeł",
+                progress=25,
+                summaries=[],
+            )
+
+        claimed.refresh_from_db()
+        self.assertEqual(claimed.cost_summary["api_attempts_recorded"], 1)
+        self.assertEqual(claimed.cost_summary["estimated_cost_usd"], "0.25")
+        self.assertEqual(claimed.cost_summary["unknown_cost_attempts"], 0)
+        self.assertTrue(claimed.cost_summary["cost_complete"])
+        self.assertEqual(len(claimed.provider_failure_history), 1)
+        self.assertTrue(claimed.provider_failure_history[0]["usage_recorded"])
+
+    def test_launch_recovers_paid_search_artifact_from_log(self):
+        category, _ = FranchiseCategory.objects.get_or_create(
+            slug="recover-search-test",
+            defaults={"name": "Recover search test"},
+        )
+        franchise = Franchise.objects.create(
+            name="Recover Search Brand",
+            slug="recover-search-brand",
+            category=category,
+            short_description="Recover fixture",
+        )
+        launch = FranchiseResearchLaunch.objects.create(
+            franchise=franchise,
+            profile_id="PL:L1",
+            status=FranchiseResearchLaunch.STATUS_RUNNING,
+        )
+        root = Path(self.temporary_directory.name)
+        sources_path = root / "sources.json"
+        sources_path.write_text("{}", encoding="utf-8")
+        launch.log = json.dumps({"sources_path": str(sources_path)})
+        launch.save(update_fields=["log"])
+
+        with (
+            patch("franchises.research_launches.REPOSITORY_ROOT", root),
+            patch(
+                "franchises.research_launches.load_search_results",
+                return_value=(self.search, "a" * 64),
+            ),
+        ):
+            recovered = _recover_paid_search_artifact(
+                launch,
+                plan_sha256=self.search.plan_sha256,
+            )
+
+        launch.refresh_from_db()
+        self.assertEqual(recovered, sources_path)
+        self.assertEqual(launch.sources_reference, str(sources_path))
+        self.assertEqual(launch.sources_sha256, "a" * 64)
+        self.assertIn("zapytanie nie będzie ponawiane", launch.log)

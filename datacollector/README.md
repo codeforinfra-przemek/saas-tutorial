@@ -97,21 +97,22 @@ research should normally use the country-calibrated Research Profiles v2 instead
 ```
 
 `--profile` and `--depth` are mutually exclusive. Profile aliases resolve to an
-immutable versioned ID (`PL:L1` becomes `PL:L1:v1`), and Planner stores the full
+immutable versioned ID (`PL:L1` becomes `PL:L1:v2`), and Planner stores the full
 materialized profile plus a self-verifying SHA-256 in plan schema `1.3.0`.
 
 ### Polish Research Profiles v2
 
 | Profile | Questions | Fields | Completion gate | Intended use |
 | --- | ---: | ---: | ---: | --- |
-| `PL:L1:v1` | 13 | 61 | 30 | mass population of a useful public directory profile |
+| `PL:L1:v2` (`PL:L1`) | 7 | 20 | 14 | calibrated, inexpensive decision core for mass population |
+| `PL:L1:v1` (legacy) | 13 | 61 | 30 | immutable compatibility contract for existing runs |
 | `PL:L2:v1` | 26 | 179 | 77 | multi-source public verification, registries and manual risk checks |
 | `PL:L3:v1` | 34 | 273 | 101 | public due diligence covering the FDD 1–23 benchmark and documenting private gaps |
 
-The levels are cumulative: L1 questions and fields are retained in L2, and L2
-is retained in L3. Common Planner task IDs are stable between levels. A higher
-level adds scope and can strengthen evidence requirements; it cannot silently
-weaken an inherited minimum-source or corroboration rule.
+L2 v1 and L3 v1 remain cumulative with the frozen L1 v1 contract. L1 v2 is an
+explicitly smaller replacement selected by the `PL:L1` alias; it does not mutate
+historical plans or silently redefine L2/L3. A future L2 v2 must inherit L1 v2
+explicitly. Common Planner task IDs remain stable for shared canonical questions.
 
 Availability is recorded per field, independently from task priority:
 
@@ -137,6 +138,84 @@ PL profiles use Polish search-query templates and freeze the appropriate Polish
 authorities in the snapshot (CEIDG/Biznes.gov.pl, KRS/PRS/RDF, UOKiK, UPRP,
 ELI and EUR-Lex). The FTC/FDD material remains a comparative coverage framework,
 not a claim that US disclosure law applies in Poland.
+
+### Empirical L1 benchmark (10 brands, 20 fields)
+
+The bundled benchmark makes the proposed L1 gates measurable instead of treating
+them as new dogma. It compares the same 10 brands and 20 decision fields for two
+methods: `researcher_chatgpt` and `pipeline`. Gold must be prepared in the blind
+Gold-only Workbench at `/internal/research/benchmark/gold/`; the normal combined
+brand view is deliberately not the place to create independent reference data.
+
+```bash
+# Inspect brands, fields, freshness and source policy.
+.venv/bin/python -m datacollector benchmark --show-spec
+
+# Create the independent manual truth set.
+.venv/bin/python -m datacollector benchmark \
+  --init-gold-set datacollector/benchmarks/pl-l1-gold-v1.json \
+  --operator "Researcher name"
+
+# Create one result/review sheet for each method.
+.venv/bin/python -m datacollector benchmark \
+  --init-submission datacollector/benchmarks/pl-l1-manual-v1.json \
+  --method researcher_chatgpt --operator "Researcher name"
+.venv/bin/python -m datacollector benchmark \
+  --init-submission datacollector/benchmarks/pl-l1-pipeline-v1.json \
+  --method pipeline --operator "Researcher name"
+
+# Evaluate after research and Human Review.
+.venv/bin/python -m datacollector benchmark \
+  --evaluate datacollector/benchmarks/pl-l1-pipeline-v1.json \
+  --gold-set datacollector/benchmarks/pl-l1-gold-v1.json
+
+# Explicit AI-assisted proxy when no independent employee is available.
+# This resumes from a checkpoint after every completed role and stops between
+# calls at the known-cost ceiling.
+OPENAI_TIMEOUT_SECONDS=180 \
+OPENAI_SEARCH_TIMEOUT_SECONDS=240 \
+OPENAI_MAX_OUTPUT_TOKENS=12000 \
+.venv/bin/python -m datacollector benchmark \
+  --run-ai-experiment datacollector/benchmarks/pl-l1-ai-assisted-experiment-v1.json \
+  --gold-set datacollector/benchmarks/pl-l1-gold-v1.json \
+  --direct-submission datacollector/benchmarks/pl-l1-manual-v1.json \
+  --pipeline-submission datacollector/benchmarks/pl-l1-pipeline-v1.json \
+  --max-cost-usd 8.00 \
+  --max-search-calls 8
+```
+
+Initialization refuses to overwrite an existing artifact. `--force` is
+available only as an explicit destructive reset; normal benchmark work should
+be edited in the staff-only UI at `/internal/research/benchmark/`.
+
+The Benchmark Workbench shows completion per brand for Gold, direct and
+pipeline variants. Each combined brand page edits all 20 Gold/direct fields with source
+and date validation and records research time, review time and known cost. The
+pipeline column is read-only: select a PL:L1 Batch Campaign on the overview to
+export launch scope, provider cost, Searcher source metadata, proposed values
+and Human Review decisions into the pipeline artifact. Partial campaigns stay
+explicitly incomplete and can be exported incrementally. JSON artifacts and
+evaluation reports remain downloadable for independent analysis.
+
+`--run-ai-experiment` is not silently relabelled as human work. Its Gold is an
+independent-of-submissions AI proxy; the direct method is one monolithic
+Responses API web-search prompt per brand; review is a separate model call
+against the frozen Gold. `research_minutes` and `review_minutes` are measured API
+wall-clock times and the artifacts store `ai_assisted_wall_clock`. A future
+employee study can use the same forms with `human_active` without mixing the two
+measurement types.
+
+The evaluator first reports `ready`/`not_ready`; an empty template can no longer
+look like a scored method. It then reports attempted tasks, proposed versus accepted fields, unchanged
+Human Review acceptance, review time, accepted fields per known dollar, numeric
+source/date metadata, undisclosed demo values and optional exact agreement with
+the gold set. A proposal is deliberately distinct from a publishable accepted
+value. The 8–12 proposal, 60%, 15-minute and 10-fields-per-dollar thresholds are
+pilot targets to recalibrate after this A/B test.
+
+L1 v2 also supplies exact per-field freshness policy to the paid Checker. A live
+official offer/contact page no longer fails only because it lacks a publication
+date, while investment and outlet numbers still require a defensible as-of date.
 
 Create a no-API profile plan:
 
@@ -1241,6 +1320,24 @@ previously downloaded and indexed document corpus.
 See [the free Searcher architecture note](docs/free_searcher_architecture.md) for
 the recommended backend boundary, deployment stages, security requirements and
 the local-model fit for this workstation.
+
+## Cheap, effective PL:L1 (`cheap-effective-v1`)
+
+Workbench and Batch Campaign launches for `PL:L1` now use this order:
+
+1. deterministic offline Planner for the fixed profile;
+2. existing `Franchise.website_url` as an explicitly `unverified_seed`;
+3. local retrieval of the homepage and common first-party paths before paid search;
+4. paid Searcher capped at four calls when a seed exists, focused on gaps,
+   registries and independent confirmation;
+5. parsed-document cache shared by canonical URL and content SHA-256;
+6. paid Extractor with explicit prompt caching and bounded source/API limits;
+7. risk-based semantic Checker; low-risk scopes remain visibly `not_reviewed`
+   for Human Review instead of receiving an invented approval;
+8. terminal launch status `complete` only for complete scope, otherwise `partial`.
+
+Accepting and publishing `websites.official` in Human Review upgrades the seed
+to `validated_official`. Merely storing or fetching a URL never does.
 
 ## Tests
 

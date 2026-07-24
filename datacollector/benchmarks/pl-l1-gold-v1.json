@@ -1,0 +1,2068 @@
+{
+  "artifact_type": "pl_l1_gold_set",
+  "spec_version": "1.0.0",
+  "profile_id": "PL:L1:v2",
+  "researcher": "OpenAI independent benchmark proxy",
+  "methodology": "ai_independent_proxy",
+  "independence_statement": "Generated without access to direct or pipeline submissions. This is an AI proxy and must not be represented as independent human research.",
+  "provider_model": "gpt-5.6-terra",
+  "created_at": "2026-07-22T06:11:23.217500Z",
+  "instructions": [
+    "Fill this artifact independently of pipeline results.",
+    "Use found only with a value, direct source URL, source type and observation date.",
+    "Use not_public for a field a competent researcher could not find publicly; do not guess.",
+    "Record the source's effective/as-of date separately from the observation date where available."
+  ],
+  "brands": [
+    {
+      "slug": "zabka",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "Żabka",
+          "source_url": "https://www.zabka.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Nazwa marki używana w oficjalnym serwisie polskim."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "Sieć sklepów typu modern convenience / convenience retail.",
+          "source_url": "https://zabkagroup.com/pl/o-nas/transformacja-formatu-modern-convenience/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna strona Grupy opisuje Żabkę jako największą w Polsce sieć sklepów typu modern convenience."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Sieć małych sklepów convenience działających głównie we franczyzie, oferująca szybkie zakupy oraz usługi dodatkowe, m.in. kawę i przekazywanie/odbiór paczek.",
+          "source_url": "https://zabkagroup.com/pl/o-nas/transformacja-formatu-modern-convenience/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Opis dotyczy polskiej sieci sklepów Żabka."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://www.zabka.pl/",
+          "source_url": "https://www.zabka.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalny polski serwis marki."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "found",
+          "canonical_value": "https://www.zabka.pl/franczyza/",
+          "source_url": "https://www.zabka.pl/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Aktywna oficjalna strona rekrutacyjno-ofertowa franczyzy."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "found",
+          "canonical_value": "kontakt@zabka.pl; tel. +48 61 856 37 00. Dla kandydatów na franczyzobiorców: franczyza@zabka.pl; tel. 800 207 208 lub 509 197 000.",
+          "source_url": "https://www.zabka.pl/kontakt/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Kontakt ogólny oraz opublikowane kanały kontaktu dotyczące franczyzy."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "found",
+          "canonical_value": "Franczyza indywidualna: za każdy sklep odpowiada jeden franczyzobiorca. Nie znaleziono publicznego potwierdzenia oferty master-franczyzy, odsprzedaży ani transferu.",
+          "source_url": "https://www.zabka.pl/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalne FAQ stanowi, że za każdy sklep odpowiada jeden franczyzobiorca; brak w badanym materiale publicznych warunków pozostałych formatów."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "found",
+          "canonical_value": "Około 5 000 zł łącznych kosztów wejścia na start.",
+          "source_url": "https://www.zabka.pl/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalne FAQ podaje, że łączne koszty otwarcia zamykają się w kwocie ok. 5 000 zł; suma obejmuje m.in. opłatę za przystąpienie, kasę fiskalną, koncesję alkoholową oraz towary regionalne."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "found",
+          "canonical_value": "Kandydat nie musi dysponować własnym lokalem: Żabka pozyskuje nieruchomość i wskazuje lokal handlowy. Franczyzobiorca nie może być właścicielem lokalu, w którym prowadzi sklep Żabka.",
+          "source_url": "https://www.zabka.pl/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Sieć deklaruje zapewnienie umeblowanego i wyposażonego sklepu."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "found",
+          "canonical_value": "1 000 zł netto.",
+          "source_url": "https://www.zabka.pl/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalne FAQ: opłata za przystąpienie do sieci wynosi 1 000 zł netto."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "W aktualnie odnalezionych oficjalnych materiałach nie opublikowano stawki ani sposobu naliczania royalty dla franczyzobiorcy Żabki."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Sieć deklaruje wsparcie i komunikację marketingową, ale nie opublikowano odrębnej opłaty marketingowej ani jej stawki."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "found",
+          "canonical_value": "Około 5 000 zł.",
+          "source_url": "https://www.zabka.pl/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Publicznie podany łączny koszt otwarcia; źródło nie określa tej sumy jako ceny netto ani brutto."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie znaleziono opublikowanego maksymalnego poziomu łącznej inwestycji/kosztów wejścia w Polsce."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "found",
+          "canonical_value": "PLN (zł).",
+          "source_url": "https://www.zabka.pl/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Kwoty opublikowano w złotych polskich."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "found",
+          "canonical_value": "Około 5 000 zł.",
+          "source_url": "https://www.zabka.pl/artykul-edukacyjny/co-to-jest-sklep-convenience-i-jak-otworzyc-taki-biznes/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-05-26",
+          "notes": "Oficjalny materiał z 26 maja 2026 r. wskazuje wkład około 5 000 zł."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Bieżąca oficjalna strona oferty publikuje kwoty, lecz nie podaje wyraźnej daty obowiązywania tych warunków."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "found",
+          "canonical_value": "Szkolenie przed otwarciem sklepu: praktyczne i teoretyczne; strona wskazuje 15-dniowe szkolenie wprowadzające, natomiast w FAQ wskazuje 11 dni szkolenia praktycznego w sklepie szkoleniowym.",
+          "source_url": "https://www.zabka.pl/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Zachowano rozbieżność wewnątrz aktualnej strony oficjalnej; nie ujednolicano czasu szkolenia."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "found",
+          "canonical_value": "12 823 placówki pod marką Żabka w Polsce.",
+          "source_url": "https://zabkagroup.com/pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-06-30",
+          "notes": "Nie użyto globalnej liczby 13 063, ponieważ obejmuje ona także sklepy Nano i sklepy w Rumunii."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "found",
+          "canonical_value": "Polska; stan na 30.06.2026.",
+          "source_url": "https://zabkagroup.com/pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-06-30",
+          "notes": "Oficjalna strona Grupy podaje 12 823 „sklepów Żabka” na 30 czerwca 2026 r.; odrębnie oznacza szerszą liczbę obejmującą Nano i Rumunię."
+        }
+      ]
+    },
+    {
+      "slug": "mcdonalds",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "McDonald's",
+          "source_url": "https://mcdonalds.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna polska strona marki."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "QSR — sieć restauracji szybkiej obsługi.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Polska strona franczyzowa opisuje markę jako sieć restauracji szybkiej obsługi w Polsce."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Sieć restauracji oferująca m.in. burgery, zestawy, wrapy i sałatki, kurczaka, frytki i dodatki, kawę McCafé, desery, napoje, Happy Meal oraz śniadania.",
+          "source_url": "https://mcdonalds.pl/nasze-menu/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Skrót oparty na bieżących kategoriach polskiego menu."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://mcdonalds.pl/",
+          "source_url": "https://mcdonalds.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalny serwis McDonald's Polska."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "found",
+          "canonical_value": "https://mcdonalds.pl/o-mcdonalds/franczyza/",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna polska strona oferty franczyzowej."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "found",
+          "canonical_value": "Dział Franczyzy: licencja@pl.mcd.com; tel. +48 22 211 58 26, godz. 9:00–17:00.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/faq/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Publicznie wskazany kanał kontaktu dotyczący franczyzy."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "found",
+          "canonical_value": "Franczyza restauracyjna dla jednej osoby fizycznej; możliwe prowadzenie wielu restauracji po decyzji McDonald's Polska. Spółki i wspólnicy biznesowi są wykluczeni. Nie znaleziono publicznego potwierdzenia modelu master franchise, transferu ani odsprzedaży.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/faq/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oferta obejmuje format single-unit i możliwość multi-unit zależną od decyzji franczyzodawcy."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "found",
+          "canonical_value": "Minimum 2 000 000 zł środków własnych, w całości przeznaczonych na franczyzę restauracji.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/wymagania-finansowe/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalnie wskazany minimalny wymóg środków własnych."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "found",
+          "canonical_value": "Kandydat nie musi zapewniać lokalu ani pomagać w pozyskiwaniu lokalizacji; wyszukiwaniem i nabywaniem miejsc pod restauracje zajmuje się Dział Rozwoju McDonald's Polska.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/faq/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Brak publicznie podanych parametrów technicznych lokalu dla kandydata, ponieważ lokalizacje pozyskuje McDonald's Polska."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "found",
+          "canonical_value": "45 000 USD + aktualna stawka VAT.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/faq/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Wstępna opłata licencyjna; oficjalna strona wymaga doliczenia aktualnej stawki VAT."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "found",
+          "canonical_value": "Miesięczna opłata licencyjna; publiczna strona nie podaje stawki ani sposobu jej naliczania.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/wymagania-finansowe/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Nie przypisano kwoty ani procentu, ponieważ nie zostały publicznie opublikowane dla Polski."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "found",
+          "canonical_value": "Miesięczna opłata marketingowa; publiczna strona nie podaje stawki ani sposobu jej naliczania.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/wymagania-finansowe/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Nie przypisano kwoty ani procentu, ponieważ nie zostały publicznie opublikowane dla Polski."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie opublikowano minimalnej całkowitej inwestycji. Oficjalna strona podaje jedynie średni koszt zakupu wyposażenia powyżej 5 000 000 zł oraz dodatkowe, zmienne koszty."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie opublikowano maksymalnej całkowitej inwestycji; cena wyposażenia zależy od dotychczasowej sprzedaży restauracji."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak publicznego zakresu całkowitej inwestycji, więc nie przypisano jednej waluty do tego pola. Składowe są publikowane w PLN i USD."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "found",
+          "canonical_value": "Minimum 2 000 000 zł środków własnych; wydatki mogą być finansowane ze środków własnych w minimum 25% oraz kredytu bankowego w maksimum 75%. Dla pierwszej restauracji rekomendowany udział własny wynosi 25%.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/wymagania-finansowe/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Strona FAQ potwierdza rekomendowany 25% udział własny dla pierwszej restauracji; wymóg minimum 2 mln zł podaje strona wymagań finansowych."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Dla całkowitej inwestycji nie opublikowano ani kompletnego zakresu, ani wyraźnej daty obowiązywania danych."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "found",
+          "canonical_value": "Około 9 miesięcy szkolenia w restauracji, minimum 20 godzin tygodniowo; obejmuje szkolenia praktyczne i teoretyczne, cztery etapy rozwoju stanowiskowego i menedżerskiego oraz cztery kursy teoretyczne trwające 3–4 dni. Proces poprzedza trzydniowa praktyka w warszawskiej restauracji.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/franczyza/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalny opis procesu przygotowania kandydata do franczyzy."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Najnowszy odnaleziony komunikat oficjalny podaje jedynie „ponad 600 restauracji”, a nie dokładną liczbę całkowitą wymaganą przez pole."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "found",
+          "canonical_value": "Polska — stan komunikowany 24 czerwca 2026 r.: ponad 600 restauracji McDonald's.",
+          "source_url": "https://mcdonalds.pl/o-mcdonalds/biuro-prasowe/463022-nowy-wymiar-orzezwienia-iced-oat-mango-matcha-juz-w-mcdonalds",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-06-24",
+          "notes": "Zakres: Polska; komunikat nie zawiera dokładnej liczby placówek."
+        }
+      ]
+    },
+    {
+      "slug": "bafra-kebab",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "Bafra Kebab",
+          "source_url": "https://bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Nazwa używana na oficjalnej stronie marki."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "Gastronomia / street food (kebab)",
+          "source_url": "https://bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna strona opisuje sieć jako street food i wskazuje przyczepy z kebabem."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Ogólnopolska sieć franczyzowa mobilnych punktów gastronomicznych sprzedających kebab; model opiera się na przyczepach gastronomicznych i wsparciu franczyzodawcy w lokalizacji, finansowaniu oraz uruchomieniu punktu.",
+          "source_url": "https://franczyza.bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Opis ograniczony do informacji deklarowanych na aktualnej stronie franczyzowej."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://bafrakebab.pl/",
+          "source_url": "https://bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Główna oficjalna strona konsumencka marki."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "found",
+          "canonical_value": "https://franczyza.bafrakebab.pl/",
+          "source_url": "https://franczyza.bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna strona pozyskiwania franczyzobiorców."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "found",
+          "canonical_value": "Telefon franczyzowy: +48 537 631 631",
+          "source_url": "https://bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Numer oznaczony na stronie głównej jako „FRANCZYZA”."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "found",
+          "canonical_value": "Franczyza pojedynczego mobilnego punktu w przyczepie gastronomicznej; rozpoczęcie przez zakup przyczepy albo leasing przyczepy.",
+          "source_url": "https://franczyza.bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna strona wskazuje dwie opcje rozpoczęcia współpracy: zakup lub leasing przyczepy; nie komunikuje modelu master-franczyzy ani odsprzedaży."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "found",
+          "canonical_value": "Od 35 000 zł wkładu własnego.",
+          "source_url": "https://franczyza.bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Kwota jest komunikowana jako minimalny próg środków własnych przy finansowaniu, często leasingowym; nie jest przedstawiona jako pełny koszt inwestycji."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "found",
+          "canonical_value": "Model mobilnej przyczepy gastronomicznej. Sieć wskazuje lokalizacje m.in. na osiedlach, deptakach, skwerach oraz przy marketach i galeriach handlowych; dział komercjalizacji ma pozyskiwać i oceniać lokalizację.",
+          "source_url": "https://franczyza.bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Nie opublikowano mierzalnych wymogów technicznych lokalu/powierzchni."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Na aktualnej oficjalnej stronie oferty nie znaleziono publicznej kwoty opłaty wejściowej."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Aktualna oficjalna strona wspomina opłatę franczyzową w kalkulatorze kosztów, ale nie podaje jej stawki ani sposobu naliczania."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie znaleziono aktualnej, publicznej stawki opłaty marketingowej w źródle oficjalnym."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalnie komunikowane „od 35 tys. zł” oznacza wkład własny, a nie minimalną całkowitą inwestycję."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie znaleziono publicznej maksymalnej całkowitej inwestycji dla Polski."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "not_applicable",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak opublikowanej wartości całkowitej inwestycji, do której waluta mogłaby się odnosić."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "found",
+          "canonical_value": "Od 35 000 zł.",
+          "source_url": "https://franczyza.bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna strona opisuje tę kwotę jako środki własne potrzebne do uruchomienia punktu, w praktyce z wykorzystaniem leasingu."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Strona nie podaje daty obowiązywania ani daty aktualności parametrów inwestycyjnych."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "found",
+          "canonical_value": "Obowiązkowe szkolenie trwa pięć dni i obejmuje przygotowanie potraw, obsługę urządzeń, operacyjne prowadzenie punktu oraz obsługę klienta. Praktyka odbywa się w działającym punkcie; dostępna jest też platforma szkoleniowa, a szkolenie kończy egzamin i certyfikat.",
+          "source_url": "https://franczyza.bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Opis programu szkoleniowego pochodzi z sekcji FAQ oferty franczyzowej."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "found",
+          "canonical_value": "431 placówek (371 punktów franczyzowych i 60 punktów własnych).",
+          "source_url": "https://franczyza.bafrakebab.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Suma obliczona wyłącznie z dwóch aktualnie prezentowanych na oficjalnej stronie wartości składowych; strona określa 371 punktów franczyzowych jako działające w całej Polsce."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalna strona publikuje bieżące liczniki punktów, ale nie podaje ich daty referencyjnej. Odczyt źródła wykonano 2026-07-23; zakres: Polska dla 371 punktów franczyzowych."
+        }
+      ]
+    },
+    {
+      "slug": "bobby-burger",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "Bobby Burger",
+          "source_url": "https://www.bobbyburger.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Nazwa widoczna w aktywnym oficjalnym systemie zamówień marki."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "Gastronomia — sieć burgerowni / restauracji burgerowych.",
+          "source_url": "https://www.bobbyburger.pl/rzeszow",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalne menu obejmuje burgery, zestawy, dodatki, sałatki, napoje i desery."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Marka prowadzi lokale gastronomiczne skoncentrowane na burgerach; oferta obejmuje burgery wołowe i drobiowe, pozycje bezmięsne, dodatki oraz napoje, z obsługą zamówień online.",
+          "source_url": "https://www.bobbyburger.pl/rzeszow",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Opis oparty na aktualnie dostępnym oficjalnym menu lokalnym."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://www.bobbyburger.pl/",
+          "source_url": "https://www.bobbyburger.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Aktywny oficjalny serwis marki, działający jako system zamówień online."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalna witryna dostępna podczas badania nie udostępniała publicznej podstrony ani formularza franczyzowego."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalny serwis udostępnia przede wszystkim proces zamówień i kontakty przypisane do lokali, a nie centralny kontakt biznesowy."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "found",
+          "canonical_value": "Franczyza lokalu stacjonarnego oraz format kontenerowy „Bobby Smart Cube”. Nie ujawniono publicznie modelu multi-unit, master-franczyzy, transferu ani odsprzedaży.",
+          "source_url": "https://franczyza-burgery-gastronomia-bobby-burger.info-net.com.pl/",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Źródło branżowe opisuje wariant lokalu i system kontenerowy; nie podaje daty obowiązywania oferty."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Odnalezione materiały podają szacunki kosztów inwestycji, ale nie określają wymaganego kapitału kandydata ani minimalnego wkładu własnego."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "found",
+          "canonical_value": "Lokal wymaga akceptacji sieci; sugerowana powierzchnia: duże miasta 100–140 m², mniejsze miasta od 70 m².",
+          "source_url": "https://franczyza-burgery-gastronomia-bobby-burger.info-net.com.pl/",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Źródło nie podaje daty publikacji ani obowiązywania parametrów."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "found",
+          "canonical_value": "19 950 PLN netto — opłata wstępna dla lokalu.",
+          "source_url": "https://www.dobrepomyslynabiznes.pl/franczyza/bobby-burger-franczyza",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Źródło podaje także, że opłata obejmuje m.in. projekt aranżacji, system informatyczny, wsparcie przygotowania i szkolenia. Inne aktywne źródło branżowe podaje zaokrągloną kwotę 19 900 PLN dla lokalu oraz 9,9 tys. PLN dla systemu kontenerowego; brak publicznej oficjalnej taryfy rozstrzygającej rozbieżność."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "found",
+          "canonical_value": "8% miesięcznego obrotu netto.",
+          "source_url": "https://www.dobrepomyslynabiznes.pl/franczyza/bobby-burger-franczyza",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Stawka jest zgodna z drugim aktywnym źródłem branżowym. Nie odnaleziono publicznego dokumentu oficjalnego z datą obowiązywania."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Odnaleziony opis wsparcia wymienia kampanie i materiały marketingowe, lecz nie wskazuje odrębnej opłaty marketingowej ani jej stawki."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Aktywne źródło branżowe wskazuje historycznie wyglądające wartości „od 100 tys. zł” dla gotowego lokalu po gastronomii oraz „od 120 tys. zł” dla kontenera, ale nie podaje daty obowiązywania; nie spełnia wymogu explicit_as_of."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Odnaleziono jedynie orientacyjny koszt otwarcia około 200 000 PLN netto, zależny od wielkości i stanu lokalu; nie jest to publicznie określony maksymalny pułap inwestycji ani wartość z datą aktualności."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Materiały branżowe operują w PLN, lecz nie odnaleziono inwestycji spełniającej wymóg jednoznacznej daty aktualności."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak wskazanej kwoty lub procentu wkładu własnego."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Odnalezione strony z parametrami nie publikują daty obowiązywania ani aktualizacji danych inwestycyjnych."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "found",
+          "canonical_value": "Szkolenia dla franczyzobiorcy i pracowników przed otwarciem oraz w trakcie działalności; według opisu obejmują utrzymanie jednolitych standardów sieci.",
+          "source_url": "https://www.dobrepomyslynabiznes.pl/franczyza/bobby-burger-franczyza",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Źródło branżowe nie wskazuje długości ani szczegółowego harmonogramu szkolenia."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Aktywna strona branżowa deklaruje „aktualnie” 34 lokale w kraju, ale nie podaje daty tego stanu. Inne źródła prezentują odmienne, niedatowane albo historyczne liczby, więc nie można konserwatywnie potwierdzić bieżącej łącznej liczby placówek w Polsce."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Źródło używa określenia „aktualnie”, ale nie wskazuje konkretnej daty odniesienia; nie odnaleziono aktualnego, datowanego zestawienia oficjalnego lub rejestrowego."
+        }
+      ]
+    },
+    {
+      "slug": "carrefour-express",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "Carrefour Express",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza/express-convenience",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalna strona Carrefour Polska opisuje formaty Carrefour Express convenience i Express minimarket."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "Handel detaliczny artykułami spożywczymi; format sklepów convenience/osiedlowych.",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/o-nas/carrefour-polska",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Carrefour Polska określa się jako omnikanałowa sieć spożywcza; sklepy Express należą do formatów osiedlowych/convenience."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Franczyzowy format sklepów spożywczych: Express convenience to samoobsługowy sklep dla szybkich zakupów blisko domu lub pracy, z ofertą dań gotowych i jedzenia na wynos; Express minimarket oferuje także tradycyjną sprzedaż mięs i wędlin oraz szeroki asortyment świeży.",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza/express-convenience",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Opis dotyczy polskich formatów Carrefour Express."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://www.carrefour.pl/",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalny serwis korporacyjny Carrefour Polska wskazuje przejście do carrefour.pl."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "found",
+          "canonical_value": "https://serwiskorporacyjny.carrefour.pl/franczyza",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Aktywna oficjalna strona programu franczyzowego Carrefour Polska."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "found",
+          "canonical_value": "Dział franczyzy: formularz „Jesteś zainteresowany franczyzą?” na stronie oferty; telefony 519 014 567 i 502 456 201.",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalna strona franczyzy publikuje formularz oraz wskazane numery kontaktowe."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "found",
+          "canonical_value": "Franczyza: Carrefour Express convenience, Carrefour Express minimarket oraz Carrefour Express na stacjach paliw. Dodatkowo Carrefour prowadzi model ajencyjny dla Carrefour Express convenience. Brak publicznego potwierdzenia modelu master-franczyzy lub odsprzedaży/transferu dla Carrefour Express.",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Strona franczyzy wymienia pięć modeli Carrefour; strona ajencji wskazuje model ajencyjny Express convenience."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "found",
+          "canonical_value": "Dla ajencji Carrefour Express convenience wkład ajenta ogranicza się do zakupu drukarek fiskalnych oraz opłacenia koncesji na alkohol i ubezpieczenia lokalu. Dla klasycznej franczyzy Carrefour nie publikuje konkretnej kwoty wymaganego kapitału; wskazuje jedynie potrzebę środków na prace adaptacyjne, jeżeli wymaga tego stan lokalu.",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza/ajencja",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Nie podano kwoty w PLN ani minimum kapitałowego dla klasycznej franczyzy."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "found",
+          "canonical_value": "Express convenience: lokal do 250 m², w miejscu o dużym natężeniu ruchu, np. w centrum dużego miasta; lokal wymaga pozytywnej weryfikacji Carrefour. Express minimarket: powierzchnia sprzedaży 100–500 m², lokalizacja miejska lub wiejska; lokal wymaga pozytywnej weryfikacji Carrefour. Dla obu formatów wymagane są środki na adaptację, gdy stan lokalu tego wymaga.",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza/carrefour-express-minimarket",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Wymagania zależą od wybranego formatu Carrefour Express."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Na aktualnie dostępnych oficjalnych stronach Carrefour Polska nie znaleziono publicznej kwoty ani stawki opłaty wejściowej dla Carrefour Express."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Na aktualnie dostępnych oficjalnych stronach Carrefour Polska nie znaleziono publicznej stawki royalty ani sposobu jej kalkulacji dla Carrefour Express."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Carrefour deklaruje wsparcie marketingowe, ale nie publikuje aktualnej opłaty marketingowej dla Carrefour Express."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak publicznie podanej minimalnej całkowitej inwestycji dla franczyzy Carrefour Express."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak publicznie podanej maksymalnej całkowitej inwestycji dla franczyzy Carrefour Express."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "not_applicable",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono publicznej wartości inwestycji, więc waluta nie ma zastosowania."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "found",
+          "canonical_value": "Klasyczna franczyza: Carrefour wskazuje konieczność posiadania odpowiednich środków na prace adaptacyjne, jeżeli wymaga tego stan lokalu; kwota nie jest publiczna. Ajencja: zakup drukarek fiskalnych oraz opłacenie koncesji na alkohol i ubezpieczenia lokalu.",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza/ajencja",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "To opis zakresu wkładu, nie wycena pieniężna."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie ma publicznego zestawienia inwestycji z oznaczoną datą aktualności."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "found",
+          "canonical_value": "Pakiet szkoleń; dodatkowo wsparcie ekipy otwarciowej, doradztwo opiekuna regionalnego, logistyka i wsparcie marketingowe.",
+          "source_url": "https://serwiskorporacyjny.carrefour.pl/franczyza/express-convenience",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalna strona formatu Express convenience wymienia pakiet szkoleń jako element wsparcia."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "found",
+          "canonical_value": "495 sklepów convenience (Carrefour Express) w Polsce.",
+          "source_url": "https://polskieradio24.pl/artykul/3652040%2Ccarrefour-zamyka-sklepy-w-polsce-brak-zadowalajacej-oferty-kupna",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2025-12-31",
+          "notes": "Źródło podaje, że na koniec 2025 r. Carrefour miał w Polsce 495 sklepów convenience, identyfikowanych w artykule jako placówki Carrefour Express."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "found",
+          "canonical_value": "Polska, stan na 31 grudnia 2025 r.: 495 sklepów convenience (Carrefour Express).",
+          "source_url": "https://polskieradio24.pl/artykul/3652040%2Ccarrefour-zamyka-sklepy-w-polsce-brak-zadowalajacej-oferty-kupna",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2025-12-31",
+          "notes": "Liczba dotyczy polskiego formatu convenience; nie należy jej utożsamiać z liczbą wszystkich sklepów Carrefour Polska."
+        }
+      ]
+    },
+    {
+      "slug": "chorten",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "Chorten",
+          "source_url": "https://chorten.com.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Marka jest prezentowana na oficjalnej stronie jako Chorten / Grupa Chorten."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "Polska grupa detalicznych sklepów spożywczych.",
+          "source_url": "https://franczyza.chorten.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalny opis odnosi się do grupy polskich detalicznych sklepów spożywczych."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Partnerska grupa zakupowo-handlowa dla niezależnych sklepów spożywczych: zapewnia warunki zakupowe, umowy handlowe, marketing, narzędzia IT i opiekę koordynatora, przy zachowaniu niezależności właściciela sklepu.",
+          "source_url": "https://franczyza.chorten.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Opis dotyczy polskiego modelu współpracy partnerskiej Grupy Chorten."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://chorten.com.pl/",
+          "source_url": "https://chorten.com.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Główna oficjalna strona marki w Polsce."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "found",
+          "canonical_value": "https://franczyza.chorten.pl/",
+          "source_url": "https://franczyza.chorten.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalna strona „Dołącz do nas”, przedstawiająca ofertę współpracy."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "found",
+          "canonical_value": "Formularz dla osób prowadzących sklep lub chcących go otworzyć; bezpośrednio: tel./fax 85 653 74 35, e-mail: biuro@chorten.com.pl.",
+          "source_url": "https://franczyza.chorten.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalna strona oferty wskazuje formularz kontaktowy i kontakt bezpośredni do Grupy Chorten."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "found",
+          "canonical_value": "Model partnerski dla niezależnie prowadzonych placówek; możliwe są małe sklepy (do 80 m² sali sprzedaży) i markety (powyżej 300 m²). Nie opublikowano oferty master-franczyzy, transferu ani odsprzedaży jednostki.",
+          "source_url": "https://franczyza.chorten.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Właściciel zachowuje własną markę i niezależność biznesową; wszystkie placówki są partnerskie."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "found",
+          "canonical_value": "Brak konieczności ponoszenia inwestycji na start; nie opublikowano odrębnej kwoty wymaganego kapitału kandydata.",
+          "source_url": "https://franczyza.chorten.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Źródło nie podaje liczbowego wymogu kapitałowego ani waluty."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Wskazane metraże opisują segmenty współpracy, a nie ogólny minimalny lub maksymalny wymóg lokalowy."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "found",
+          "canonical_value": "0 PLN — brak opłat wpisowych i franczyzowych.",
+          "source_url": "https://franczyza.chorten.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalna strona zastrzega jednocześnie występowanie niewielkich, regionalnie zróżnicowanych opłat administracyjnych, bez podania ich kwot."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Strona deklaruje brak opłat franczyzowych, ale nie publikuje pozycji rozliczeniowej nazwanej royalty."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalna oferta deklaruje wsparcie marketingowe, lecz nie podaje odpłatności za to wsparcie."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Źródło podaje, że nie ma konieczności ponoszenia inwestycji na start, lecz nie publikuje liczbowej wartości inwestycji."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak publicznego przedziału inwestycji dla kandydata."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "not_applicable",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalna strona nie podaje kwoty inwestycji ani waluty."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Deklaracja o braku konieczności inwestycji na start nie określa liczbowo wkładu własnego."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Na stronie nie wskazano daty obowiązywania parametrów inwestycyjnych."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalna oferta deklaruje organizowanie szkoleń podnoszących rentowność placówek, ale bez programu, czasu trwania lub potwierdzenia szkolenia wdrożeniowego."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "found",
+          "canonical_value": "2445 placówek Chorten widocznych w liczniku „Znajdź sklep blisko Ciebie”.",
+          "source_url": "https://chorten.com.pl/aktualnosci/grupa-chorten-kupi%C5%82a-sie%C4%87-ponad-500-sklep%C3%B3w-euro",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "To licznik placówek prezentowany na oficjalnej stronie marki. Nie należy go utożsamiać z liczbą ponad 3500 placówek całej Grupy Chorten, obejmującej także inne koncepty, podaną w artykule z 26.02.2026."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "found",
+          "canonical_value": "Polska; 2445 placówek widocznych w oficjalnym liczniku strony, zaobserwowane 2026-07-23.",
+          "source_url": "https://chorten.com.pl/aktualnosci/grupa-chorten-kupi%C5%82a-sie%C4%87-ponad-500-sklep%C3%B3w-euro",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Zakres liczby: placówki prezentowane w liczniku marki Chorten na stronie dla klientów w Polsce."
+        }
+      ]
+    },
+    {
+      "slug": "da-grasso",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "Da Grasso",
+          "source_url": "https://www.dagrasso.pl",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Nazwa używana w oficjalnym serwisie marki."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "Gastronomia — sieć pizzerii / restauracji",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oferta franczyzowa opisuje dwa formaty pizzerii/restauracji."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Franczyzowa sieć pizzerii oferująca format Ekspres (dowóz i odbiór osobisty) oraz restaurację klasyczną (sala, dowóz i odbiór osobisty), ze wsparciem operacyjnym, marketingowym i technologicznym centrali.",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Opis ograniczony do publicznie prezentowanego modelu na rynku polskim."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://www.dagrasso.pl",
+          "source_url": "https://www.dagrasso.pl",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalny serwis konsumencki marki."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "found",
+          "canonical_value": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna strona warunków oferty franczyzowej."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "found",
+          "canonical_value": "Kontakt franczyzowy: formularz na stronie oferty; tel. 509 910 000; e-mail: sekretariat@dagrasso.pl.",
+          "source_url": "https://www.dagrassofranczyza.pl/kontakt.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalny formularz jest przeznaczony do rozmowy o lokalu i wejściu we franczyzę; telefon i e-mail podane w stopce serwisu franczyzowego."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "found",
+          "canonical_value": "Dwa formaty pojedynczego lokalu: Ekspres oraz restauracja klasyczna. Marka publicznie deklaruje wsparcie w otwieraniu kolejnego lokalu dla działających partnerów; nie publikuje modelu master-franczyzy, transferu ani odsprzedaży.",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Ekspres: dostawa i odbiór; restauracja klasyczna: sala, dostawa i odbiór."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "found",
+          "canonical_value": "Partner pokrywa ok. 50% inwestycji; publiczna oferta nie podaje jednej, stałej kwoty kapitału własnego dla kandydata.",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Kwota zależy od formatu, lokalizacji i stanu lokalu. Centrala deklaruje finansowanie do 50% kosztów otwarcia."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "found",
+          "canonical_value": "Ekspres: 65–100 m². Restauracja klasyczna: 100–200 m². Poszukiwany jest lokal usługowy (deweloperski lub z rynku wtórnego); oceniane są m.in. przyłącze prądu, możliwość wentylacji, widoczność i ruch, dojazd, potencjał dostaw, parking/ogródek oraz warunki najmu.",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Centrala przeprowadza audyt techniczny i analizę lokalizacji."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "found",
+          "canonical_value": "15 000 zł netto, jednorazowo (opłata licencyjna).",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Publicznie wskazana jako jednorazowa opłata licencyjna."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "found",
+          "canonical_value": "6,5% prowizji od zamówień online i telefonicznych (www.dagrasso.pl oraz Call Center); zamówienia bezpośrednie w lokalu są poza prowizją.",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Stała miesięczna opłata franczyzowa: 0 PLN."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "found",
+          "canonical_value": "Około 1 600 zł netto miesięcznie.",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Wartość podana przez markę z kwalifikatorem „ok.”."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "found",
+          "canonical_value": "Od 200 000 zł netto — format Ekspres.",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Publicznie podana minimalna inwestycja początkowa; oferta wskazuje, że jest to inwestycja po stronie partnera."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalna oferta podaje progi „od”, lecz nie publikuje maksymalnej całkowitej inwestycji."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "found",
+          "canonical_value": "PLN (zł; wartości netto).",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Waluta i kwalifikator netto wynikają z publicznego cennika wejścia."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "found",
+          "canonical_value": "Około 50% inwestycji po stronie partnera (wkład własny, adaptacja lokalu, wyposażenie dodatkowe, pierwsze zatowarowanie i marketing otwarciowy).",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Nie opublikowano jednej kwoty wkładu własnego; udział jest zależny od projektu."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalna strona prezentuje bieżącą ofertę, ale nie podaje wyraźnej daty obowiązywania ani daty aktualności wartości inwestycyjnych."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "found",
+          "canonical_value": "Szkolenia dla franczyzobiorcy i zespołu przed otwarciem, w trakcie przygotowań i po otwarciu; obejmują również wdrożenie operacyjne i wsparcie rekrutacyjne.",
+          "source_url": "https://www.dagrassofranczyza.pl/oferta.html",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Marka deklaruje szkolenia na wszystkich etapach oraz stałe wsparcie operacyjne."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "found",
+          "canonical_value": "190 placówek w Polsce.",
+          "source_url": "https://www.dagrassofranczyza.pl",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-03-31",
+          "notes": "Suma wartości wojewódzkich na oficjalnej mapie sieci (stan na Q1 2026): 190."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "found",
+          "canonical_value": "Polska, stan na Q1 2026 (do 31 marca 2026); liczba 190 wynika z sumy placówek wykazanych na oficjalnej mapie według województw.",
+          "source_url": "https://www.dagrassofranczyza.pl",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-03-31",
+          "notes": "Zakres: placówki Da Grasso widoczne na mapie sieci w Polsce."
+        }
+      ]
+    },
+    {
+      "slug": "xtreme-fitness-gyms",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "Xtreme Fitness Gyms",
+          "source_url": "https://www.xtremefitness.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Nazwa używana na oficjalnej stronie sieci w Polsce."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "Sieć klubów fitness / siłowni",
+          "source_url": "https://xtremebrands.pl/franczyza/fitness",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna oferta franczyzowa określa koncept jako kluby fitness."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Franczyzowa sieć nowoczesnych klubów fitness; model obejmuje uruchomienie i prowadzenie klubu z centralnym wsparciem lokalizacyjnym, operacyjnym, marketingowym, szkoleniowym i technologicznym.",
+          "source_url": "https://xtremebrands.pl/franczyza/fitness",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Opis ograniczony do publicznie komunikowanego modelu polskiej oferty."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://www.xtremefitness.pl/",
+          "source_url": "https://www.xtremefitness.pl/",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna strona konsumencka marki w Polsce."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "found",
+          "canonical_value": "https://xtremebrands.pl/franczyza/fitness",
+          "source_url": "https://xtremebrands.pl/franczyza/fitness",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna polska strona oferty franczyzowej Xtreme Fitness Gyms."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "found",
+          "canonical_value": "kontakt@xtremebrands.pl; +48 882 477 531",
+          "source_url": "https://xtremebrands.pl/franczyza/fitness",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Ogólny kontakt Xtreme Brands publikowany przy ofercie franczyzowej."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "found",
+          "canonical_value": "Franczyza single-unit i multi-unit: oferta dotyczy otwarcia klubu, a marka publicznie komunikuje rozwijanie kilku lokalizacji przez partnerów. Brak publicznego potwierdzenia formatu master, transferu lub odsprzedaży.",
+          "source_url": "https://xtremebrands.pl/franczyza/dolacz/xtreme-brands",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Strona webinaru wskazuje, że partnerzy otwierają więcej niż jedną lokalizację; nie przesądza warunków ewentualnego transferu/odsprzedaży."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "found",
+          "canonical_value": "Wkład własny: 450 000–475 000 zł.",
+          "source_url": "https://xtremebrands.pl/franczyza/na-czym-polega",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Publicznie wskazany kapitał własny potrzebny do wejścia we współpracę; kwota bez wskazania kwalifikacji VAT."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "found",
+          "canonical_value": "Lokal 500–1000 m², w galerii handlowej, retail parku albo budynku wolnostojącym; wysokość min. 3 m; nośność stropu min. 500 kg/m²; dobra ekspozycja, dojazd i parking; miasta od 10 tys. mieszkańców.",
+          "source_url": "https://xtremebrands.pl/franczyza/fitness",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Marka deklaruje, że wskazuje i negocjuje lokal na podstawie analiz ruchu, demografii i konkurencji."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "found",
+          "canonical_value": "230 000 zł netto.",
+          "source_url": "https://xtremebrands.pl/franczyza/fitness",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Opłata wstępna."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "found",
+          "canonical_value": "Miesięcznie: 5% od sprzedaży netto + 5 zł od każdego m² powierzchni klubu.",
+          "source_url": "https://xtremebrands.pl/franczyza/fitness",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Źródło nie podaje kwalifikacji VAT dla stawki 5 zł/m²."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "found",
+          "canonical_value": "1 000 zł netto miesięcznie.",
+          "source_url": "https://xtremebrands.pl/franczyza/fitness",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oddzielnie komunikowana jest też opłata technologiczna: 1 000 zł netto miesięcznie; nie została wliczona do opłaty marketingowej."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "found",
+          "canonical_value": "około 1 100 000 zł",
+          "source_url": "https://xtremebrands.pl/franczyza/na-czym-polega",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Dolna granica publicznie podanego przedziału całkowitej inwestycji; kwota orientacyjna, bez wskazania VAT."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "found",
+          "canonical_value": "około 1 200 000 zł",
+          "source_url": "https://xtremebrands.pl/franczyza/na-czym-polega",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Górna granica publicznie podanego przedziału całkowitej inwestycji; kwota orientacyjna, bez wskazania VAT."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "found",
+          "canonical_value": "PLN (zł)",
+          "source_url": "https://xtremebrands.pl/franczyza/na-czym-polega",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Waluta wynika z opublikowanych kwot inwestycji."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "found",
+          "canonical_value": "450 000–475 000 zł wkładu własnego.",
+          "source_url": "https://xtremebrands.pl/franczyza/na-czym-polega",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Źródło podaje także możliwość finansowania wewnętrznego od 750 000 zł; nie określa VAT dla wkładu własnego."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Aktualna strona oferty publikuje wartości inwestycji, lecz nie podaje jednoznacznej daty obowiązywania tych wartości."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "found",
+          "canonical_value": "Szkolenia przed otwarciem dla właściciela, menedżera, zespołu sprzedaży/obsługi i trenerów; wsparcie obejmuje także standardy jakości, sprzedaż i marketing. Po otwarciu przewidziano dedykowanego opiekuna biznesowego oraz doradztwo operacyjne.",
+          "source_url": "https://xtremebrands.pl/franczyza/fitness",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Zakres opublikowany jako wsparcie centrali przed i po otwarciu."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "found",
+          "canonical_value": "184",
+          "source_url": "https://xtremebrands.pl/aktualnosci/xtreme-kids/xtreme-brands-otwiera-200-lokalizacje",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-06-25",
+          "notes": "184 klubów fitness Xtreme Fitness Gyms w Polsce po otwarciach w Kielcach i Niepołomicach 25 czerwca 2026 r. Jest to najnowsza odnaleziona oficjalnie datowana liczba; nie obejmuje 16 sal zabaw Xtreme KiDS."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "found",
+          "canonical_value": "Polska — stan po otwarciach z 25 czerwca 2026 r.; komunikat opublikowano 10 lipca 2026 r.",
+          "source_url": "https://xtremebrands.pl/aktualnosci/xtreme-kids/xtreme-brands-otwiera-200-lokalizacje",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-06-25",
+          "notes": "Zakres dotyczy wyłącznie klubów fitness Xtreme Fitness Gyms w Polsce."
+        }
+      ]
+    },
+    {
+      "slug": "subway",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "Subway®",
+          "source_url": "https://restaurants.subway.com/pl",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalny polski katalog lokalizacji używa nazwy Subway®."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "QSR / fast food (restauracje szybkiej obsługi)",
+          "source_url": "https://lexpress-franchise.com/pl/franczyza/subway/",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Profil branżowy klasyfikuje ofertę jako fast food; zgodne z kategorią QSR."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Sieć restauracji oferująca kanapki/suby komponowane z pieczywa, warzyw, dodatków i białka, a także sałatki, wrapy oraz ciastka.",
+          "source_url": "https://restaurants.subway.com/poland/pk/rzesz%C3%B3w/pilsudskiego-44",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Opis oferty pochodzi z aktywnej, oficjalnej strony polskiej restauracji."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://mysubway.pl/",
+          "source_url": "https://restaurants.subway.com/pl",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Oficjalny katalog Subway dla Polski wskazuje mysubway.pl jako „stronę firmową”."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktywnej, oficjalnej polskiej strony rekrutacji franczyzobiorców Subway."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono publicznego, oficjalnego ogólnego kanału kontaktu biznesowego/franczyzowego dla Polski."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "found",
+          "canonical_value": "Multi-franczyza: możliwość prowadzenia kilku punktów.",
+          "source_url": "https://lexpress-franchise.com/pl/franczyza/subway/",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Aktualny profil wskazuje wprost możliwość zostania multi-franczyzobiorcą. Nie potwierdzono aktualnie innych formatów (master, transfer, resale)."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "found",
+          "canonical_value": "340 000 zł wkładu własnego.",
+          "source_url": "https://lexpress-franchise.com/pl/franczyza/subway/",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-07-23",
+          "notes": "Kwota podana w aktualnym profilu partnerskim jako środki potrzebne do uzyskania wymaganych kredytów."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnych (≤365 dni) publicznych wymagań dotyczących powierzchni lub parametrów lokalu dla Polski."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Aktualny profil branżowy zawiera niespójne wartości opłaty wstępnej (10 000 zł w planie finansowym i 15 000 € w opisie); bez oficjalnego dokumentu nie można konserwatywnie ustalić jednej wartości."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnej publicznej stawki royalty obowiązującej w Polsce."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnej publicznej stawki opłaty marketingowej obowiązującej w Polsce."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Odnaleziono bieżący profil podający jedną kwotę 1 270 000 zł, lecz bez jawnej daty aktualności wymaganej dla tego pola i bez oficjalnego dokumentu dla Polski."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnego, datowanego zakresu maksymalnej inwestycji dla Polski."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "not_applicable",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak zweryfikowanej wartości inwestycji spełniającej wymóg jawnej daty aktualności; waluta podąża za wartością."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Choć bieżący profil branżowy podaje 340 000 zł wkładu własnego, nie wskazuje jawnej daty aktualności inwestycji wymaganej w kontrakcie dla tego pola."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono źródła z jawną datą aktualności wartości inwestycyjnych dla polskiej oferty."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnego (≤730 dni) publicznego opisu szkolenia startowego dla Polski."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnej, datowanej liczby placówek Subway w Polsce. Wartości globalne oraz niedatowane dane katalogowe nie są właściwe dla tego pola."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak publicznej, aktualnej i datowanej informacji o liczbie placówek Subway w Polsce."
+        }
+      ]
+    },
+    {
+      "slug": "north-fish",
+      "fields": [
+        {
+          "target_field": "brand.name",
+          "status": "found",
+          "canonical_value": "North Fish",
+          "source_url": "https://www.northfish.pl/9/o_north_fish/kontakt",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Nazwa używana na aktywnej polskiej stronie marki."
+        },
+        {
+          "target_field": "brand.category",
+          "status": "found",
+          "canonical_value": "QSR (sieć restauracji szybkiej obsługi)",
+          "source_url": "https://www.szef-kuchni.com.pl/aktualnosci/siec-40-lokali-zostanie-zamknieta",
+          "source_type": "industry",
+          "observed_at": "2026-07-23",
+          "valid_as_of": "2026-06-30",
+          "notes": "Źródło branżowe opisuje operatora jako działającego w segmencie restauracji szybkiej obsługi oraz markę North Fish jako sieć lokali z daniami rybnymi."
+        },
+        {
+          "target_field": "brand.public_summary",
+          "status": "found",
+          "canonical_value": "Sieć restauracji oferująca dania z ryb i owoców morza, w tym ryby panierowane i z pieca, fish & chips, burgery i tortille; w menu występują także pozycje roślinne.",
+          "source_url": "https://www.northfish.pl/342/menu/burgery_i_tortille",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Opis oparty na aktywnym menu oraz komunikacji marki dotyczącej oferty roślinnej."
+        },
+        {
+          "target_field": "websites.official",
+          "status": "found",
+          "canonical_value": "https://www.northfish.pl/",
+          "source_url": "https://www.northfish.pl/9/o_north_fish/kontakt",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Oficjalna polska domena marki."
+        },
+        {
+          "target_field": "websites.franchise_offer",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Przeszukano oficjalne strony North Fish i North Food oraz bieżące wyniki branżowe; nie odnaleziono publicznej strony rekrutacji franczyzobiorców."
+        },
+        {
+          "target_field": "contact.generic_business_route",
+          "status": "found",
+          "canonical_value": "North Food Polska S.A., al. Solidarności 36, 25-323 Kielce; tel. +48 41 334 77 00; formularz: https://www.northfish.pl/9/o_north_fish/kontakt",
+          "source_url": "https://www.northfish.pl/9/o_north_fish/kontakt",
+          "source_type": "official",
+          "observed_at": "2026-07-23",
+          "valid_as_of": null,
+          "notes": "Ogólny kanał kontaktowy operatora marki wskazany na stronie North Fish."
+        },
+        {
+          "target_field": "offer.unit_formats",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Konsumencki format „North Fish easy” nie stanowi publicznego potwierdzenia formatu współpracy franczyzowej."
+        },
+        {
+          "target_field": "candidate.capital_requirement",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnej publicznej wartości kapitału wymaganego od kandydata na franczyzobiorcę w Polsce."
+        },
+        {
+          "target_field": "candidate.premises_requirements",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnych publicznych wymagań dotyczących powierzchni, lokalizacji ani parametrów lokalu franczyzowego."
+        },
+        {
+          "target_field": "fees.joining_fee",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnej publicznej opłaty wejściowej dla Polski."
+        },
+        {
+          "target_field": "fees.royalty",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnej publicznej stawki royalty dla Polski."
+        },
+        {
+          "target_field": "fees.marketing",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnej publicznej opłaty marketingowej dla Polski."
+        },
+        {
+          "target_field": "investment.total_low",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono publicznej minimalnej inwestycji z datą aktualności mieszczącą się w wymaganym okresie 365 dni."
+        },
+        {
+          "target_field": "investment.total_high",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono publicznej maksymalnej inwestycji z datą aktualności mieszczącą się w wymaganym okresie 365 dni."
+        },
+        {
+          "target_field": "investment.currency",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak opublikowanej wartości inwestycji, a więc także waluty inwestycji."
+        },
+        {
+          "target_field": "investment.own_contribution",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono aktualnego publicznego wymogu wkładu własnego."
+        },
+        {
+          "target_field": "investment.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak publicznych danych inwestycyjnych, dla których można ustalić datę aktualności."
+        },
+        {
+          "target_field": "support.training_program",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Nie odnaleziono publicznego opisu szkolenia startowego dla franczyzobiorcy."
+        },
+        {
+          "target_field": "outlets.current_total",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Oficjalna strona nadal prezentuje wybrane lokalizacje, ale nie podaje łącznej liczby restauracji ani daty jej obowiązywania. Odnalezione liczby branżowe dotyczą łącznie operatora North Food i formatów North Fish oraz John Burg, więc nie są właściwe dla tego pola."
+        },
+        {
+          "target_field": "outlets.as_of",
+          "status": "not_public",
+          "canonical_value": "",
+          "source_url": "",
+          "source_type": "",
+          "observed_at": null,
+          "valid_as_of": null,
+          "notes": "Brak oficjalnie datowanej, łącznej liczby placówek przypisanej wyłącznie marce North Fish."
+        }
+      ]
+    }
+  ]
+}

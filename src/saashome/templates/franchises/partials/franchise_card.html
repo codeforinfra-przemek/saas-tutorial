@@ -20,13 +20,7 @@
                 <a href="{{ franchise.get_absolute_url }}" class="min-w-0">
                     <h2 class="truncate text-base font-black text-slate-950 hover:text-brand-700">{{ franchise.name }}</h2>
                 </a>
-                {% if franchise.display_promoted %}
-                    {% include "components/badge.html" with variant="promoted" label="Promowane" only %}
-                {% endif %}
-                {% if franchise.display_verified %}
-                    {% include "components/badge.html" with variant="verified" label="Zweryfikowane" only %}
-                {% endif %}
-                {% if franchise.organization_id %}{% include "components/badge.html" with variant="claimed" label="Zarządzane" only %}{% endif %}
+                {% include "franchises/partials/trust_badges.html" %}
             </div>
             <p class="mt-0.5 text-xs font-semibold text-slate-500">{{ franchise.category.name }}</p>
             <p class="mt-2 line-clamp-2 text-xs leading-5 text-slate-600">{{ franchise.short_description }}</p>
@@ -37,7 +31,9 @@
         <div class="rounded-lg bg-slate-50 p-2">
             <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Inwestycja</p>
             <p class="mt-0.5 font-black text-slate-950">
-                {% if franchise.min_investment and franchise.max_investment %}
+                {% if not franchise.has_public_financial_data %}
+                    Brak zweryfikowanych danych
+                {% elif franchise.min_investment and franchise.max_investment %}
                     {{ franchise.min_investment|grouped_number }}-{{ franchise.max_investment|grouped_number }} zł
                 {% elif franchise.min_investment %}
                     od {{ franchise.min_investment|grouped_number }} zł
@@ -50,7 +46,7 @@
         </div>
         <div class="rounded-lg bg-slate-50 p-2">
             <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Opłata wstępna</p>
-            <p class="mt-0.5 font-black text-slate-950">{% if franchise.initial_fee %}{{ franchise.initial_fee|grouped_number }} zł{% else %}Brak danych{% endif %}</p>
+            <p class="mt-0.5 font-black text-slate-950">{% if franchise.has_public_financial_data and franchise.initial_fee %}{{ franchise.initial_fee|grouped_number }} zł{% else %}Brak danych{% endif %}</p>
         </div>
         <div class="rounded-lg bg-slate-50 p-2">
             <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Model</p>
