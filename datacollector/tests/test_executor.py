@@ -3,6 +3,7 @@ from unittest import TestCase
 from datacollector.agents.checker import CheckerAgent
 from datacollector.agents.executor import (
     ExecutorAgent,
+    _merge_search_source,
     _search_sources_requiring_extraction,
 )
 from datacollector.agents.extractor import ExtractorAgent
@@ -15,6 +16,7 @@ from datacollector.schemas import (
     ResolverAction,
     ResolverResults,
     SearchSourceOrigin,
+    SourceType,
 )
 from datacollector.tests import test_checker as checker_fixtures
 from datacollector.tests import test_resolver as resolver_fixtures
@@ -574,3 +576,50 @@ class ExecutorAgentTests(TestCase):
             {usage.agent for usage in execution.agent_usage},
             {"searcher", "extractor"},
         )
+
+    def test_paid_rediscovery_upgrades_inherited_source_provenance(self):
+        prior_source = self.search.sources[0]
+        observed_action_ids = list(prior_source.observed_in_action_ids)
+        self.assertTrue(observed_action_ids)
+        delta_source = prior_source.model_copy(
+            update={
+                "source_type": SourceType.OFFICIAL,
+                "origin": SearchSourceOrigin.OPENAI_WEB_SEARCH,
+                "provider_observed": True,
+                "observed_in_action_ids": observed_action_ids,
+                "discovered_via_queries": [],
+                "relevance_note": "Official franchise page observed by provider.",
+            }
+        )
+        upgraded = _merge_search_source(
+            prior_source,
+            delta_source,
+            prior_search_id=self.search.search_id,
+        )
+
+        self.assertEqual(upgraded.source_type, SourceType.OFFICIAL)
+        self.assertEqual(upgraded.origin, SearchSourceOrigin.OPENAI_WEB_SEARCH)
+        self.assertTrue(upgraded.provider_observed)
+        self.assertEqual(upgraded.observed_in_action_ids, observed_action_ids)
+
+    def test_unobserved_paid_seed_remains_inherited(self):
+        prior_source = self.search.sources[0]
+        unobserved_seed = prior_source.model_copy(
+            update={
+                "origin": SearchSourceOrigin.PLAN_SEED,
+                "provider_observed": False,
+                "observed_in_action_ids": [],
+                "discovered_via_queries": [],
+                "inherited_from_search_id": None,
+            }
+        )
+
+        merged = _merge_search_source(
+            prior_source,
+            unobserved_seed,
+            prior_search_id=self.search.search_id,
+        )
+
+        self.assertEqual(merged.origin, SearchSourceOrigin.INHERITED)
+        self.assertFalse(merged.provider_observed)
+        self.assertEqual(merged.inherited_from_search_id, self.search.search_id)

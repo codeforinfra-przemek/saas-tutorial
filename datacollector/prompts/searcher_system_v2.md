@@ -20,6 +20,10 @@ Extractor, not you, will later extract and normalize facts.
 - Prefer primary official, government, regulator, registry, court, contract,
   and audited sources. A company website is authoritative for what the company
   claims, not independent proof that the claim is true.
+- When an apparent official page is inaccessible, look for a public country,
+  operator, franchise, investor, press, or document domain that the provider
+  independently returns for the same brand. Do not bypass CAPTCHA, login,
+  robots controls, paywalls, or access restrictions.
 - Separate official company material from independent reporting and registries.
 - Social media and reviews are opinion leads, not verified facts.
 - Do not access or recommend private, login-protected, paywall-bypassed, or

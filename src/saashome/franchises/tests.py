@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -30,6 +31,7 @@ from .research_jobs import (
 )
 from .research_launches import (
     _combined_usage,
+    _normalizer_allows_publication,
     _usage_with_floor,
     _process_hybrid_l1_discovery,
     _recover_paid_search_artifact,
@@ -47,7 +49,11 @@ from .research_campaigns import (
 from .views import filtered_directory_franchises
 
 from datacollector.agents.reviewer import HumanReviewer
-from datacollector.schemas import HumanReviewDecision, NormalizerMode
+from datacollector.schemas import (
+    HumanReviewDecision,
+    NormalizerMode,
+    NormalizerStrategySource,
+)
 from datacollector.tests import test_normalizer as normalizer_fixtures
 
 from .models import (
@@ -206,6 +212,115 @@ class L1AutoReviewPolicyTests(TestCase):
         self.assertEqual(summary["policy_accepted"], 2)
         self.assertEqual(summary["pending_human_review"], 1)
 
+    def test_exact_brand_from_official_source_metadata_is_auto_accepted(self):
+        now = timezone.now()
+        field = FranchiseResearchReviewField.objects.create(
+            workspace=self.workspace,
+            task_id="scope.brand_identity",
+            task_title="Identity",
+            target_field="brand.name",
+            pipeline_status="derived_source_metadata",
+            checker_status="partial",
+            proposed_values=[
+                {
+                    "display": "Auto Review Brand",
+                    "canonical_text": "Auto Review Brand",
+                    "needs_corroboration": False,
+                    "provenance": "official_search_source_metadata",
+                }
+            ],
+            evidence=[
+                {
+                    "url": "https://example.com/",
+                    "source_type": "official",
+                    "discovered_at": now.isoformat(),
+                    "quote": "Auto Review Brand — official",
+                    "provenance": "official_search_source_metadata",
+                }
+            ],
+        )
+
+        summary = auto_review_l1_workspace(self.workspace)
+
+        field.refresh_from_db()
+        self.assertEqual(
+            field.decision,
+            FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED,
+        )
+        self.assertEqual(summary["accepted_fields"], ["brand.name"])
+
+    def test_compact_low_risk_normalized_value_can_pass_without_semantic_checker(self):
+        now = timezone.now()
+        compact = FranchiseResearchReviewField.objects.create(
+            workspace=self.workspace,
+            task_id="support.training",
+            task_title="Training",
+            target_field="support.training_program",
+            pipeline_status="normalized",
+            checker_status="not_reviewed",
+            proposed_values=[
+                {
+                    "display": (
+                        "Sieć zapewnia szkolenie startowe dla franczyzobiorcy "
+                        "i pracowników."
+                    ),
+                    "canonical_text": (
+                        "Sieć zapewnia szkolenie startowe dla franczyzobiorcy "
+                        "i pracowników."
+                    ),
+                    "needs_corroboration": False,
+                    "provenance": "risk_based_low_risk_normalized",
+                }
+            ],
+            evidence=[
+                {
+                    "url": "https://example.com/franczyza/",
+                    "source_type": "official",
+                    "discovered_at": now.isoformat(),
+                }
+            ],
+        )
+        uncompact = FranchiseResearchReviewField.objects.create(
+            workspace=self.workspace,
+            task_id="candidate.premises",
+            task_title="Premises",
+            target_field="candidate.premises_requirements",
+            pipeline_status="normalized",
+            checker_status="not_reviewed",
+            proposed_values=[
+                {
+                    "display": "lokal 50 m² | centrum miasta | parking",
+                    "canonical_text": "lokal 50 m² | centrum miasta | parking",
+                    "needs_corroboration": False,
+                    "provenance": "risk_based_low_risk_normalized",
+                }
+            ],
+            evidence=[
+                {
+                    "url": "https://example.com/franczyza/",
+                    "source_type": "official",
+                    "discovered_at": now.isoformat(),
+                }
+            ],
+        )
+
+        summary = auto_review_l1_workspace(self.workspace)
+
+        compact.refresh_from_db()
+        uncompact.refresh_from_db()
+        self.assertEqual(
+            compact.decision,
+            FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED,
+        )
+        self.assertEqual(
+            uncompact.decision,
+            FranchiseResearchReviewField.DECISION_PENDING,
+        )
+        self.assertEqual(
+            summary["pending_reasons"][uncompact.target_field],
+            "uncompacted_public_text",
+        )
+
     def test_retry_usage_never_drops_below_recorded_floor(self):
         launch = type(
             "Launch",
@@ -246,6 +361,41 @@ class L1AutoReviewPolicyTests(TestCase):
         )
         self.assertEqual(result["estimated_cost_usd"], "1.20941000")
         self.assertEqual(result["total_tokens"], 278314)
+
+    def test_auto_publication_requires_import_eligible_normalizer(self):
+        deterministic = type(
+            "Normalizer",
+            (),
+            {
+                "normalization_mode": NormalizerMode.PAID,
+                "strategy_source": NormalizerStrategySource.DETERMINISTIC,
+            },
+        )()
+        paid_openai = type(
+            "Normalizer",
+            (),
+            {
+                "normalization_mode": NormalizerMode.PAID,
+                "strategy_source": NormalizerStrategySource.OPENAI,
+            },
+        )()
+
+        self.assertFalse(_normalizer_allows_publication(deterministic))
+        self.assertTrue(_normalizer_allows_publication(paid_openai))
+
+    def test_retry_claim_preserves_first_started_at(self):
+        first_started_at = timezone.now() - timedelta(minutes=7)
+        launch = FranchiseResearchLaunch.objects.create(
+            franchise=self.workspace.franchise,
+            profile_id="PL:L1",
+            status=FranchiseResearchLaunch.STATUS_QUEUED,
+            started_at=first_started_at,
+        )
+
+        claimed = claim_next_launch()
+
+        self.assertEqual(claimed.pk, launch.pk)
+        self.assertEqual(claimed.started_at, first_started_at)
 
 
 class PolishCatalogSyncTests(TestCase):
@@ -1266,6 +1416,85 @@ class FranchiseResearchImportTests(TestCase):
         sync_campaign(campaign)
         campaign.refresh_from_db()
         self.assertEqual(campaign.status, FranchiseResearchCampaign.STATUS_CANCELLED)
+
+    def test_campaign_monitoring_gate_stops_queue_after_minimum_sample(self):
+        category, _ = FranchiseCategory.objects.get_or_create(
+            slug="campaign-gate-test",
+            defaults={"name": "Campaign gate test"},
+        )
+        franchises = [
+            Franchise.objects.create(
+                name=f"Gate Brand {index}",
+                slug=f"gate-brand-{index}",
+                category=category,
+                short_description="Campaign gate fixture",
+            )
+            for index in range(4)
+        ]
+        campaign = create_research_campaign(
+            name="Quality gate test",
+            description="",
+            franchises=franchises,
+            profile_id="PL:L1",
+            configuration={
+                "max_cost_usd": "1.00",
+                "initial_task_limit": 7,
+                "max_search_calls": 10,
+                "max_sources": 10,
+                "max_extractor_api_calls": 15,
+                "auto_review_finalize": True,
+                "monitoring_gate": {
+                    "enabled": True,
+                    "minimum_completed": 3,
+                    "minimum_average_proposals": "8",
+                    "minimum_average_publications": "5",
+                    "stop_on_unknown_cost": True,
+                },
+            },
+            max_total_cost_usd="4.00",
+            max_concurrent_runs=1,
+            include_previously_researched=False,
+        )
+
+        for position in range(1, 4):
+            launch = campaign.launches.get(campaign_position=position)
+            launch.status = FranchiseResearchLaunch.STATUS_PARTIAL
+            launch.progress_percent = 100
+            launch.result_summary = {
+                "proposed_fields": 7,
+                "auto_finalization": {"published_fields": 4},
+            }
+            launch.cost_summary = {
+                "estimated_cost_usd": "0.40",
+                "unknown_cost_attempts": 0,
+            }
+            launch.completed_at = timezone.now()
+            launch.save()
+            sync_campaign(campaign)
+            campaign.refresh_from_db()
+            if position < 3:
+                self.assertFalse(campaign.cancel_requested)
+
+        campaign.refresh_from_db()
+        state = campaign.configuration["monitoring_gate_state"]
+        self.assertTrue(campaign.cancel_requested)
+        self.assertEqual(
+            state["triggered_stop_codes"],
+            [
+                "average_proposals_below_gate",
+                "average_publications_below_gate",
+            ],
+        )
+        self.assertEqual(
+            campaign.launches.filter(
+                status=FranchiseResearchLaunch.STATUS_CANCELLED
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            campaign.status,
+            FranchiseResearchCampaign.STATUS_CANCELLED,
+        )
 
     def test_launch_reserves_budget_instead_of_hiding_known_cost(self):
         usage = _combined_usage(

@@ -30,6 +30,106 @@ def _decimal(value) -> Decimal:
         return Decimal("0")
 
 
+_SUCCESSFUL_LAUNCH_STATUSES = {
+    FranchiseResearchLaunch.STATUS_SUCCEEDED,
+    FranchiseResearchLaunch.STATUS_COMPLETE,
+    FranchiseResearchLaunch.STATUS_PARTIAL,
+    FranchiseResearchLaunch.STATUS_INSUFFICIENT,
+}
+
+
+def campaign_monitoring_snapshot(
+    campaign: FranchiseResearchCampaign,
+    *,
+    launches=None,
+) -> dict:
+    """Evaluate optional between-run campaign cost and quality gates."""
+
+    gate = dict(campaign.configuration.get("monitoring_gate") or {})
+    if not gate.get("enabled"):
+        return {"enabled": False}
+    launches = list(
+        launches
+        if launches is not None
+        else campaign.launches.select_related("result_workspace").all()
+    )
+    completed = [
+        launch
+        for launch in launches
+        if launch.status in _SUCCESSFUL_LAUNCH_STATUSES
+        and launch.result_summary
+    ]
+    completed_count = len(completed)
+    proposed_fields = sum(
+        int(launch.result_summary.get("proposed_fields") or 0)
+        for launch in completed
+    )
+    published_fields = sum(
+        int(
+            (launch.result_summary.get("auto_finalization") or {}).get(
+                "published_fields"
+            )
+            or 0
+        )
+        for launch in completed
+    )
+    estimated_cost = sum(
+        (
+            _decimal(launch.cost_summary.get("estimated_cost_usd"))
+            for launch in launches
+        ),
+        Decimal("0"),
+    )
+    unknown_cost_attempts = sum(
+        int(launch.cost_summary.get("unknown_cost_attempts") or 0)
+        for launch in launches
+    )
+    minimum_completed = max(1, int(gate.get("minimum_completed") or 3))
+    minimum_average_proposals = _decimal(
+        gate.get("minimum_average_proposals") or 8
+    )
+    minimum_average_publications = _decimal(
+        gate.get("minimum_average_publications") or 5
+    )
+    average_proposals = (
+        Decimal(proposed_fields) / completed_count
+        if completed_count
+        else Decimal("0")
+    )
+    average_publications = (
+        Decimal(published_fields) / completed_count
+        if completed_count
+        else Decimal("0")
+    )
+    evaluated = completed_count >= minimum_completed
+    stop_codes = []
+    if estimated_cost >= campaign.max_total_cost_usd:
+        stop_codes.append("campaign_cost_limit")
+    if gate.get("stop_on_unknown_cost", True) and unknown_cost_attempts:
+        stop_codes.append("unknown_provider_cost")
+    if evaluated and average_proposals < minimum_average_proposals:
+        stop_codes.append("average_proposals_below_gate")
+    if evaluated and average_publications < minimum_average_publications:
+        stop_codes.append("average_publications_below_gate")
+    return {
+        "enabled": True,
+        "minimum_completed": minimum_completed,
+        "completed": completed_count,
+        "evaluated": evaluated,
+        "minimum_average_proposals": str(minimum_average_proposals),
+        "minimum_average_publications": str(minimum_average_publications),
+        "average_proposals": str(average_proposals.quantize(Decimal("0.01"))),
+        "average_publications": str(
+            average_publications.quantize(Decimal("0.01"))
+        ),
+        "estimated_cost_usd": str(estimated_cost),
+        "max_total_cost_usd": str(campaign.max_total_cost_usd),
+        "unknown_cost_attempts": unknown_cost_attempts,
+        "stop_codes": stop_codes,
+        "should_stop": bool(stop_codes),
+    }
+
+
 def campaign_snapshot(campaign: FranchiseResearchCampaign) -> dict:
     launches = list(
         campaign.launches.select_related("franchise", "result_workspace").order_by(
@@ -138,6 +238,13 @@ def campaign_snapshot(campaign: FranchiseResearchCampaign) -> dict:
     progress = round(
         sum(int(launch.progress_percent or 0) for launch in launches) / total
     ) if total else 0
+    monitoring = campaign_monitoring_snapshot(campaign, launches=launches)
+    prior_monitoring = campaign.configuration.get("monitoring_gate_state") or {}
+    if prior_monitoring.get("triggered_stop_codes"):
+        monitoring["triggered_stop_codes"] = prior_monitoring[
+            "triggered_stop_codes"
+        ]
+        monitoring["triggered_at"] = prior_monitoring.get("triggered_at")
     return {
         "total": total,
         "queued": statuses[FranchiseResearchLaunch.STATUS_QUEUED],
@@ -178,6 +285,7 @@ def campaign_snapshot(campaign: FranchiseResearchCampaign) -> dict:
         "cost_per_proposed_field_usd": (
             estimated_cost / proposed_fields if proposed_fields else None
         ),
+        "monitoring": monitoring,
         "launches": launches,
     }
 
@@ -187,7 +295,41 @@ def sync_campaign(campaign: FranchiseResearchCampaign) -> FranchiseResearchCampa
     """Derive campaign lifecycle from its authoritative child launches."""
 
     locked = FranchiseResearchCampaign.objects.select_for_update().get(pk=campaign.pk)
-    statuses = list(locked.launches.values_list("status", flat=True))
+    launches = list(locked.launches.select_related("result_workspace").all())
+    monitoring = campaign_monitoring_snapshot(locked, launches=launches)
+    previous_state = locked.configuration.get("monitoring_gate_state") or {}
+    if monitoring.get("enabled"):
+        monitoring_state = dict(monitoring)
+        if previous_state.get("triggered_stop_codes"):
+            monitoring_state["triggered_stop_codes"] = previous_state[
+                "triggered_stop_codes"
+            ]
+            monitoring_state["triggered_at"] = previous_state.get("triggered_at")
+        if monitoring.get("should_stop") and not monitoring_state.get(
+            "triggered_stop_codes"
+        ):
+            monitoring_state["triggered_stop_codes"] = monitoring["stop_codes"]
+            monitoring_state["triggered_at"] = timezone.now().isoformat()
+        configuration = dict(locked.configuration)
+        configuration["monitoring_gate_state"] = monitoring_state
+        locked.configuration = configuration
+        locked.save(update_fields=["configuration"])
+        if monitoring_state.get("triggered_stop_codes"):
+            now = timezone.now()
+            locked.launches.filter(
+                status=FranchiseResearchLaunch.STATUS_QUEUED
+            ).update(
+                status=FranchiseResearchLaunch.STATUS_CANCELLED,
+                current_stage="Anulowane przez bramkę monitorującą kampanii",
+                completed_at=now,
+            )
+            if not locked.cancel_requested:
+                locked.cancel_requested = True
+                locked.save(update_fields=["cancel_requested"])
+            launches = list(
+                locked.launches.select_related("result_workspace").all()
+            )
+    statuses = [launch.status for launch in launches]
     now = timezone.now()
     if not statuses:
         return locked

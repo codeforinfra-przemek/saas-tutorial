@@ -12,6 +12,7 @@ from datacollector.documents import (
     FetchStatus,
     FetchedDocument,
     ParsedContent,
+    ResilientDocumentFetcher,
     TransportNetworkError,
     TransportResponse,
     Urllib3PinnedTransport,
@@ -57,6 +58,45 @@ class DiskCachedDocumentFetcherTests(TestCase):
         self.assertEqual(first.source_id, "source-one")
         self.assertEqual(second.source_id, "source-two")
         self.assertIn("document_cache_hit", second.warnings)
+
+    def test_resilient_fetcher_recovers_from_www_access_denied(self):
+        base = MagicMock()
+
+        def fetch(url, *, source_id=""):
+            if url.startswith("https://example.com/"):
+                return FetchedDocument(
+                    source_id=source_id,
+                    requested_url=url,
+                    final_url=url,
+                    status=FetchStatus.FETCHED,
+                    fetched_at=NOW,
+                    media_type="text/html",
+                    text="Public franchise offer",
+                )
+            return FetchedDocument(
+                source_id=source_id,
+                requested_url=url,
+                final_url=url,
+                status=FetchStatus.ACCESS_DENIED,
+                fetched_at=NOW,
+                error_code="access_denied",
+            )
+
+        base.fetch.side_effect = fetch
+        resilient = ResilientDocumentFetcher(base)
+
+        document = resilient.fetch(
+            "https://www.example.com/franchise/",
+            source_id="source-test",
+        )
+
+        self.assertEqual(document.status, FetchStatus.FETCHED)
+        self.assertEqual(
+            document.requested_url,
+            "https://www.example.com/franchise/",
+        )
+        self.assertEqual(document.resolved_via, "alternate_public_url")
+        self.assertIn("alternate_public_url_recovery", document.warnings)
 
 
 PUBLIC_IP = "93.184.216.34"
@@ -447,6 +487,42 @@ class DocumentFetcherTests(TestCase):
         self.assertNotIn("secret-style", document.text)
         self.assertIsNotNone(document.content_sha256)
         self.assertIsNotNone(document.text_sha256)
+
+    def test_extracts_json_ld_and_next_data_without_executing_javascript(self):
+        resolver = FakeResolver({"example.com": [PUBLIC_IP]})
+        html = b"""<!doctype html><html><head>
+        <script type="application/ld+json">
+        {"@type":"Organization","name":"Marka Testowa",
+         "description":"Franczyza mobilna bez lokalu.",
+         "telephone":"+48 123 456 789"}
+        </script>
+        <script id="__NEXT_DATA__" type="application/json">
+        {"props":{"pageProps":{"content":{"title":"Oferta franczyzowa",
+         "text":"Szkolenie startowe i wsparcie operacyjne."}}},
+         "buildId":"secret-build-id"}
+        </script>
+        <script>window.secret = "do-not-extract";</script>
+        </head><body><main id="app"></main></body></html>"""
+        transport = FakeTransport(
+            {
+                "https://example.com/franchise": response(
+                    headers={"Content-Type": "text/html; charset=utf-8"},
+                    chunks=(html,),
+                )
+            }
+        )
+
+        document = fetcher(resolver, transport).fetch(
+            "https://example.com/franchise"
+        )
+
+        self.assertEqual(document.status, FetchStatus.FETCHED)
+        self.assertIn("Marka Testowa", document.text)
+        self.assertIn("Franczyza mobilna bez lokalu.", document.text)
+        self.assertIn("Szkolenie startowe", document.text)
+        self.assertNotIn("secret-build-id", document.text)
+        self.assertNotIn("do-not-extract", document.text)
+        self.assertIn("embedded_structured_data_extracted", document.warnings)
 
     def test_classifies_short_incapsula_page_as_anti_bot(self):
         resolver = FakeResolver({"example.com": [PUBLIC_IP]})

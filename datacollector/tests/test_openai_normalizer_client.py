@@ -137,7 +137,7 @@ class OpenAINormalizerClientTests(TestCase):
             max_retries=0,
         )
 
-    def test_request_contains_only_accepted_claims_and_has_no_tools(self):
+    def test_request_contains_only_eligible_grounded_claims_and_has_no_tools(self):
         draft = self._draft()
         fake_client = FakeOpenAI(draft)
 
@@ -153,7 +153,10 @@ class OpenAINormalizerClientTests(TestCase):
         )
         payload = json.loads(request["input"][1]["content"])
         self.assertEqual(
-            [item["claim_id"] for item in payload["accepted_claims"]],
+            [
+                item["claim_id"]
+                for item in payload["eligible_grounded_claims"]
+            ],
             self.claim_ids,
         )
         self.assertEqual(payload["required_output"]["claim_ids"], self.claim_ids)

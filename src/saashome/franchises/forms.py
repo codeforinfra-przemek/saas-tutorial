@@ -714,6 +714,38 @@ class ResearchCampaignForm(forms.Form):
             "nigdy jako Human Review."
         ),
     )
+    monitor_quality_gate = forms.BooleanField(
+        required=False,
+        initial=True,
+        label="Automatycznie zatrzymaj kampanię po niespełnieniu bramek L1",
+        help_text=(
+            "Bramka jest oceniana między pełnymi runami; rozpoczęty run "
+            "zawsze bezpiecznie kończy swój bieżący przebieg."
+        ),
+    )
+    gate_minimum_completed = forms.IntegerField(
+        required=False,
+        min_value=1,
+        max_value=20,
+        initial=3,
+        label="Oceń po tylu markach",
+    )
+    gate_minimum_average_proposals = forms.DecimalField(
+        required=False,
+        min_value=0,
+        max_value=20,
+        decimal_places=2,
+        initial=8,
+        label="Min. średnia propozycji",
+    )
+    gate_minimum_average_publications = forms.DecimalField(
+        required=False,
+        min_value=0,
+        max_value=20,
+        decimal_places=2,
+        initial=5,
+        label="Min. średnia publikacji",
+    )
     acknowledge_paid = forms.BooleanField(
         label="Rozumiem łączny budżet i potwierdzam użycie płatnego API OpenAI.",
     )

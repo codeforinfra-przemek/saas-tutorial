@@ -79,12 +79,13 @@ L1_PUBLIC_FIELD_ORDER = (
     "outlets.as_of",
 )
 
-# Conservative v1 auto-review policy. Numeric, financial, scale and dated
-# commercial claims deliberately remain human-review items.
+# Conservative auto-review policy. Numeric, financial, scale, category
+# classification and dated commercial claims deliberately remain Human Review
+# items. The catalog already has an editorial category, so a free-form model
+# label must never replace it automatically.
 L1_AUTO_REVIEW_SAFE_FIELDS = frozenset(
     {
         "brand.name",
-        "brand.category",
         "brand.public_summary",
         "websites.official",
         "websites.franchise_offer",
@@ -94,7 +95,7 @@ L1_AUTO_REVIEW_SAFE_FIELDS = frozenset(
         "support.training_program",
     }
 )
-L1_AUTO_REVIEW_POLICY_VERSION = "pl-l1-safe-public-v2"
+L1_AUTO_REVIEW_POLICY_VERSION = "pl-l1-safe-public-v3"
 
 # dotted field -> (plain-language purpose, profile section, anchor, model field)
 FIELD_PROFILE_MAP = {

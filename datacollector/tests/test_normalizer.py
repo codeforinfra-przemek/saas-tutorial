@@ -4,11 +4,16 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
 from datacollector.agents.checker import CheckerAgent
-from datacollector.agents.normalizer import NormalizerAgent, NormalizerValidationError
+from datacollector.agents.normalizer import (
+    NormalizerAgent,
+    NormalizerValidationError,
+    _bounded_low_risk_claim_ids,
+)
 from datacollector.cli import main
 from datacollector.llm.protocol import (
     NormalizerGeneration,
@@ -21,6 +26,8 @@ from datacollector.schemas import (
     CheckerContradictionKind,
     CheckerFieldStatus,
     CheckerMode,
+    CheckerSourceSupport,
+    CheckerSemanticFit,
     CheckerVerdict,
     NormalizationPrecision,
     NormalizedValueType,
@@ -29,6 +36,7 @@ from datacollector.schemas import (
     NormalizerMode,
     NormalizerStrategySource,
     NormalizerValueDraft,
+    SourceType,
     TokenUsage,
 )
 from datacollector.tests import test_checker as checker_fixtures
@@ -206,6 +214,162 @@ class NormalizerAgentTests(TestCase):
         )
         self.assertFalse(results.publishable)
         self.assertTrue(results.ready_for_human_review)
+
+    def test_risk_based_low_risk_scope_is_source_typed_and_bounded(self):
+        claims = [
+            SimpleNamespace(
+                claim_id=f"claim-{index:016x}",
+                task_id="task-training",
+                target_field="support.training_program",
+                value_text=f"Szkolenie {index}",
+                citation_ids=["citation-training"],
+            )
+            for index in range(4)
+        ]
+        plan = SimpleNamespace(
+            profile_snapshot=SimpleNamespace(profile_id="PL:L1:v2"),
+            planner_input=SimpleNamespace(profile_id="PL:L1:v2"),
+        )
+        search = SimpleNamespace(
+            sources=[
+                SimpleNamespace(
+                    source_id="source-official",
+                    source_type=SourceType.OFFICIAL,
+                )
+            ]
+        )
+        extraction = SimpleNamespace(
+            claims=claims,
+            citations=[
+                SimpleNamespace(
+                    citation_id="citation-training",
+                    source_id="source-official",
+                )
+            ],
+        )
+        checker = SimpleNamespace(
+            checker_mode=CheckerMode.RISK_BASED,
+            claim_decisions=[
+                SimpleNamespace(
+                    claim_id=claim.claim_id,
+                    verdict=CheckerVerdict.NOT_REVIEWED,
+                    semantic_fit=CheckerSemanticFit.NOT_REVIEWED,
+                    source_support=CheckerSourceSupport.NOT_REVIEWED,
+                )
+                for claim in claims
+            ],
+        )
+
+        selected = _bounded_low_risk_claim_ids(
+            plan,
+            search,
+            extraction,
+            checker,
+            unsafe_claim_ids=set(),
+        )
+
+        self.assertEqual(
+            selected,
+            [claim.claim_id for claim in claims[:3]],
+        )
+
+        search.sources[0].source_type = SourceType.UNKNOWN
+        self.assertEqual(
+            _bounded_low_risk_claim_ids(
+                plan,
+                search,
+                extraction,
+                checker,
+                unsafe_claim_ids=set(),
+            ),
+            [],
+        )
+
+    def test_compatible_low_risk_descriptions_are_compacted_to_one_value(self):
+        claims = [
+            SimpleNamespace(
+                claim_id=f"claim-{index:016x}",
+                task_id="task-training",
+                target_field="support.training_program",
+                value_text=value,
+                citation_ids=[f"citation-{index}"],
+            )
+            for index, value in enumerate(
+                [
+                    "Szkolenie przed otwarciem.",
+                    "Wsparcie w pozyskiwaniu klientów.",
+                ],
+                start=1,
+            )
+        ]
+        draft = NormalizerDraft(
+            values=[
+                NormalizerValueDraft(
+                    task_id=claim.task_id,
+                    target_field=claim.target_field,
+                    claim_ids=[claim.claim_id],
+                    value_type=NormalizedValueType.TEXT,
+                    canonical_text=claim.value_text,
+                    precision=NormalizationPrecision.QUALITATIVE,
+                )
+                for claim in claims
+            ]
+        )
+
+        values = NormalizerAgent._materialize_values(
+            draft,
+            {claim.claim_id: claim for claim in claims},
+            {
+                claim.claim_id: SimpleNamespace(
+                    source_support=CheckerSourceSupport.NOT_REVIEWED
+                )
+                for claim in claims
+            },
+            {
+                f"citation-{index}": SimpleNamespace(source_id=f"source-{index}")
+                for index in range(1, 3)
+            },
+            low_risk_claim_ids={claim.claim_id for claim in claims},
+        )
+
+        self.assertEqual(len(values), 1)
+        self.assertEqual(values[0].claim_ids, [claim.claim_id for claim in claims])
+        self.assertEqual(
+            values[0].canonical_text,
+            "Szkolenie przed otwarciem; Wsparcie w pozyskiwaniu klientów",
+        )
+        self.assertFalse(values[0].needs_corroboration)
+
+        field_results, ignored = NormalizerAgent._build_field_results(
+            SimpleNamespace(
+                contradictions=[],
+                task_results=[
+                    SimpleNamespace(
+                        task_id="task-training",
+                        field_results=[
+                            SimpleNamespace(
+                                target_field="support.training_program",
+                                status=CheckerFieldStatus.MISSING,
+                                audit_basis=None,
+                                accepted_claim_ids=[],
+                                rejected_claim_ids=[],
+                                needs_review_claim_ids=[],
+                            )
+                        ],
+                    )
+                ],
+            ),
+            values,
+            eligible_claim_ids=[claim.claim_id for claim in claims],
+            unsafe_excluded_claim_ids=[],
+            low_risk_claim_ids=[claim.claim_id for claim in claims],
+        )
+
+        self.assertEqual(ignored, 0)
+        self.assertEqual(
+            field_results[0].checker_status,
+            CheckerFieldStatus.NOT_REVIEWED,
+        )
 
     def test_local_quality_audit_becomes_derived_field_without_a_fake_value(self):
         task_result = self.checker_results.task_results[0]

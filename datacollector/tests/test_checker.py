@@ -604,6 +604,46 @@ class CheckerAgentTests(TestCase):
         self.assertEqual(routing.authority_class, SourceAuthorityClass.ROUTING_ONLY)
         self.assertEqual(routing.reliability_score, 5)
 
+    def test_risk_based_checker_reviews_claims_not_entire_mixed_task(self):
+        llm = FixtureCheckerLLM(self._accepted_draft)
+
+        results = self._run(llm, risk_based=True)
+
+        reviewed_id_set = set(results.reviewed_claim_ids)
+        inherited_id_set = set(results.inherited_claim_ids)
+        reviewed_claims = [
+            claim
+            for claim in self.extraction_results.claims
+            if claim.claim_id in reviewed_id_set
+        ]
+        inherited_claims = [
+            claim
+            for claim in self.extraction_results.claims
+            if claim.claim_id in inherited_id_set
+        ]
+        self.assertTrue(reviewed_claims)
+        self.assertTrue(inherited_claims)
+        self.assertTrue(
+            all(
+                claim.target_field.startswith("websites.")
+                for claim in reviewed_claims
+            )
+        )
+        self.assertTrue(
+            all(
+                not claim.target_field.startswith("websites.")
+                for claim in inherited_claims
+            )
+        )
+        self.assertEqual(results.reviewed_task_ids, [self.task.task_id])
+        self.assertTrue(
+            all(
+                decision.verdict == CheckerVerdict.NOT_REVIEWED
+                for decision in results.claim_decisions
+                if decision.claim_id in inherited_id_set
+            )
+        )
+
     def test_v1_source_quality_metric_loads_under_v11_name(self):
         score = CheckerScoreBreakdown.model_validate(
             {

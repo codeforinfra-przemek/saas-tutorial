@@ -70,7 +70,10 @@ class FetchPolicy:
     connect_timeout_seconds: float = 5.0
     read_timeout_seconds: float = 15.0
     total_timeout_seconds: float = 45.0
-    user_agent: str = "SaaSFranchiseResearchBot/0.1"
+    user_agent: str = (
+        "Mozilla/5.0 (compatible; SaaSFranchiseResearchBot/0.3; "
+        "public-research)"
+    )
     allow_http: bool = True
     allow_ip_literals: bool = False
 
@@ -518,11 +521,23 @@ class _VisibleHTMLParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self._skip_depth = 0
         self._title_depth = 0
+        self._structured_depth = 0
         self.parts: list[str] = []
         self.title_parts: list[str] = []
+        self.structured_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.casefold()
+        attributes = {
+            str(key).casefold(): str(value or "")
+            for key, value in attrs
+        }
+        if tag == "script" and (
+            attributes.get("type", "").casefold()
+            in {"application/ld+json", "application/json"}
+            or attributes.get("id", "").casefold() == "__next_data__"
+        ):
+            self._structured_depth += 1
         if tag in self._SKIPPED:
             self._skip_depth += 1
         if tag == "title":
@@ -540,10 +555,15 @@ class _VisibleHTMLParser(HTMLParser):
             self._title_depth -= 1
         if tag in self._SKIPPED and self._skip_depth:
             self._skip_depth -= 1
+        if tag == "script" and self._structured_depth:
+            self._structured_depth -= 1
         if not self._skip_depth and tag in self._BLOCKS:
             self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
+        if self._structured_depth:
+            self.structured_parts.append(data)
+            return
         if self._skip_depth:
             return
         if self._title_depth:
@@ -565,6 +585,81 @@ def _normalize_visible_text(parts: Iterable[str]) -> str:
             normalized.append("")
             previous_blank = True
     return "\n".join(normalized).strip()
+
+
+_STRUCTURED_PUBLIC_KEYS = {
+    "address",
+    "addresscountry",
+    "addresslocality",
+    "addressregion",
+    "alternatename",
+    "articlebody",
+    "caption",
+    "category",
+    "contactpoint",
+    "content",
+    "description",
+    "email",
+    "headline",
+    "label",
+    "name",
+    "opis",
+    "postalcode",
+    "price",
+    "pricecurrency",
+    "streetaddress",
+    "telephone",
+    "text",
+    "title",
+    "tytul",
+    "url",
+    "value",
+}
+
+
+def _structured_public_text(blocks: Iterable[str], *, max_chars: int) -> str:
+    """Extract bounded semantic strings from JSON hydration without executing JS."""
+
+    values: list[str] = []
+    seen: set[str] = set()
+    observed = 0
+
+    def visit(value, key: str = "") -> None:
+        nonlocal observed
+        if observed >= 2_000 or sum(len(item) for item in values) >= max_chars:
+            return
+        observed += 1
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                normalized_key = re.sub(r"[^a-z]", "", str(child_key).casefold())
+                visit(child, normalized_key)
+            return
+        if isinstance(value, list):
+            for child in value[:500]:
+                visit(child, key)
+            return
+        if not isinstance(value, str) or key not in _STRUCTURED_PUBLIC_KEYS:
+            return
+        rendered = re.sub(r"\s+", " ", value).strip()
+        if (
+            len(rendered) < 2
+            or len(rendered) > 1_000
+            or rendered in seen
+            or re.search(r"(?:function\s*\(|=>|webpack|__next)", rendered, re.I)
+        ):
+            return
+        seen.add(rendered)
+        values.append(rendered)
+
+    for block in blocks:
+        if sum(len(item) for item in values) >= max_chars:
+            break
+        try:
+            payload = json.loads(block)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        visit(payload)
+    return "\n".join(values)[:max_chars].strip()
 
 
 def _declared_charset(content_type: str) -> str | None:
@@ -602,6 +697,14 @@ def extract_html(content: bytes, content_type: str, policy: FetchPolicy) -> Pars
     except Exception:
         return ParsedContent(status=FetchStatus.PARSE_FAILED, error_code="html_parse_failed")
     text = _normalize_visible_text(parser.parts)
+    remaining = max(policy.max_text_chars - len(text), 0)
+    structured_text = _structured_public_text(
+        parser.structured_parts,
+        max_chars=min(remaining, 100_000),
+    )
+    if structured_text:
+        text = "\n\n".join(value for value in (text, structured_text) if value)
+        warnings = (*warnings, "embedded_structured_data_extracted")
     title = re.sub(r"\s+", " ", "".join(parser.title_parts)).strip()
     status = FetchStatus.FETCHED
     if len(text) > policy.max_text_chars:
@@ -932,6 +1035,8 @@ class DocumentFetcher:
                             else "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9"
                         ),
                         "Accept-Encoding": "identity",
+                        "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.7",
+                        "Cache-Control": "no-cache",
                         "User-Agent": self.policy.user_agent,
                     },
                     connect_timeout=min(
@@ -1379,6 +1484,88 @@ class DocumentFetcher:
             http_status=metadata_raw.http_status,
             resolved_via="eli_api",
             error_code=code,
+        )
+
+
+_RECOVERABLE_ALTERNATE_STATUSES = {
+    FetchStatus.ACCESS_DENIED,
+    FetchStatus.ANTI_BOT,
+    FetchStatus.TLS_ERROR,
+    FetchStatus.NETWORK_ERROR,
+}
+
+
+def _alternate_public_urls(value: str, status: FetchStatus) -> list[str]:
+    """Return conservative URL variants; every candidate is revalidated on fetch."""
+
+    try:
+        parsed = urlsplit(value)
+        hostname = (parsed.hostname or "").casefold()
+        port = parsed.port
+    except ValueError:
+        return []
+    if parsed.scheme.casefold() not in {"http", "https"} or not hostname:
+        return []
+    if port not in {None, 80, 443}:
+        return []
+    host_variants = []
+    if hostname.startswith("www."):
+        host_variants.append(hostname[4:])
+    else:
+        host_variants.append(f"www.{hostname}")
+    path_variants = [parsed.path or "/"]
+    if parsed.path and parsed.path != "/":
+        toggled = (
+            parsed.path.rstrip("/")
+            if parsed.path.endswith("/")
+            else f"{parsed.path}/"
+        )
+        path_variants.append(toggled or "/")
+    schemes = [parsed.scheme.casefold()]
+    if status == FetchStatus.TLS_ERROR and parsed.scheme.casefold() == "https":
+        schemes.append("http")
+    candidates = []
+    for scheme in schemes:
+        for host in [hostname, *host_variants]:
+            for path in path_variants:
+                netloc = host
+                candidate = urlunsplit((scheme, netloc, path, parsed.query, ""))
+                if candidate != value and candidate not in candidates:
+                    candidates.append(candidate)
+    return candidates[:5]
+
+
+class ResilientDocumentFetcher:
+    """Retry public URL variants without executing scripts or bypassing challenges."""
+
+    def __init__(self, fetcher: DocumentFetcher) -> None:
+        self.fetcher = fetcher
+
+    def fetch(self, url: str, *, source_id: str = "") -> FetchedDocument:
+        primary = self.fetcher.fetch(url, source_id=source_id)
+        if primary.status not in _RECOVERABLE_ALTERNATE_STATUSES:
+            return primary
+        attempted = 0
+        for candidate in _alternate_public_urls(url, primary.status):
+            attempted += 1
+            recovered = self.fetcher.fetch(candidate, source_id=source_id)
+            if recovered.status not in {FetchStatus.FETCHED, FetchStatus.PARTIAL}:
+                continue
+            return replace(
+                recovered,
+                requested_url=url,
+                resolved_via="alternate_public_url",
+                warnings=(
+                    *recovered.warnings,
+                    "alternate_public_url_recovery",
+                ),
+            )
+        return replace(
+            primary,
+            warnings=(
+                *primary.warnings,
+                f"alternate_public_url_attempts_failed:{attempted}",
+            ),
         )
 
 

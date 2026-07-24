@@ -139,7 +139,7 @@ class OpenAINormalizerClient:
                 "scope_complete": checker_results.scope_complete,
                 "iteration": iteration,
             },
-            "accepted_claims": [
+            "eligible_grounded_claims": [
                 {
                     "claim_id": claim_id,
                     "task_id": claim_by_id[claim_id].task_id,
@@ -161,6 +161,7 @@ class OpenAINormalizerClient:
                     "checker_source_support": (
                         decision_by_id[claim_id].source_support.value
                     ),
+                    "checker_verdict": decision_by_id[claim_id].verdict.value,
                     "citations": [
                         {
                             "citation_id": citation_id,
@@ -187,7 +188,10 @@ class OpenAINormalizerClient:
                 "rule": (
                     "Cover every supplied claim_id exactly once. Group claims only "
                     "when their task, field, meaning, scope, period, unit, and "
-                    "currency are equivalent."
+                    "currency are equivalent. Compact descriptive values to no "
+                    "more than three short Polish sentences and 400 characters. "
+                    "Return one value group for compatible public-summary, "
+                    "unit-format, premises and training claims."
                 ),
             },
         }

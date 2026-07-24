@@ -786,15 +786,33 @@ def _seed_sources(
         urls.append((website, SourceType.UNKNOWN, "Unverified website seed inherited from Planner input."))
         if official_first:
             parsed = urlsplit(website)
-            root = urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
-            for path in ("franczyza/", "franchise/", "o-nas/", "kontakt/"):
-                urls.append(
-                    (
-                        urljoin(root, path),
-                        SourceType.UNKNOWN,
-                        "Deterministic official-first path candidate; reachability and ownership are not yet verified.",
+            hostname = (parsed.hostname or "").casefold()
+            hosts = [hostname]
+            if hostname.startswith("www."):
+                hosts.append(hostname[4:])
+            elif hostname:
+                hosts.append(f"www.{hostname}")
+            roots = [
+                urlunsplit((parsed.scheme, host, "/", "", ""))
+                for host in dict.fromkeys(hosts)
+            ]
+            for root in roots:
+                for path in (
+                    "franczyza/",
+                    "franchise/",
+                    "oferta-franczyzowa/",
+                    "wspolpraca/",
+                    "o-nas/",
+                    "kontakt/",
+                ):
+                    urls.append(
+                        (
+                            urljoin(root, path),
+                            SourceType.UNKNOWN,
+                            "Deterministic official-first host/path candidate; "
+                            "reachability and ownership are not yet verified.",
+                        )
                     )
-                )
     for task in plan.tasks:
         for hint in task.source_hints:
             if _canonicalize_public_url(hint) is not None:

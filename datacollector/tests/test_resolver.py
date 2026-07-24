@@ -225,12 +225,13 @@ class ResolverAgentTests(TestCase):
         )
 
     def _run(self, llm=None, *, checker_results=None, **kwargs):
+        search_results = kwargs.pop("search_results", self.search_results)
         extraction_results = kwargs.pop(
             "extraction_results", self.extraction_results
         )
         return ResolverAgent(llm).create_resolution_results(
             self.plan,
-            self.search_results,
+            search_results,
             extraction_results,
             checker_results or self.checker_results,
             plan_sha256=kwargs.pop(
@@ -728,6 +729,52 @@ class ResolverAgentTests(TestCase):
             [],
         )
 
+    def test_materialized_candidate_is_not_scheduled_as_known_source(self):
+        source_id = self.search_results.sources[0].source_id
+        follow_up = self.checker_results.follow_up_tasks[0].model_copy(
+            update={
+                "candidate_source_ids": [source_id],
+                "retry_source_ids": [],
+                "reextract_source_ids": [],
+                "minimum_additional_sources": 1,
+            }
+        )
+        checker = self.checker_results.model_copy(
+            update={"follow_up_tasks": [follow_up]}
+        )
+
+        results = self._run(checker_results=checker)
+
+        self.assertEqual(
+            results.work_items[0].selected_action,
+            ResolverAction.SEARCH_NEW_SOURCE,
+        )
+        self.assertNotIn(
+            ResolverAction.EXTRACT_KNOWN_SOURCE,
+            results.work_items[0].allowed_actions,
+        )
+
+    def test_explicit_l1_gap_policy_prefers_bounded_new_search(self):
+        follow_up = self.checker_results.follow_up_tasks[0]
+        changed_checker = self.checker_results.model_copy(
+            update={"follow_up_tasks": [follow_up]}
+        )
+
+        results = self._run(
+            checker_results=changed_checker,
+            prefer_new_search=True,
+        )
+
+        self.assertEqual(
+            results.work_items[0].selected_action,
+            ResolverAction.SEARCH_NEW_SOURCE,
+        )
+        self.assertEqual(results.search_task_ids, [follow_up.task_id])
+        self.assertIn(
+            "explicitly preferred bounded new-source search",
+            " ".join(results.warnings),
+        )
+
     def test_corroboration_prefers_new_search_over_reextraction(self):
         follow_up = self.checker_results.follow_up_tasks[0].model_copy(
             update={
@@ -1022,9 +1069,19 @@ class ResolverAgentTests(TestCase):
 
     def test_known_candidate_is_preferred_over_retry_and_reextraction(self):
         follow_up = self.checker_results.follow_up_tasks[0]
+        candidate = self.search_results.sources[1].model_copy(
+            update={
+                "source_id": "source-abcdef0123456789",
+                "url": "https://example.com/new-candidate",
+                "canonical_url": "https://example.com/new-candidate",
+            }
+        )
+        expanded_search = self.search_results.model_copy(
+            update={"sources": [*self.search_results.sources, candidate]}
+        )
         changed_follow_up = follow_up.model_copy(
             update={
-                "candidate_source_ids": [self.search_results.sources[1].source_id],
+                "candidate_source_ids": [candidate.source_id],
                 "retry_source_ids": [self.search_results.sources[0].source_id],
                 "reextract_source_ids": [self.search_results.sources[2].source_id],
             }
@@ -1033,7 +1090,10 @@ class ResolverAgentTests(TestCase):
             update={"follow_up_tasks": [changed_follow_up]}
         )
 
-        results = self._run(checker_results=changed_checker)
+        results = self._run(
+            checker_results=changed_checker,
+            search_results=expanded_search,
+        )
 
         self.assertEqual(
             results.work_items[0].selected_action,
@@ -1041,7 +1101,7 @@ class ResolverAgentTests(TestCase):
         )
         self.assertEqual(
             results.work_items[0].selected_source_ids,
-            [self.search_results.sources[1].source_id],
+            [candidate.source_id],
         )
 
     def test_document_mention_uses_retry_not_reextraction(self):

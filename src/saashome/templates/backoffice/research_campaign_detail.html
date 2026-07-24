@@ -21,6 +21,7 @@
 </section>
 
 {% if campaign.cancel_requested %}<div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900">Zlecono zatrzymanie kampanii. Pozycje oczekujące zostały anulowane; rozpoczęte runy dokończą bieżący przebieg.</div>{% endif %}
+{% if snapshot.monitoring.enabled %}<section class="mt-5 rounded-xl border {% if snapshot.monitoring.triggered_stop_codes %}border-red-200 bg-red-50 text-red-950{% else %}border-emerald-200 bg-emerald-50 text-emerald-950{% endif %} p-4 text-sm"><strong>Bramka monitorująca L1</strong><p class="mt-1">Próba {{ snapshot.monitoring.completed }}/{{ snapshot.monitoring.minimum_completed }} · średnia propozycji {{ snapshot.monitoring.average_proposals }} (min. {{ snapshot.monitoring.minimum_average_proposals }}) · średnia publikacji {{ snapshot.monitoring.average_publications }} (min. {{ snapshot.monitoring.minimum_average_publications }}).</p>{% if snapshot.monitoring.triggered_stop_codes %}<p class="mt-2 font-bold">Automatyczne zatrzymanie: {{ snapshot.monitoring.triggered_stop_codes|join:", " }}</p>{% endif %}</section>{% endif %}
 
 <section id="campaign-monitor" data-status-url="{% url 'backoffice:research_campaign_status' campaign.campaign_id %}" class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div class="border-b border-slate-200 px-5 py-4"><h3 class="font-black">Pozycje kampanii</h3><p class="mt-1 text-xs text-slate-500">Kliknij markę, aby zobaczyć pełny log, artefakty i szczegółowy koszt runu.</p></div>

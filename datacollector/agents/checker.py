@@ -65,6 +65,12 @@ DEFAULT_MAX_CLAIMS = 500
 DEFAULT_MAX_EVIDENCE_CHARS = 100_000
 _TERMINAL_RETRIEVAL_ERROR_CODES = {"access_denied", "anti_bot_page"}
 _ISO_CURRENCY_CODES = {"CHF", "CZK", "EUR", "GBP", "PLN", "USD"}
+_SEMANTIC_HIGH_RISK_PREFIXES = (
+    "fees.",
+    "investment.",
+    "outlets.",
+    "websites.",
+)
 
 
 class CheckerValidationError(ValueError):
@@ -128,6 +134,15 @@ def _currency_claims_are_equivalent(
         return False
     currencies = [_canonical_currency_value(claim) for claim in claims]
     return all(currencies) and len(set(currencies)) == 1
+
+
+def _requires_semantic_review(target_field: str) -> bool:
+    """Return whether one field warrants the paid L1 semantic audit."""
+
+    return (
+        target_field == "candidate.capital_requirement"
+        or target_field.startswith(_SEMANTIC_HIGH_RISK_PREFIXES)
+    )
 
 
 def _stable_id(prefix: str, *parts: object) -> str:
@@ -605,26 +620,10 @@ class CheckerAgent:
             ]
 
         if risk_based and not incremental:
-            high_risk_prefixes = (
-                "candidate.capital_requirement",
-                "fees.",
-                "investment.",
-                "outlets.",
-                "websites.",
-            )
-            semantic_task_ids = {
-                task.task_id
-                for task in selected_tasks
-                if any(
-                    target_field == "candidate.capital_requirement"
-                    or target_field.startswith(high_risk_prefixes[1:])
-                    for target_field in task.target_fields
-                )
-            }
             structurally_reviewed_claims = [
                 claim
                 for claim in selected_claims
-                if claim.task_id not in semantic_task_ids
+                if not _requires_semantic_review(claim.target_field)
             ]
             inherited_decision_by_id.update(
                 {
@@ -639,6 +638,11 @@ class CheckerAgent:
             inherited_claim_ids.extend(
                 claim.claim_id for claim in structurally_reviewed_claims
             )
+            semantic_task_ids = {
+                claim.task_id
+                for claim in selected_claims
+                if _requires_semantic_review(claim.target_field)
+            }
             reviewed_task_ids = [
                 task_id
                 for task_id in extraction_results.selected_task_ids
@@ -653,6 +657,11 @@ class CheckerAgent:
             claim
             for claim in selected_claims
             if claim.task_id in reviewed_task_id_set
+            and (
+                not risk_based
+                or incremental
+                or _requires_semantic_review(claim.target_field)
+            )
         ]
         reviewed_claim_ids = [claim.claim_id for claim in reviewed_claims]
         reviewed_citation_ids = {
@@ -665,16 +674,21 @@ class CheckerAgent:
             for citation in extraction_results.citations
             if citation.citation_id in reviewed_citation_ids
         }
-        reviewed_sources = (
-            list(selected_sources)
-            if not incremental
-            else [
+        if risk_based and not incremental:
+            reviewed_sources = [
+                source
+                for source in selected_sources
+                if source.source_id in reviewed_cited_source_ids
+            ]
+        elif not incremental:
+            reviewed_sources = list(selected_sources)
+        else:
+            reviewed_sources = [
                 source
                 for source in selected_sources
                 if reviewed_task_id_set.intersection(source.task_ids)
                 or source.source_id in reviewed_cited_source_ids
             ]
-        )
         reviewed_source_ids = [source.source_id for source in reviewed_sources]
 
         warnings: list[str] = []
@@ -692,7 +706,7 @@ class CheckerAgent:
         elif risk_based:
             warnings.append(
                 "Risk-based Checker sent only financial, website-identity and "
-                "network-scale task scopes to semantic review; other grounded "
+                "network-scale claims to semantic review; other grounded "
                 "claims remain explicitly not_reviewed for Human Review."
             )
 
@@ -725,10 +739,13 @@ class CheckerAgent:
                     f"Cannot load Checker prompt: {self.prompt_path}"
                 ) from exc
             try:
+                semantic_extraction_results = extraction_results.model_copy(
+                    update={"claims": reviewed_claims}
+                )
                 generation = self.llm.generate(
                     plan,
                     search_results,
-                    extraction_results,
+                    semantic_extraction_results,
                     reviewed_tasks,
                     reviewed_sources,
                     system_prompt,

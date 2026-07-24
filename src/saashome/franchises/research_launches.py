@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, close_old_connections, transaction
 from django.utils import timezone
 
 
@@ -30,9 +30,11 @@ from datacollector.storage.json_store import (
     load_research_plan,
     load_search_results,
 )
+from datacollector.benchmark import field_policy_map
+from datacollector.schemas import NormalizerMode, NormalizerStrategySource
 
 from .models import Franchise, FranchiseResearchLaunch
-from .research_fields import L1_PUBLIC_FIELD_ORDER
+from .research_fields import L1_AUTO_REVIEW_POLICY_VERSION, L1_PUBLIC_FIELD_ORDER
 from .research_jobs import ResearchCommandResult
 from .research_workbench import create_research_workspace
 
@@ -43,6 +45,19 @@ UNKNOWN_PROVIDER_ATTEMPT_RESERVE_USD = Decimal("0.50")
 
 class ResearchLaunchError(ValueError):
     """Safe orchestration or immutable-lineage error."""
+
+
+def _normalizer_allows_publication(normalized) -> bool:
+    """Mirror the immutable import gate before mutating Auto-review state."""
+
+    return (
+        normalized.normalization_mode == NormalizerMode.PAID
+        and normalized.strategy_source
+        in {
+            NormalizerStrategySource.OPENAI,
+            NormalizerStrategySource.OPENAI_REPAIRED,
+        }
+    )
 
 
 _TRANSIENT_PROVIDER_FAILURES = {
@@ -456,7 +471,7 @@ def queue_research_launch(
                     else "missing"
                 ),
                 "l1_pipeline_version": (
-                    "cheap-effective-v2"
+                    "cheap-effective-v3"
                     if profile_id in {"PL:L1", "PL:L1:v2"}
                     else "standard-v1"
                 ),
@@ -501,17 +516,17 @@ def claim_next_launch() -> FranchiseResearchLaunch | None:
             launch.status = FranchiseResearchLaunch.STATUS_RUNNING
             launch.current_stage = "Walidacja konfiguracji"
             launch.progress_percent = 3
-            launch.started_at = now
+            update_fields = [
+                "status",
+                "current_stage",
+                "progress_percent",
+                "heartbeat_at",
+            ]
+            if launch.started_at is None:
+                launch.started_at = now
+                update_fields.append("started_at")
             launch.heartbeat_at = now
-            launch.save(
-                update_fields=[
-                    "status",
-                    "current_stage",
-                    "progress_percent",
-                    "started_at",
-                    "heartbeat_at",
-                ]
-            )
+            launch.save(update_fields=update_fields)
             if campaign is not None:
                 sync_campaign(campaign)
             return launch
@@ -795,6 +810,47 @@ def _accepted_checker_fields(checker) -> set[str]:
     }
 
 
+_L1_LOW_RISK_CANDIDATE_FIELDS = frozenset(
+    {
+        "brand.name",
+        "brand.public_summary",
+        "contact.generic_business_route",
+        "offer.unit_formats",
+        "candidate.premises_requirements",
+        "support.training_program",
+    }
+)
+
+
+def _actionable_l1_checker_fields(checker) -> set[str]:
+    """Count safe grounded fields even when risk-based Checker skips semantics."""
+
+    fields = _accepted_checker_fields(checker)
+    policies = field_policy_map(getattr(checker, "profile_id", None))
+    assessments = {
+        item.source_id: item
+        for item in checker.source_assessments
+    }
+    for decision in checker.claim_decisions:
+        if (
+            decision.verdict.value != "not_reviewed"
+            or decision.target_field not in _L1_LOW_RISK_CANDIDATE_FIELDS
+            or decision.target_field not in policies
+        ):
+            continue
+        policy = policies[decision.target_field]
+        supported = {
+            source_id
+            for source_id in decision.source_ids
+            if source_id in assessments
+            and assessments[source_id].source_type.value
+            in policy.accepted_source_types
+        }
+        if len(supported) >= policy.minimum_sources:
+            fields.add(decision.target_field)
+    return fields
+
+
 def _process_hybrid_l1_discovery(
     launch: FranchiseResearchLaunch,
     runner,
@@ -940,7 +996,7 @@ def _process_hybrid_l1_discovery(
         launch.seed_check_reference = str(seed_check_path)
         launch.save(update_fields=["seed_check_reference"])
     seed_checker, _ = load_checker_results(seed_check_path)
-    accepted_seed_fields = _accepted_checker_fields(seed_checker)
+    accepted_seed_fields = _actionable_l1_checker_fields(seed_checker)
     minimum_l1_proposals = 8
     if len(accepted_seed_fields) >= minimum_l1_proposals:
         launch.sources_reference = str(seed_sources_path)
@@ -1001,6 +1057,7 @@ def _process_hybrid_l1_discovery(
                 str(config["initial_task_limit"]),
                 "--max-queries-per-item",
                 "2",
+                "--prefer-new-search",
             ],
             label="L1/2B · deterministyczny plan wyłącznie dla braków",
             progress=48,
@@ -1096,9 +1153,9 @@ def process_research_launch(
     config = dict(launch.configuration)
     if (
         launch.profile_id in {"PL:L1", "PL:L1:v2"}
-        and config.get("l1_pipeline_version") != "cheap-effective-v2"
+        and config.get("l1_pipeline_version") != "cheap-effective-v3"
     ):
-        config["l1_pipeline_version"] = "cheap-effective-v2"
+        config["l1_pipeline_version"] = "cheap-effective-v3"
         launch.configuration = config
         launch.save(update_fields=["configuration"])
     summaries: list[dict] = (
@@ -1374,43 +1431,66 @@ def process_research_launch(
         auto_review_summary = {}
         finalization_summary = {}
         if is_l1 and config.get("auto_review_finalize"):
-            from .research_auto_review import auto_review_l1_workspace
-            from .research_finalizer import finalize_research_workspace
+            if not _normalizer_allows_publication(normalized):
+                auto_review_summary = {
+                    "policy_version": L1_AUTO_REVIEW_POLICY_VERSION,
+                    "contract_fields": len(L1_PUBLIC_FIELD_ORDER),
+                    "policy_accepted": 0,
+                    "documented_gaps": 0,
+                    "pending_human_review": projectable_fields,
+                    "accepted_fields": [],
+                    "gap_fields": [],
+                    "pending_fields": [],
+                    "pending_reasons": {},
+                    "skipped_reason": "normalizer_not_import_eligible",
+                }
+                finalization_summary = {
+                    "skipped_reason": "normalizer_not_import_eligible",
+                }
+                launch.current_stage = (
+                    "L1 bez publikacji — Normalizer nie zwrócił wyniku "
+                    "zdatnego do importu"
+                )
+            else:
+                from .research_auto_review import auto_review_l1_workspace
+                from .research_finalizer import finalize_research_workspace
 
-            auto_review_summary = auto_review_l1_workspace(
-                workspace,
-                actor=launch.requested_by,
-            )
-            if auto_review_summary["policy_accepted"]:
-                finalization, _ = finalize_research_workspace(
+                auto_review_summary = auto_review_l1_workspace(
                     workspace,
                     actor=launch.requested_by,
                 )
-                published = list(
-                    finalization.published_fields.filter(
-                        status="projected",
-                        is_current=True,
-                    ).values_list("target_field", flat=True)
-                )
-                finalization_summary = {
-                    "finalization_id": str(finalization.finalization_id),
-                    "release_number": finalization.release_number,
-                    "published_fields": len(published),
-                    "published_target_fields": published,
-                }
-                launch.current_stage = (
-                    f"{launch.current_stage.split(' — Workbench')[0]} — "
-                    f"opublikowano automatycznie {len(published)}/20 bezpiecznych pól"
-                )
-            else:
-                launch.current_stage = (
-                    f"{launch.current_stage} — auto-review nie dopuścił żadnego pola"
-                )
+                if auto_review_summary["policy_accepted"]:
+                    finalization, _ = finalize_research_workspace(
+                        workspace,
+                        actor=launch.requested_by,
+                    )
+                    published = list(
+                        finalization.published_fields.filter(
+                            status="projected",
+                            is_current=True,
+                        ).values_list("target_field", flat=True)
+                    )
+                    finalization_summary = {
+                        "finalization_id": str(finalization.finalization_id),
+                        "release_number": finalization.release_number,
+                        "published_fields": len(published),
+                        "published_target_fields": published,
+                    }
+                    launch.current_stage = (
+                        f"{launch.current_stage.split(' — Workbench')[0]} — "
+                        f"opublikowano automatycznie {len(published)}/20 "
+                        "bezpiecznych pól"
+                    )
+                else:
+                    launch.current_stage = (
+                        f"{launch.current_stage} — "
+                        "auto-review nie dopuścił żadnego pola"
+                    )
         launch.progress_percent = 100
         launch.result_summary = {
             "profile_id": workspace.profile_id,
             "l1_pipeline_version": (
-                "cheap-effective-v2"
+                "cheap-effective-v3"
                 if launch.profile_id in {"PL:L1", "PL:L1:v2"}
                 else None
             ),
@@ -1460,7 +1540,24 @@ def process_research_launch(
         launch.error_message = str(exc)[:4000]
         launch.completed_at = timezone.now()
         launch.heartbeat_at = launch.completed_at
-        launch.save()
+        try:
+            launch.save()
+        except DatabaseError:
+            # A long-running worker may lose its serverless PostgreSQL
+            # connection while OpenAI and document retrieval are in progress.
+            # Reconnect once so the durable lease is not left as "running".
+            close_old_connections()
+            FranchiseResearchLaunch.objects.filter(pk=launch.pk).update(
+                status=launch.status,
+                current_stage=launch.current_stage,
+                error_code=launch.error_code,
+                error_message=launch.error_message,
+                completed_at=launch.completed_at,
+                heartbeat_at=launch.heartbeat_at,
+                cost_summary=launch.cost_summary,
+                log=launch.log,
+            )
+            launch = FranchiseResearchLaunch.objects.get(pk=launch.pk)
     if launch.campaign_id:
         from .research_campaigns import sync_campaign
 

@@ -88,6 +88,45 @@ def _inherited_relevance_note(value: str) -> str:
     return f"{prefix}{value}"[:1000]
 
 
+def _merge_search_source(
+    source: SearchSource,
+    delta_source: SearchSource | None,
+    *,
+    prior_search_id: str,
+) -> SearchSource:
+    if (
+        delta_source is not None
+        and delta_source.provider_observed
+        and delta_source.origin == SearchSourceOrigin.OPENAI_WEB_SEARCH
+    ):
+        # The paid Searcher may independently rediscover an offline seed. Keep
+        # its current provider provenance and refined source classification
+        # instead of allowing the inherited UNKNOWN record to shadow it.
+        return delta_source.model_copy(
+            update={
+                "task_ids": _deduplicate(
+                    [*source.task_ids, *delta_source.task_ids]
+                ),
+            }
+        )
+    return source.model_copy(
+        update={
+            "origin": SearchSourceOrigin.INHERITED,
+            "provider_observed": False,
+            "task_ids": _deduplicate(
+                [
+                    *source.task_ids,
+                    *(delta_source.task_ids if delta_source else []),
+                ]
+            ),
+            "observed_in_action_ids": [],
+            "discovered_via_queries": [],
+            "relevance_note": _inherited_relevance_note(source.relevance_note),
+            "inherited_from_search_id": prior_search_id,
+        }
+    )
+
+
 def _artifact_sha256(value) -> str:
     rendered = (
         json.dumps(value.model_dump(mode="json"), ensure_ascii=False, indent=2)
@@ -428,7 +467,7 @@ class ExecutorAgent:
                 raise
             raise ExecutorProviderError(
                 "Paid Searcher completed but Executor search merge failed "
-                f"({type(exc).__name__}).",
+                f"({type(exc).__name__}: {exc}).",
                 code="postprocessing_error",
                 usages=delta_search.agent_usage,
             ) from None
@@ -589,6 +628,7 @@ class ExecutorAgent:
             execution_mode=execution_mode,
             delta_search=delta_search,
             delta_extraction=delta_extraction,
+            new_source_ids=new_source_ids,
         )
         agent_usage = [
             *(delta_search.agent_usage if delta_search is not None else []),
@@ -833,23 +873,10 @@ class ExecutorAgent:
         for source in prior.sources:
             delta_source = delta_by_id.get(source.source_id)
             sources.append(
-                source.model_copy(
-                    update={
-                        "origin": SearchSourceOrigin.INHERITED,
-                        "provider_observed": False,
-                        "task_ids": _deduplicate(
-                            [
-                                *source.task_ids,
-                                *(delta_source.task_ids if delta_source else []),
-                            ]
-                        ),
-                        "observed_in_action_ids": [],
-                        "discovered_via_queries": [],
-                        "relevance_note": (
-                            _inherited_relevance_note(source.relevance_note)
-                        ),
-                        "inherited_from_search_id": prior.search_id,
-                    }
+                _merge_search_source(
+                    source,
+                    delta_source,
+                    prior_search_id=prior.search_id,
                 )
             )
         sources.extend(
@@ -1380,6 +1407,7 @@ class ExecutorAgent:
         execution_mode: ExecutorMode,
         delta_search: SearchResults | None,
         delta_extraction: ExtractionResults | None,
+        new_source_ids: list[str],
     ) -> list[ExecutorBatchResult]:
         document_by_source = {
             document.source_id: document
@@ -1406,11 +1434,7 @@ class ExecutorAgent:
             claim.claim_id: _claim_source_ids(merged_extraction, claim)
             for claim in merged_extraction.claims
         }
-        prior_source_ids = {
-            source.source_id
-            for source in merged_search.sources
-            if source.origin == SearchSourceOrigin.INHERITED
-        }
+        current_new_source_ids = set(new_source_ids)
         results: list[ExecutorBatchResult] = []
         for batch in resolution.execution_batches:
             if batch.action == ResolverAction.HUMAN_REVIEW:
@@ -1450,7 +1474,7 @@ class ExecutorAgent:
                 resulting_source_ids = [
                     source.source_id
                     for source in merged_search.sources
-                    if source.source_id not in prior_source_ids
+                    if source.source_id in current_new_source_ids
                     and set(source.task_ids).intersection(batch.task_ids)
                 ]
                 status = (

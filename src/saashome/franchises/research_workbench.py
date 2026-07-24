@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -50,6 +51,73 @@ def _resolved(path: str | Path) -> Path:
 
 def _enum_value(value) -> str:
     return str(getattr(value, "value", value))
+
+
+def _normalized_label(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def _official_url_source(sources, target_field: str):
+    """Choose one provider-observed official URL according to its public role."""
+
+    candidates = [
+        source
+        for source in sources
+        if _enum_value(source.source_type) == "official"
+        and getattr(source, "provider_observed", False)
+    ]
+    if not candidates:
+        return None, ""
+
+    franchise_tokens = ("franczy", "franchis", "oferta")
+
+    def url_parts(source):
+        parts = urlsplit(source.canonical_url)
+        return (
+            parts,
+            (parts.hostname or "").casefold(),
+            (parts.path or "/").casefold(),
+        )
+
+    ranked = []
+    if target_field == "websites.official":
+        for source in candidates:
+            parts, host, path = url_parts(source)
+            ranked.append(
+                (
+                    any(token in host for token in franchise_tokens),
+                    path not in {"", "/"},
+                    len(source.canonical_url),
+                    source.source_id,
+                    source,
+                    urlunsplit((parts.scheme, parts.netloc, "/", "", "")),
+                )
+            )
+    else:
+        for source in candidates:
+            _parts, host, path = url_parts(source)
+            hostname_is_franchise = any(
+                token in host for token in franchise_tokens
+            )
+            path_is_franchise = any(token in path for token in franchise_tokens)
+            if not hostname_is_franchise and not path_is_franchise:
+                continue
+            ranked.append(
+                (
+                    not hostname_is_franchise,
+                    not path_is_franchise,
+                    path not in {"", "/"} if hostname_is_franchise else False,
+                    len(source.canonical_url),
+                    source.source_id,
+                    source,
+                    source.canonical_url,
+                )
+            )
+    if not ranked:
+        return None, ""
+    ranked.sort(key=lambda item: item[:-2])
+    selected = ranked[0]
+    return selected[-2], selected[-1]
 
 
 def _display_value(value) -> str:
@@ -278,18 +346,19 @@ def create_research_workspace(
     checker_decisions_by_id = {
         item.claim_id: item for item in checker.claim_decisions
     }
-    grounded_unreviewed_by_key = {}
+    grounded_review_by_key = {}
     if _enum_value(getattr(checker, "checker_mode", "")) == "risk_based":
         for claim in extraction.claims:
             decision = checker_decisions_by_id.get(claim.claim_id)
             if (
                 decision is not None
-                and _enum_value(decision.verdict) == "not_reviewed"
+                and _enum_value(decision.verdict)
+                in {"not_reviewed", "needs_review"}
             ):
-                grounded_unreviewed_by_key.setdefault(
+                grounded_review_by_key.setdefault(
                     (claim.task_id, claim.target_field),
                     [],
-                ).append(claim)
+                ).append((claim, _enum_value(decision.verdict)))
     rows = []
     sort_order = 0
     for task in plan.tasks:
@@ -303,6 +372,20 @@ def create_research_workspace(
             if normalized_field:
                 for value_id in normalized_field.normalized_value_ids:
                     value = values_by_id[value_id]
+                    value_decisions = [
+                        checker_decisions_by_id.get(claim_id)
+                        for claim_id in value.claim_ids
+                    ]
+                    value_is_risk_based_low_risk = (
+                        _enum_value(getattr(checker, "checker_mode", ""))
+                        == "risk_based"
+                        and bool(value_decisions)
+                        and all(
+                            decision is not None
+                            and _enum_value(decision.verdict) == "not_reviewed"
+                            for decision in value_decisions
+                        )
+                    )
                     proposed_values.append(
                         {
                             "id": value.normalized_value_id,
@@ -311,6 +394,15 @@ def create_research_workspace(
                             "type": _enum_value(value.value_type),
                             "precision": _enum_value(value.precision),
                             "needs_corroboration": value.needs_corroboration,
+                            **(
+                                {
+                                    "provenance": (
+                                        "risk_based_low_risk_normalized"
+                                    )
+                                }
+                                if value_is_risk_based_low_risk
+                                else {}
+                            ),
                         }
                     )
                     for citation_id in value.citation_ids:
@@ -342,6 +434,16 @@ def create_research_workspace(
                         )
                 pipeline_status = _enum_value(normalized_field.status)
                 checker_status = _enum_value(normalized_field.checker_status)
+                if (
+                    proposed_values
+                    and all(
+                        item.get("provenance")
+                        == "risk_based_low_risk_normalized"
+                        for item in proposed_values
+                    )
+                    and checker_status in {"", "missing", "not_reviewed"}
+                ):
+                    checker_status = "not_reviewed"
                 notes = normalized_field.notes
                 source_ids = normalized_field.source_ids
                 normalized_field_id = normalized_field.normalized_field_id
@@ -353,42 +455,72 @@ def create_research_workspace(
                 notes = []
                 source_ids = []
                 normalized_field_id = ""
+            # A provider-observed official source title can validate the exact
+            # directory label without asking a model to restate the brand.
+            if not proposed_values and target_field == "brand.name":
+                expected_name = franchise.name.strip()
+                expected_key = _normalized_label(expected_name)
+                official_identity_sources = [
+                    source
+                    for source in search.sources
+                    if _enum_value(source.source_type) == "official"
+                    and getattr(source, "provider_observed", False)
+                    and task.task_id in source.task_ids
+                    and expected_key
+                    and expected_key in _normalized_label(source.title or "")
+                ]
+                selected_source = (official_identity_sources or [None])[0]
+                if selected_source is not None:
+                    proposed_values = [
+                        {
+                            "id": f"source-brand-{selected_source.source_id}",
+                            "display": expected_name,
+                            "canonical_text": expected_name,
+                            "type": "text",
+                            "precision": "exact",
+                            "needs_corroboration": False,
+                            "provenance": "official_search_source_metadata",
+                        }
+                    ]
+                    evidence = [
+                        {
+                            "citation_id": "",
+                            "quote": selected_source.title,
+                            "locator": "provider-observed official source title",
+                            "source_id": selected_source.source_id,
+                            "source_title": selected_source.title,
+                            "url": selected_source.canonical_url,
+                            "source_type": "official",
+                            "discovered_at": selected_source.discovered_at.isoformat(),
+                            "provenance": "official_search_source_metadata",
+                        }
+                    ]
+                    pipeline_status = "derived_source_metadata"
+                    checker_status = "partial"
+                    source_ids = [selected_source.source_id]
+                    notes = [
+                        *notes,
+                        "Brand label matched deterministically in an official Searcher title.",
+                    ]
             # Website URLs are already typed, canonical Searcher metadata. When
             # Searcher classified a source as official, copying that URL into
             # the review draft is safer and cheaper than asking Normalizer to
             # restate it as a semantic claim.
             if (
-                not proposed_values
+                (not proposed_values or pipeline_status == "multiple_values")
                 and target_field in {"websites.official", "websites.franchise_offer"}
             ):
                 official_sources = [
                     source
                     for source in search.sources
                     if _enum_value(source.source_type) == "official"
+                    and getattr(source, "provider_observed", False)
                     and task.task_id in source.task_ids
                 ]
-                if target_field == "websites.franchise_offer":
-                    preferred = [
-                        source
-                        for source in official_sources
-                        if any(
-                            token in source.canonical_url.casefold()
-                            for token in ("franczy", "franchis", "oferta")
-                        )
-                    ]
-                    selected_source = (preferred or official_sources or [None])[0]
-                    derived_url = (
-                        selected_source.canonical_url if selected_source else ""
-                    )
-                else:
-                    selected_source = (official_sources or [None])[0]
-                    if selected_source:
-                        parts = urlsplit(selected_source.canonical_url)
-                        derived_url = urlunsplit(
-                            (parts.scheme, parts.netloc, "/", "", "")
-                        )
-                    else:
-                        derived_url = ""
+                selected_source, derived_url = _official_url_source(
+                    official_sources,
+                    target_field,
+                )
                 if selected_source and derived_url:
                     proposed_values = [
                         {
@@ -424,13 +556,20 @@ def create_research_workspace(
             # on high-risk fields. Exact quote-grounded low-risk Extractor claims
             # must still reach Human Review, but remain visibly unreviewed and
             # cannot become public without an explicit human decision.
-            unreviewed_claims = grounded_unreviewed_by_key.get(
+            grounded_review_claims = grounded_review_by_key.get(
                 (task.task_id, target_field),
                 [],
             )
-            if not proposed_values and unreviewed_claims:
+            if not proposed_values and grounded_review_claims:
                 raw_source_ids = []
-                for claim in unreviewed_claims:
+                verdicts = set()
+                for claim, verdict in grounded_review_claims:
+                    verdicts.add(verdict)
+                    provenance = (
+                        "extractor_grounded_unreviewed"
+                        if verdict == "not_reviewed"
+                        else "extractor_grounded_needs_review"
+                    )
                     proposed_values.append(
                         {
                             "id": claim.claim_id,
@@ -439,7 +578,7 @@ def create_research_workspace(
                             "type": "text",
                             "precision": "as_stated",
                             "needs_corroboration": True,
-                            "provenance": "extractor_grounded_unreviewed",
+                            "provenance": provenance,
                         }
                     )
                     for citation_id in claim.citation_ids:
@@ -472,19 +611,28 @@ def create_research_workspace(
                                     and getattr(source, "discovered_at", None)
                                     else ""
                                 ),
-                                "provenance": "extractor_grounded_unreviewed",
+                                "provenance": provenance,
                             }
                         )
                 source_ids = list(
                     dict.fromkeys([*source_ids, *raw_source_ids])
                 )
-                pipeline_status = "grounded_unreviewed"
-                checker_status = "not_reviewed"
+                needs_semantic_review = "needs_review" in verdicts
+                pipeline_status = (
+                    "grounded_needs_review"
+                    if needs_semantic_review
+                    else "grounded_unreviewed"
+                )
+                checker_status = (
+                    "needs_review"
+                    if needs_semantic_review
+                    else "not_reviewed"
+                )
                 notes = [
                     *notes,
                     (
-                        "Quote-grounded Extractor proposal omitted from semantic "
-                        "Checker by the PL:L1 risk policy; requires Human Review."
+                        "Quote-grounded Extractor proposal retained for Human "
+                        "Review; it is not eligible for automatic publication."
                     ),
                 ]
             rows.append(

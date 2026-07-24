@@ -9,6 +9,7 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
+from ..benchmark import field_policy_map
 from ..llm.protocol import NormalizerLLM, NormalizerProviderError
 from ..schemas import (
     AgentIterationUsage,
@@ -42,6 +43,24 @@ DEFAULT_PROMPT_PATH = (
 )
 DEFAULT_MAX_CLAIMS = 100
 DEFAULT_MAX_INPUT_CHARS = 100_000
+MAX_LOW_RISK_CLAIMS_PER_FIELD = 3
+MAX_LOW_RISK_CLAIMS_PER_RUN = 24
+L1_LOW_RISK_NORMALIZATION_FIELDS = frozenset(
+    {
+        "brand.name",
+        "brand.public_summary",
+        "contact.generic_business_route",
+        "offer.unit_formats",
+        "candidate.premises_requirements",
+        "support.training_program",
+    }
+)
+L1_COMPACT_DESCRIPTIVE_FIELDS = {
+    "brand.public_summary": 400,
+    "offer.unit_formats": 240,
+    "candidate.premises_requirements": 400,
+    "support.training_program": 400,
+}
 
 
 class NormalizerValidationError(ValueError):
@@ -103,6 +122,82 @@ def _normalization_input_chars(
         + sum(len(citation_quote_by_id[citation_id]) for citation_id in claim.citation_ids)
         for claim in claims
     )
+
+
+def _plan_profile_id(plan: ResearchPlan) -> str:
+    snapshot = getattr(plan, "profile_snapshot", None)
+    return (
+        getattr(snapshot, "profile_id", "")
+        or getattr(plan.planner_input, "profile_id", "")
+        or ""
+    )
+
+
+def _bounded_low_risk_claim_ids(
+    plan: ResearchPlan,
+    search_results: SearchResults,
+    extraction_results: ExtractionResults,
+    checker_results: CheckerResults,
+    *,
+    unsafe_claim_ids: set[str],
+) -> list[str]:
+    """Select a small, source-policy-compliant risk-based normalization scope."""
+
+    profile_id = _plan_profile_id(plan)
+    if (
+        checker_results.checker_mode != CheckerMode.RISK_BASED
+        or profile_id != "PL:L1:v2"
+    ):
+        return []
+    policies = field_policy_map(profile_id)
+    if not policies:
+        return []
+    decision_by_id = {
+        decision.claim_id: decision
+        for decision in checker_results.claim_decisions
+    }
+    citation_by_id = {
+        citation.citation_id: citation
+        for citation in extraction_results.citations
+    }
+    source_by_id = {
+        source.source_id: source
+        for source in search_results.sources
+    }
+    selected: list[str] = []
+    per_field: dict[tuple[str, str], int] = {}
+    for claim in extraction_results.claims:
+        if len(selected) >= MAX_LOW_RISK_CLAIMS_PER_RUN:
+            break
+        decision = decision_by_id.get(claim.claim_id)
+        policy = policies.get(claim.target_field)
+        if (
+            decision is None
+            or decision.verdict != CheckerVerdict.NOT_REVIEWED
+            or claim.claim_id in unsafe_claim_ids
+            or claim.target_field not in L1_LOW_RISK_NORMALIZATION_FIELDS
+            or policy is None
+            or not claim.value_text.strip()
+        ):
+            continue
+        key = (claim.task_id, claim.target_field)
+        if per_field.get(key, 0) >= MAX_LOW_RISK_CLAIMS_PER_FIELD:
+            continue
+        supported_sources = {
+            citation_by_id[citation_id].source_id
+            for citation_id in claim.citation_ids
+            if citation_id in citation_by_id
+            and citation_by_id[citation_id].source_id in source_by_id
+            and source_by_id[
+                citation_by_id[citation_id].source_id
+            ].source_type.value
+            in policy.accepted_source_types
+        }
+        if len(supported_sources) < policy.minimum_sources:
+            continue
+        selected.append(claim.claim_id)
+        per_field[key] = per_field.get(key, 0) + 1
+    return selected
 
 
 class NormalizerAgent:
@@ -176,11 +271,24 @@ class NormalizerAgent:
             for unsafe_item in checker_results.unsafe_items
             for claim_id in unsafe_item.claim_ids
         }
-        eligible_claim_ids = [
+        accepted_claim_ids = [
             decision.claim_id
             for decision in checker_results.claim_decisions
             if decision.verdict == CheckerVerdict.ACCEPTED
             and decision.claim_id not in unsafe_claim_ids
+        ]
+        low_risk_claim_ids = _bounded_low_risk_claim_ids(
+            plan,
+            search_results,
+            extraction_results,
+            checker_results,
+            unsafe_claim_ids=unsafe_claim_ids,
+        )
+        eligible_id_set = set([*accepted_claim_ids, *low_risk_claim_ids])
+        eligible_claim_ids = [
+            claim.claim_id
+            for claim in extraction_results.claims
+            if claim.claim_id in eligible_id_set
         ]
         eligible_claims = [claim_by_id[claim_id] for claim_id in eligible_claim_ids]
         excluded_claim_ids = [
@@ -221,6 +329,13 @@ class NormalizerAgent:
         failed_attempts: list[NormalizerAttemptFailure] = []
         repair_summary = NormalizerRepairSummary()
         warnings: list[str] = []
+        if low_risk_claim_ids:
+            warnings.append(
+                "Included "
+                f"{len(low_risk_claim_ids)} bounded, quote-grounded low-risk "
+                "claim(s) omitted from semantic Checker scope; values remain "
+                "subject to deterministic Auto-review policy."
+            )
 
         scope_task_ids, scope_source_ids = self._scope_ids(
             eligible_claims,
@@ -328,12 +443,14 @@ class NormalizerAgent:
             claim_by_id,
             decision_by_id,
             citation_by_id,
+            low_risk_claim_ids=set(low_risk_claim_ids),
         )
         field_results, ignored_contradictions = self._build_field_results(
             checker_results,
             normalized_values,
             eligible_claim_ids=eligible_claim_ids,
             unsafe_excluded_claim_ids=unsafe_excluded_claim_ids,
+            low_risk_claim_ids=low_risk_claim_ids,
         )
         if ignored_contradictions:
             warnings.append(
@@ -421,7 +538,11 @@ class NormalizerAgent:
             compliance_rules=_deduplicate(
                 [
                     *checker_results.compliance_rules,
-                    "Normalize only accepted, grounded Checker claims.",
+                    (
+                        "Normalize only Checker-accepted claims or bounded, "
+                        "quote-grounded PL:L1 low-risk claims from allowed "
+                        "public source types."
+                    ),
                     "Preserve claim, citation, and source provenance for every value.",
                     "Never publish or import Normalizer output without human approval.",
                 ]
@@ -538,7 +659,10 @@ class NormalizerAgent:
         claim_by_id,
         decision_by_id,
         citation_by_id,
+        *,
+        low_risk_claim_ids: set[str] | None = None,
     ) -> list[NormalizedValue]:
+        low_risk_claim_ids = low_risk_claim_ids or set()
         values: list[NormalizedValue] = []
         for item in draft.values:
             claims = [claim_by_id[claim_id] for claim_id in item.claim_ids]
@@ -591,13 +715,95 @@ class NormalizerAgent:
                     citation_ids=citation_ids,
                     source_ids=source_ids,
                     needs_corroboration=any(
-                        decision_by_id[claim.claim_id].source_support
-                        == CheckerSourceSupport.NEEDS_CORROBORATION
+                        (
+                            decision_by_id[claim.claim_id].source_support
+                            == CheckerSourceSupport.NEEDS_CORROBORATION
+                        )
+                        or (
+                            decision_by_id[claim.claim_id].source_support
+                            == CheckerSourceSupport.NOT_REVIEWED
+                            and claim.claim_id not in low_risk_claim_ids
+                        )
                         for claim in claims
                     ),
                 )
             )
-        return values
+        grouped: dict[tuple[str, str], list[NormalizedValue]] = {}
+        for value in values:
+            grouped.setdefault((value.task_id, value.target_field), []).append(value)
+        compacted: list[NormalizedValue] = []
+        for (task_id, target_field), field_values in grouped.items():
+            maximum = L1_COMPACT_DESCRIPTIVE_FIELDS.get(target_field)
+            claim_ids = _deduplicate(
+                [
+                    claim_id
+                    for value in field_values
+                    for claim_id in value.claim_ids
+                ]
+            )
+            can_coalesce = (
+                maximum is not None
+                and len(field_values) > 1
+                and set(claim_ids).issubset(low_risk_claim_ids)
+                and all(
+                    value.value_type == NormalizedValueType.TEXT
+                    for value in field_values
+                )
+            )
+            if can_coalesce:
+                snippets = _deduplicate(
+                    [
+                        value.canonical_text.strip().rstrip(" .;")
+                        for value in field_values
+                        if value.canonical_text.strip()
+                    ]
+                )
+                canonical_text = "; ".join(snippets)
+                if canonical_text and len(canonical_text) <= maximum:
+                    first = field_values[0]
+                    compacted.append(
+                        first.model_copy(
+                            update={
+                                "normalized_value_id": _stable_id(
+                                    "normalized-value",
+                                    task_id,
+                                    target_field,
+                                    *sorted(claim_ids),
+                                ),
+                                "claim_ids": claim_ids,
+                                "canonical_text": canonical_text,
+                                "notes": (
+                                    "Compatible low-risk source statements were "
+                                    "compacted into one grounded review value."
+                                ),
+                                "raw_value_texts": _deduplicate(
+                                    [
+                                        raw
+                                        for value in field_values
+                                        for raw in value.raw_value_texts
+                                    ]
+                                ),
+                                "citation_ids": _deduplicate(
+                                    [
+                                        citation_id
+                                        for value in field_values
+                                        for citation_id in value.citation_ids
+                                    ]
+                                ),
+                                "source_ids": _deduplicate(
+                                    [
+                                        source_id
+                                        for value in field_values
+                                        for source_id in value.source_ids
+                                    ]
+                                ),
+                                "needs_corroboration": False,
+                            }
+                        )
+                    )
+                    continue
+            compacted.extend(field_values)
+        return compacted
 
     @staticmethod
     def _build_field_results(
@@ -606,9 +812,11 @@ class NormalizerAgent:
         *,
         eligible_claim_ids: list[str],
         unsafe_excluded_claim_ids: list[str],
+        low_risk_claim_ids: list[str] | None = None,
     ) -> tuple[list[NormalizerFieldResult], int]:
         eligible_set = set(eligible_claim_ids)
         unsafe_set = set(unsafe_excluded_claim_ids)
+        low_risk_set = set(low_risk_claim_ids or [])
         values_by_key: dict[tuple[str, str], list[NormalizedValue]] = {}
         for value in normalized_values:
             values_by_key.setdefault((value.task_id, value.target_field), []).append(
@@ -628,11 +836,14 @@ class NormalizerAgent:
             for field in task_result.field_results:
                 key = (task_result.task_id, field.target_field)
                 values = values_by_key.get(key, [])
-                eligible_for_field = [
-                    claim_id
-                    for claim_id in field.accepted_claim_ids
-                    if claim_id in eligible_set
-                ]
+                eligible_for_field = _deduplicate(
+                    [
+                        claim_id
+                        for value in values
+                        for claim_id in value.claim_ids
+                        if claim_id in eligible_set
+                    ]
+                )
                 needs_review_ids = _deduplicate(
                     [
                         *field.needs_review_claim_ids,
@@ -662,10 +873,29 @@ class NormalizerAgent:
                     notes.append(field.audit_basis)
                 if any(value.needs_corroboration for value in values):
                     notes.append("One or more accepted values still need corroboration.")
+                if (
+                    field.status == CheckerFieldStatus.NOT_REVIEWED
+                    and eligible_for_field
+                ):
+                    notes.append(
+                        "Bounded low-risk claims were compacted by Normalizer "
+                        "without a semantic Checker judgment."
+                    )
                 if key in conflicting_keys:
                     notes.append("Accepted claims retain an unresolved contradiction.")
                 if any(claim_id in unsafe_set for claim_id in field.accepted_claim_ids):
                     notes.append("Safety-linked accepted claims were excluded.")
+                checker_status = field.status
+                if (
+                    eligible_for_field
+                    and set(eligible_for_field).issubset(low_risk_set)
+                    and field.status
+                    in {
+                        CheckerFieldStatus.MISSING,
+                        CheckerFieldStatus.NOT_REVIEWED,
+                    }
+                ):
+                    checker_status = CheckerFieldStatus.NOT_REVIEWED
                 fields.append(
                     NormalizerFieldResult(
                         normalized_field_id=_stable_id(
@@ -673,7 +903,7 @@ class NormalizerAgent:
                         ),
                         task_id=task_result.task_id,
                         target_field=field.target_field,
-                        checker_status=field.status,
+                        checker_status=checker_status,
                         status=status,
                         normalized_value_ids=[
                             value.normalized_value_id for value in values

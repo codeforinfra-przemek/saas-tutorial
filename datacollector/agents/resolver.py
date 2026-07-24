@@ -213,6 +213,7 @@ class ResolverAgent:
         completed_gap_rounds: int = 0,
         allow_round_limit: bool = False,
         force_scope_expansion: bool = False,
+        prefer_new_search: bool = False,
     ) -> ResolverResults:
         resolved_iteration = iteration or checker_results.iteration
         self._validate_inputs(
@@ -340,6 +341,7 @@ class ResolverAgent:
             max_source_actions=max_source_actions,
             max_search_tasks=max_search_tasks,
             max_queries_per_item=max_queries_per_item,
+            prefer_new_search=prefer_new_search,
         )
 
         warnings: list[str] = []
@@ -386,6 +388,11 @@ class ResolverAgent:
                     f"Deferred {len(deferred_follow_up_ids)} lower-priority follow-up "
                     "task(s) because max_follow_ups was reached."
                 )
+        if prefer_new_search:
+            warnings.append(
+                "The caller explicitly preferred bounded new-source search over "
+                "replaying remaining known candidates."
+            )
         usage: list[AgentIterationUsage] = []
         failed_attempts: list[ResolverAttemptFailure] = []
         generated_by = "deterministic"
@@ -652,6 +659,9 @@ class ResolverAgent:
                 and document.error_code not in _TERMINAL_RETRIEVAL_ERROR_CODES
             )
         }
+        materialized_document_source_ids = {
+            document.source_id for document in extraction_results.documents
+        }
         processed_scopes = {
             (scope.task_id, scope.source_id)
             for scope in extraction_results.semantically_processed_scopes
@@ -686,9 +696,17 @@ class ResolverAgent:
                 and (follow_up.task_id, source_id) not in processed_scopes
             ]
             pools_by_follow_up[follow_up.follow_up_id] = {
-                ResolverAction.EXTRACT_KNOWN_SOURCE: evidence_source_ids(
-                    follow_up.candidate_source_ids
-                ),
+                # A source that already has a document in the immutable
+                # Extractor state is not "known but unevaluated". Scheduling
+                # EXTRACT_KNOWN_SOURCE for it merely replays the same document
+                # and can prevent a genuine gap search from running.
+                ResolverAction.EXTRACT_KNOWN_SOURCE: [
+                    source_id
+                    for source_id in evidence_source_ids(
+                        follow_up.candidate_source_ids
+                    )
+                    if source_id not in materialized_document_source_ids
+                ],
                 ResolverAction.RETRY_RETRIEVAL: evidence_source_ids(
                     follow_up.retry_source_ids
                 ),
@@ -951,6 +969,7 @@ class ResolverAgent:
         max_source_actions: int,
         max_search_tasks: int,
         max_queries_per_item: int,
+        prefer_new_search: bool = False,
     ) -> list[ResolverWorkItem]:
         issue_codes = cls._field_issue_codes(checker_results)
         allocated_sources: list[str] = []
@@ -1103,6 +1122,8 @@ class ResolverAgent:
             allowed_actions.append(ResolverAction.HUMAN_REVIEW)
 
             preferred_actions: list[ResolverAction] = []
+            if prefer_new_search:
+                preferred_actions.append(ResolverAction.SEARCH_NEW_SOURCE)
             if follow_up.candidate_source_ids:
                 if pools[ResolverAction.EXTRACT_KNOWN_SOURCE]:
                     preferred_actions.append(

@@ -50,7 +50,12 @@ from .benchmark_experiment import (
     run_ai_assisted_benchmark,
 )
 from .config import ConfigurationError, OpenAISettings
-from .documents import DiskCachedDocumentFetcher, DocumentFetcher, FetchPolicy
+from .documents import (
+    DiskCachedDocumentFetcher,
+    DocumentFetcher,
+    FetchPolicy,
+    ResilientDocumentFetcher,
+)
 from .llm.openai_client import OpenAIPlannerClient, PlannerProviderError
 from .llm.openai_checker_client import OpenAICheckerClient
 from .llm.openai_extractor_client import OpenAIExtractorClient
@@ -566,7 +571,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--risk-based",
         action="store_true",
         help=(
-            "Send only high-risk financial, website-identity and scale task scopes "
+            "Send only high-risk financial, website-identity and scale claims "
             "to semantic review; retain other grounded claims for Human Review."
         ),
     )
@@ -651,6 +656,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=3,
         help="Maximum retained queries per follow-up (default: 3).",
+    )
+    resolve_parser.add_argument(
+        "--prefer-new-search",
+        action="store_true",
+        help=(
+            "Prefer one bounded task search over replaying remaining known "
+            "candidates. Intended for an already-fetched official-seed L1 pass."
+        ),
     )
     resolve_parser.add_argument(
         "--model", help="Override OPENAI_MODEL for this Resolver invocation."
@@ -1598,7 +1611,9 @@ def _run_extract(args: argparse.Namespace) -> int:
             max_pdf_bytes=args.max_document_bytes,
             max_text_chars=args.max_pdf_scan_chars,
         )
-        fetcher = DocumentFetcher(policy=fetch_policy)
+        fetcher = ResilientDocumentFetcher(
+            DocumentFetcher(policy=fetch_policy)
+        )
         if args.document_cache_dir is not None:
             fetcher = DiskCachedDocumentFetcher(
                 fetcher,
@@ -2326,6 +2341,7 @@ def _run_resolve(args: argparse.Namespace) -> int:
                 completed_gap_rounds=completed_gap_rounds,
                 allow_round_limit=args.allow_round_limit,
                 force_scope_expansion=args.advance_with_documented_gaps,
+                prefer_new_search=getattr(args, "prefer_new_search", False),
             )
         except ResolverProviderError as exc:
             requested_model = (
@@ -2573,7 +2589,9 @@ def _run_execute(args: argparse.Namespace) -> int:
             max_pdf_bytes=args.max_document_bytes,
             max_text_chars=args.max_pdf_scan_chars,
         )
-        fetcher = DocumentFetcher(policy=fetch_policy)
+        fetcher = ResilientDocumentFetcher(
+            DocumentFetcher(policy=fetch_policy)
+        )
         if args.document_cache_dir is not None:
             fetcher = DiskCachedDocumentFetcher(
                 fetcher,

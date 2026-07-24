@@ -585,6 +585,17 @@ def research_campaign_create_view(request):
             "max_sources": data["max_sources"],
             "max_extractor_api_calls": data["max_extractor_api_calls"],
             "auto_review_finalize": data["auto_review_finalize"],
+            "monitoring_gate": {
+                "enabled": data["monitor_quality_gate"],
+                "minimum_completed": data["gate_minimum_completed"] or 3,
+                "minimum_average_proposals": str(
+                    data["gate_minimum_average_proposals"] or 8
+                ),
+                "minimum_average_publications": str(
+                    data["gate_minimum_average_publications"] or 5
+                ),
+                "stop_on_unknown_cost": True,
+            },
         }
         try:
             campaign = create_research_campaign(
@@ -701,6 +712,7 @@ def research_campaign_status_view(request, campaign_id):
                 if snapshot["cost_per_proposed_field_usd"] is not None
                 else None
             ),
+            "monitoring": snapshot["monitoring"],
             "launches": launches,
         }
     )
