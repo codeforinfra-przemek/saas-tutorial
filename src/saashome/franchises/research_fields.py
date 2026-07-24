@@ -94,7 +94,7 @@ L1_AUTO_REVIEW_SAFE_FIELDS = frozenset(
         "support.training_program",
     }
 )
-L1_AUTO_REVIEW_POLICY_VERSION = "pl-l1-safe-public-v1"
+L1_AUTO_REVIEW_POLICY_VERSION = "pl-l1-safe-public-v2"
 
 # dotted field -> (plain-language purpose, profile section, anchor, model field)
 FIELD_PROFILE_MAP = {

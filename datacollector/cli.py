@@ -2884,11 +2884,6 @@ def _save_normalizer_failure_ledger(results, reference_path: Path) -> Path:
 
 def _run_normalize(args: argparse.Namespace) -> int:
     checker_results, check_sha256 = load_checker_results(args.check)
-    if checker_results.checker_mode != CheckerMode.FULL:
-        raise NormalizerValidationError(
-            "Normalizer requires a full Checker artifact. Run `datacollector check` "
-            "without --incremental or --risk-based against the same extraction first."
-        )
     if not checker_results.passed and not args.allow_incomplete:
         raise NormalizerValidationError(
             "Checker did not pass. Review its documented gaps and rerun with "
@@ -2904,6 +2899,26 @@ def _run_normalize(args: argparse.Namespace) -> int:
     search_results, search_sha256 = load_search_results(search_path)
     plan_path = args.plan or Path(checker_results.plan_reference)
     plan, plan_sha256 = load_research_plan(plan_path)
+    profile_snapshot = getattr(plan, "profile_snapshot", None)
+    profile_id = (
+        getattr(profile_snapshot, "profile_id", "")
+        or getattr(plan.planner_input, "profile_id", "")
+        or ""
+    )
+    risk_based_l1_draft = (
+        checker_results.checker_mode == CheckerMode.RISK_BASED
+        and profile_id in {"PL:L1", "PL:L1:v2"}
+        and args.allow_incomplete
+    )
+    if (
+        checker_results.checker_mode != CheckerMode.FULL
+        and not risk_based_l1_draft
+    ):
+        raise NormalizerValidationError(
+            "Normalizer requires a full Checker artifact. A risk-based PL:L1 "
+            "artifact is allowed only with --allow-incomplete; incremental "
+            "artifacts still require a final full Checker."
+        )
     iteration = args.iteration or checker_results.iteration
     result_directory = args.output_dir or args.check.parent
     expected_path = result_directory / normalizer_results_filename_for(

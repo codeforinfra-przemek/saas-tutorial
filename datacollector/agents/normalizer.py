@@ -738,10 +738,25 @@ class NormalizerAgent:
             raise NormalizerValidationError(
                 "Normalizer requires a successful paid Checker artifact."
             )
-        if checker_results.checker_mode != CheckerMode.FULL:
+        profile_snapshot = getattr(plan, "profile_snapshot", None)
+        profile_id = (
+            getattr(profile_snapshot, "profile_id", "")
+            or getattr(plan.planner_input, "profile_id", "")
+            or ""
+        )
+        risk_based_l1_draft = (
+            checker_results.checker_mode == CheckerMode.RISK_BASED
+            and profile_id in {"PL:L1", "PL:L1:v2"}
+            and allow_incomplete
+        )
+        if (
+            checker_results.checker_mode != CheckerMode.FULL
+            and not risk_based_l1_draft
+        ):
             raise NormalizerValidationError(
                 "Normalizer requires a full Checker artifact; incremental judgments "
-                "must be followed by a full paid Checker pass."
+                "must be followed by a full paid Checker pass. A risk-based PL:L1 "
+                "artifact is allowed only for an explicitly incomplete staging draft."
             )
         if not checker_results.passed and not allow_incomplete:
             raise NormalizerValidationError(

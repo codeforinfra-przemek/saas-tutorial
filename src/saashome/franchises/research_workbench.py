@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from django.conf import settings
 from django.db import transaction
@@ -352,6 +353,73 @@ def create_research_workspace(
                 notes = []
                 source_ids = []
                 normalized_field_id = ""
+            # Website URLs are already typed, canonical Searcher metadata. When
+            # Searcher classified a source as official, copying that URL into
+            # the review draft is safer and cheaper than asking Normalizer to
+            # restate it as a semantic claim.
+            if (
+                not proposed_values
+                and target_field in {"websites.official", "websites.franchise_offer"}
+            ):
+                official_sources = [
+                    source
+                    for source in search.sources
+                    if _enum_value(source.source_type) == "official"
+                    and task.task_id in source.task_ids
+                ]
+                if target_field == "websites.franchise_offer":
+                    preferred = [
+                        source
+                        for source in official_sources
+                        if any(
+                            token in source.canonical_url.casefold()
+                            for token in ("franczy", "franchis", "oferta")
+                        )
+                    ]
+                    selected_source = (preferred or official_sources or [None])[0]
+                    derived_url = (
+                        selected_source.canonical_url if selected_source else ""
+                    )
+                else:
+                    selected_source = (official_sources or [None])[0]
+                    if selected_source:
+                        parts = urlsplit(selected_source.canonical_url)
+                        derived_url = urlunsplit(
+                            (parts.scheme, parts.netloc, "/", "", "")
+                        )
+                    else:
+                        derived_url = ""
+                if selected_source and derived_url:
+                    proposed_values = [
+                        {
+                            "id": f"source-url-{selected_source.source_id}",
+                            "display": derived_url,
+                            "canonical_text": derived_url,
+                            "type": "url",
+                            "precision": "exact",
+                            "needs_corroboration": False,
+                            "provenance": "official_search_source_metadata",
+                        }
+                    ]
+                    evidence = [
+                        {
+                            "citation_id": "",
+                            "quote": "",
+                            "locator": "canonical Searcher source URL",
+                            "source_id": selected_source.source_id,
+                            "source_title": selected_source.title or "Oficjalna strona",
+                            "url": selected_source.canonical_url,
+                            "source_type": "official",
+                            "discovered_at": selected_source.discovered_at.isoformat(),
+                            "provenance": "official_search_source_metadata",
+                        }
+                    ]
+                    pipeline_status = "derived_source_metadata"
+                    source_ids = [selected_source.source_id]
+                    notes = [
+                        *notes,
+                        "URL derived deterministically from an official Searcher source.",
+                    ]
             # Risk-based Checker deliberately spends semantic-review tokens only
             # on high-risk fields. Exact quote-grounded low-risk Extractor claims
             # must still reach Human Review, but remain visibly unreviewed and

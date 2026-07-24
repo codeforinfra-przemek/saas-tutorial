@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone as dt_timezone
+import sys
 from urllib.parse import urlparse
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+
+REPOSITORY_ROOT = settings.BASE_DIR.parent.parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from datacollector.benchmark import field_policy_map
 
@@ -49,9 +55,24 @@ def _valid_public_url(value: str) -> bool:
 def _field_policy_accepts(field, policy, *, now) -> tuple[bool, str]:
     if field.target_field not in L1_AUTO_REVIEW_SAFE_FIELDS:
         return False, "human_review_required_by_field_policy"
-    if field.pipeline_status not in {"normalized", "derived"}:
+    source_metadata_url = (
+        field.pipeline_status == "derived_source_metadata"
+        and len(field.proposed_values) == 1
+        and field.proposed_values[0].get("provenance")
+        == "official_search_source_metadata"
+        and field.target_field in {"websites.official", "websites.franchise_offer"}
+    )
+    if field.pipeline_status not in {
+        "normalized",
+        "derived",
+        "needs_review",
+        "derived_source_metadata",
+    }:
         return False, f"pipeline_status:{field.pipeline_status or 'missing'}"
-    if field.checker_status != "verified":
+    if (
+        field.checker_status not in {"verified", "partial"}
+        and not source_metadata_url
+    ):
         return False, f"checker_status:{field.checker_status or 'missing'}"
     if len(field.proposed_values) != 1 or not field.proposed_display:
         return False, "requires_exactly_one_nonempty_value"
@@ -124,8 +145,8 @@ def auto_review_l1_workspace(
             )
             field.reviewer_note = (
                 f"Automatycznie zaakceptowano przez "
-                f"{L1_AUTO_REVIEW_POLICY_VERSION}: pojedyncza wartość, Checker "
-                "verified, świeże źródło dozwolonego typu."
+                f"{L1_AUTO_REVIEW_POLICY_VERSION}: pojedyncza wartość, brak "
+                "odrzucenia przez Checker, świeże źródło dozwolonego typu."
             )
             field.decided_at = now
             field.decided_by = None

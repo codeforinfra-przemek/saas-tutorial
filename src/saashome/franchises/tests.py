@@ -30,6 +30,7 @@ from .research_jobs import (
 )
 from .research_launches import (
     _combined_usage,
+    _usage_with_floor,
     _process_hybrid_l1_discovery,
     _recover_paid_search_artifact,
     _run_stage,
@@ -101,8 +102,8 @@ class L1AutoReviewPolicyTests(TestCase):
             task_id="scope.brand_identity",
             task_title="Identity",
             target_field="brand.name",
-            pipeline_status="normalized",
-            checker_status="verified",
+            pipeline_status="needs_review",
+            checker_status="partial",
             proposed_values=[
                 {
                     "display": "Auto Review Brand",
@@ -141,6 +142,30 @@ class L1AutoReviewPolicyTests(TestCase):
                 }
             ],
         )
+        website = FranchiseResearchReviewField.objects.create(
+            workspace=self.workspace,
+            task_id="scope.brand_identity",
+            task_title="Identity",
+            target_field="websites.franchise_offer",
+            pipeline_status="derived_source_metadata",
+            checker_status="missing",
+            proposed_values=[
+                {
+                    "display": "https://example.com/franchise",
+                    "canonical_text": "https://example.com/franchise",
+                    "needs_corroboration": False,
+                    "provenance": "official_search_source_metadata",
+                }
+            ],
+            evidence=[
+                {
+                    "url": "https://example.com/franchise",
+                    "source_type": "official",
+                    "discovered_at": now.isoformat(),
+                    "provenance": "official_search_source_metadata",
+                }
+            ],
+        )
         missing = FranchiseResearchReviewField.objects.create(
             workspace=self.workspace,
             task_id="fdd06.other_fees",
@@ -154,6 +179,7 @@ class L1AutoReviewPolicyTests(TestCase):
 
         safe.refresh_from_db()
         financial.refresh_from_db()
+        website.refresh_from_db()
         missing.refresh_from_db()
         self.workspace.refresh_from_db()
         self.assertEqual(
@@ -165,6 +191,10 @@ class L1AutoReviewPolicyTests(TestCase):
             FranchiseResearchReviewField.DECISION_PENDING,
         )
         self.assertEqual(
+            website.decision,
+            FranchiseResearchReviewField.DECISION_POLICY_ACCEPTED,
+        )
+        self.assertEqual(
             missing.decision,
             FranchiseResearchReviewField.DECISION_DOCUMENTED_GAP,
         )
@@ -173,8 +203,49 @@ class L1AutoReviewPolicyTests(TestCase):
             self.workspace.status,
             FranchiseResearchWorkspace.STATUS_APPROVED_WITH_GAPS,
         )
-        self.assertEqual(summary["policy_accepted"], 1)
+        self.assertEqual(summary["policy_accepted"], 2)
         self.assertEqual(summary["pending_human_review"], 1)
+
+    def test_retry_usage_never_drops_below_recorded_floor(self):
+        launch = type(
+            "Launch",
+            (),
+            {
+                "_usage_floor": {
+                    "api_attempts_recorded": 23,
+                    "input_tokens": 242680,
+                    "output_tokens": 35514,
+                    "reasoning_tokens": 11548,
+                    "total_tokens": 278194,
+                    "tool_calls": 6,
+                    "tool_cost_usd": "0.06",
+                    "estimated_cost_usd": "1.19941000",
+                    "budgeted_cost_usd": "1.19941000",
+                    "unknown_cost_attempts": 0,
+                    "unknown_cost_reserve_usd": "0",
+                    "cost_complete": True,
+                }
+            },
+        )()
+        result = _usage_with_floor(
+            launch,
+            [
+                {
+                    "usage_totals": {
+                        "api_attempts_recorded": 1,
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "reasoning_tokens": 0,
+                        "total_tokens": 120,
+                        "tool_calls": 0,
+                        "tool_cost_usd": "0",
+                        "estimated_cost_usd": "0.01",
+                    }
+                }
+            ],
+        )
+        self.assertEqual(result["estimated_cost_usd"], "1.20941000")
+        self.assertEqual(result["total_tokens"], 278314)
 
 
 class PolishCatalogSyncTests(TestCase):

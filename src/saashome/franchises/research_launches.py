@@ -332,6 +332,44 @@ def _combined_usage(stage_summaries: list[dict]) -> dict:
     }
 
 
+def _usage_with_floor(launch, stage_summaries: list[dict]) -> dict:
+    """Add only work executed after a retry to its persisted cost ledger."""
+
+    calculated = _combined_usage(stage_summaries)
+    floor = getattr(launch, "_usage_floor", None) or {}
+    if not floor:
+        return calculated
+    integer_keys = (
+        "api_attempts_recorded",
+        "input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "total_tokens",
+        "tool_calls",
+        "unknown_cost_attempts",
+    )
+    for key in integer_keys:
+        calculated[key] = (
+            int(calculated.get(key) or 0)
+            + int(floor.get(key) or 0)
+        )
+    for key in (
+        "tool_cost_usd",
+        "estimated_cost_usd",
+        "unknown_cost_reserve_usd",
+        "budgeted_cost_usd",
+    ):
+        calculated[key] = str(
+            (_decimal(calculated.get(key)) or Decimal("0"))
+            + (_decimal(floor.get(key)) or Decimal("0"))
+        )
+    calculated["cost_complete"] = bool(
+        calculated.get("cost_complete", True)
+        and floor.get("cost_complete", True)
+    )
+    return calculated
+
+
 def _default_runner(launch: FranchiseResearchLaunch, command: list[str]) -> ResearchCommandResult:
     environment = os.environ.copy()
     environment["PYTHONUNBUFFERED"] = "1"
@@ -629,7 +667,7 @@ def fail_stale_launches(*, older_than: timedelta = timedelta(hours=2)) -> int:
 def _save_stage(launch, *, label: str, progress: int, usage: list[dict]) -> None:
     launch.current_stage = label
     launch.progress_percent = progress
-    launch.cost_summary = _combined_usage(usage) if usage else {}
+    launch.cost_summary = _usage_with_floor(launch, usage)
     launch.heartbeat_at = timezone.now()
     launch.save(update_fields=["current_stage", "progress_percent", "cost_summary", "heartbeat_at"])
 
@@ -657,7 +695,7 @@ def _run_stage(launch, runner, command, *, label, progress, summaries):
         if not result.returncode:
             summary = _parse_summary(result.stdout)
             summaries.append(summary)
-            launch.cost_summary = _combined_usage(summaries)
+            launch.cost_summary = _usage_with_floor(launch, summaries)
             launch.save(update_fields=["cost_summary"])
             return summary
 
@@ -668,7 +706,7 @@ def _run_stage(launch, runner, command, *, label, progress, summaries):
         )
         if captured_failures:
             summaries.extend(captured_failures)
-            launch.cost_summary = _combined_usage(summaries)
+            launch.cost_summary = _usage_with_floor(launch, summaries)
             launch.save(update_fields=["cost_summary"])
         transient_code = _transient_provider_failure(result.stdout)
         if transient_code is None or retries_used >= max_retries:
@@ -679,7 +717,7 @@ def _run_stage(launch, runner, command, *, label, progress, summaries):
                     stage=label,
                 )
                 summaries.append(_unknown_provider_attempt_summary(transient_code))
-                launch.cost_summary = _combined_usage(summaries)
+                launch.cost_summary = _usage_with_floor(launch, summaries)
                 launch.save(update_fields=["cost_summary"])
             detail = (
                 f" Przejściowy błąd {transient_code} nie ustąpił po "
@@ -699,7 +737,7 @@ def _run_stage(launch, runner, command, *, label, progress, summaries):
             )
             summaries.append(_unknown_provider_attempt_summary(transient_code))
         retries_used += 1
-        launch.cost_summary = _combined_usage(summaries)
+        launch.cost_summary = _usage_with_floor(launch, summaries)
         launch.log = (
             launch.log
             + "\n[Worker] Przejściowy błąd providera "
@@ -722,8 +760,11 @@ def _run_stage(launch, runner, command, *, label, progress, summaries):
 def _adopt_existing_stage(launch, path: Path, *, label, progress, summaries):
     _save_stage(launch, label=label, progress=progress, usage=summaries)
     summary = _artifact_summary(path)
-    summaries.append(summary)
-    launch.cost_summary = _combined_usage(summaries)
+    # On retry the persisted floor already contains this stage. Re-reading the
+    # immutable artifact validates lineage, but must not bill it twice.
+    if not getattr(launch, "_usage_floor", None):
+        summaries.append(summary)
+    launch.cost_summary = _usage_with_floor(launch, summaries)
     launch.log = (
         launch.log + f"[Workbench] Wykorzystano istniejący artefakt: {path.name}.\n"
     )[-100_000:]
@@ -1050,6 +1091,7 @@ def process_research_launch(
 ) -> FranchiseResearchLaunch:
     if launch.status != FranchiseResearchLaunch.STATUS_RUNNING:
         raise ResearchLaunchError("Run musi zostać przejęty przez worker.")
+    launch._usage_floor = dict(launch.cost_summary or {})
     python = sys.executable
     config = dict(launch.configuration)
     if (
@@ -1059,7 +1101,9 @@ def process_research_launch(
         config["l1_pipeline_version"] = "cheap-effective-v2"
         launch.configuration = config
         launch.save(update_fields=["configuration"])
-    summaries: list[dict] = _provider_failure_summaries(launch)
+    summaries: list[dict] = (
+        [] if launch._usage_floor else _provider_failure_summaries(launch)
+    )
     hybrid_summary: dict = {}
     try:
         if launch.plan_reference:
@@ -1405,7 +1449,7 @@ def process_research_launch(
             "quality_score": workspace.quality_score,
             "completion": completion,
         }
-        launch.cost_summary = _combined_usage(summaries)
+        launch.cost_summary = _usage_with_floor(launch, summaries)
         launch.completed_at = timezone.now()
         launch.heartbeat_at = launch.completed_at
         launch.save()
